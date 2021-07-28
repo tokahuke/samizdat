@@ -1,6 +1,6 @@
 mod returnable;
 
-pub use returnable::Returnable;
+pub use returnable::{Returnable, Return};
 
 use std::convert::TryInto;
 use std::str::FromStr;
@@ -25,13 +25,13 @@ where
     )
 }
 
-async fn result_to_response<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
-where
-    F: std::future::Future<Output = Result<T, crate::Error>>,
-    T: 'static + Returnable,
-{
-    Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
-}
+// async fn result_to_response<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
+// where
+//     F: std::future::Future<Output = Result<T, crate::Error>>,
+//     T: 'static + Returnable,
+// {
+//     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
+// }
 
 #[derive(Debug)]
 struct Hash([u8; 64]);
@@ -69,10 +69,17 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
 
             if let Some(object) = &object {
                 let object = flatbuffers::object::root_as_object(object)?;
+                Ok(Some(Return {
+                    content_type: object.content_type().to_owned(),
+                    status_code: http::StatusCode::OK,
+                    // TODO: DANGER! double copy of large, large content!!
+                    content: object.content().to_owned(),
+                }))
+            } else {
+                Ok(None)
             }
-
-            Ok(object) as Result<_, crate::Error>
         })
+        .map(reply)
 }
 
 pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -80,11 +87,11 @@ pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::R
         .and(warp::post())
         .and(warp::header("content-type"))
         .and(warp::body::bytes())
-        .map(|content_type: String, bytes: bytes::Bytes| async move {
+        .map(|content_type: String, bytes: bytes::Bytes| {
             let object = flatbuffers::build_object(&content_type, &*bytes);
             let hash = Hash::build(Sha3_512::digest(&*object));
             DB.put(&hash.0, object)?;
             Ok(hash.to_string())
         })
-        .and_then(result_to_response)
+        .map(reply)
 }

@@ -42,10 +42,13 @@ impl From<::flatbuffers::InvalidFlatbuffer> for Error {
 
 impl Returnable for Error {
     fn status_code(&self) -> http::StatusCode {
-        http::StatusCode::BAD_REQUEST
+        match self {
+            Error::Base64(_) => http::StatusCode::BAD_REQUEST,
+            _ => http::StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 
-    fn render(&self) -> Cow<str> {
-        format!("{}", self).into()
+    fn render(&self) -> Cow<[u8]> {
+        self.to_string().into_bytes().into()
     }
 }
