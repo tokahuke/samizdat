@@ -1160,7 +1160,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 
 [[package]]
-name = "samizdat"
+name = "samizdat-hub"
+version = "0.1.0"
+dependencies = [
+ "failure",
+ "failure_derive",
+ "flatbuffers",
+ "log",
+ "log4rs",
+ "rocksdb",
+ "structopt",
+ "tokio",
+]
+
+[[package]]
+name = "samizdat-node"
 version = "0.1.0"
 dependencies = [
  "base64-url",
