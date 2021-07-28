@@ -1,7 +1,9 @@
+
 mod cli;
 mod error;
 mod http;
 mod logger;
+mod flatbuffers;
 
 pub use error::Error;
 
@@ -27,6 +29,7 @@ async fn main() -> Result<(), crate::Error> {
         .and(warp::path::end())
         .map(|| warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html"))
         .or(http::get_hash())
+        .or(http::post_content())
         .with(warp::log("api"));
 
     // Run server:

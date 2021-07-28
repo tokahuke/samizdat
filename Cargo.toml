@@ -7,8 +7,10 @@ edition = "2018"
 
 [dependencies]
 base64-url = "1.4.10"
+bytes = "1.0.1"
 failure = "0.1.8"
 failure_derive = "0.1.8"
+flatbuffers = "0.8.3"
 http = "0.2.4"
 lazy_static = "1.4.0"
 log = "0.4.14"
