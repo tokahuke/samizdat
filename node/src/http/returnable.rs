@@ -23,33 +23,20 @@ impl Returnable for () {
 }
 
 impl Returnable for &str {
-    fn render(&self) -> Cow<[u8]> { (*self).as_bytes().into() }
+    fn render(&self) -> Cow<[u8]> {
+        (*self).as_bytes().into()
+    }
 }
 
 impl Returnable for String {
-    fn render(&self) -> Cow<[u8]> { self.as_bytes().into() }
-}
-
-impl<'a, T> Returnable for &'a T 
-where 
-    T: Returnable
-{
-    fn content_type(&self) -> Cow<str> {
-        (*self).content_type()
-    }
-
-    fn status_code(&self) -> http::StatusCode {
-        (*self).status_code()
-    }
-
     fn render(&self) -> Cow<[u8]> {
-        (*self).render()
+        self.as_bytes().into()
     }
 }
 
-impl<T> Returnable for Option<T> 
+impl<T> Returnable for Option<T>
 where
-    T: Returnable
+    T: Returnable,
 {
     fn content_type(&self) -> Cow<str> {
         match self {
@@ -64,7 +51,7 @@ where
             None => http::StatusCode::NOT_FOUND,
         }
     }
-    
+
     fn render(&self) -> Cow<[u8]> {
         match self {
             Some(thing) => thing.render(),
@@ -76,7 +63,7 @@ where
 impl<T, E> Returnable for Result<T, E>
 where
     T: Returnable,
-    E: Returnable
+    E: Returnable,
 {
     fn content_type(&self) -> Cow<str> {
         match self {
@@ -91,7 +78,7 @@ where
             Err(err) => err.status_code(),
         }
     }
-    
+
     fn render(&self) -> Cow<[u8]> {
         match self {
             Ok(thing) => thing.render(),

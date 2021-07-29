@@ -1,16 +1,14 @@
 mod returnable;
 
-pub use returnable::{Returnable, Return};
+pub use returnable::{Return, Returnable};
 
-use std::convert::TryInto;
 use std::str::FromStr;
 use warp::reject::Reject;
 use warp::Filter;
-use std::fmt::{self, Display};
-use sha3::{Digest, Sha3_512};
 
-use crate::DB;
 use crate::flatbuffers;
+use crate::{db, hub};
+use crate::hash::Hash;
 
 impl Reject for crate::Error {}
 
@@ -25,47 +23,20 @@ where
     )
 }
 
-// async fn result_to_response<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
-// where
-//     F: std::future::Future<Output = Result<T, crate::Error>>,
-//     T: 'static + Returnable,
-// {
-//     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
-// }
-
-#[derive(Debug)]
-struct Hash([u8; 64]);
-
-impl FromStr for Hash {
-    type Err = crate::Error;
-    fn from_str(s: &str) -> Result<Hash, crate::Error> {
-        Ok(Hash(base64_url::decode(s)?.try_into().map_err(
-            |e: Vec<_>| format!("expected 64 bytes; got {}", e.len()),
-        )?))
-    }
-}
-
-impl Display for Hash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
-    }
-}
-
-impl Hash {
-    /// # Panics
-    /// 
-    /// If the received slice does not have the correct length of 64 bytes.
-    fn build(x: impl AsRef<[u8]>) -> Hash {
-        Hash(x.as_ref().try_into().expect("bad hash value"))
-    }
+async fn async_reply<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
+where
+    F: std::future::Future<Output = Result<T, crate::Error>>,
+    T: 'static + Returnable,
+{
+    Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
 }
 
 pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("_hash" / String)
         .and(warp::get())
-        .map(|hash: String| {
+        .map(|hash: String| async move {
             let Hash(hash) = Hash::from_str(&hash)?;
-            let object = DB.get(&hash)?;
+            let object = db().get(&hash)?;
 
             if let Some(object) = &object {
                 let object = flatbuffers::object::root_as_object(object)?;
@@ -76,10 +47,11 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
                     content: object.content().to_owned(),
                 }))
             } else {
+                hub().query(Hash(hash)).await?;
                 Ok(None)
             }
         })
-        .map(reply)
+        .and_then(async_reply)
 }
 
 pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -89,8 +61,8 @@ pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::R
         .and(warp::body::bytes())
         .map(|content_type: String, bytes: bytes::Bytes| {
             let object = flatbuffers::build_object(&content_type, &*bytes);
-            let hash = Hash::build(Sha3_512::digest(&*object));
-            DB.put(&hash.0, object)?;
+            let hash = Hash::build(&object);
+            db().put(&hash, object)?;
             Ok(hash.to_string())
         })
         .map(reply)

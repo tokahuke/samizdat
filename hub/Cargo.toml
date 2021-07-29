@@ -11,7 +11,14 @@ flatbuffers = "0.8.3"
 log = "0.4.14"
 log4rs = "1.0.0"
 structopt = "0.3.21"
-tokio = { version = "1.6.1", features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio = { version = "1.3.0", features = ["rt-multi-thread", "macros", "process", "time"] }
 failure = "0.1.8"
 failure_derive = "0.1.8"
-rocksdb = "0.16.0"
+rocksdb = "0.15.0"
+futures = "0.3.13"
+tarpc = { version = "0.25.1", features = ["tokio1", "serde-transport", "tcp"] }
+lazy_static = "1.4.0"
+base64-url = "1.4.9"
+tokio-serde = { version = "0.8.0", features = ["bincode"] }
+serde_derive = "1.0.124"
+serde = "1.0.124"

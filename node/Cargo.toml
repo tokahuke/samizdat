@@ -6,17 +6,24 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-base64-url = "1.4.10"
+async_once = "0.2.1"
+base64-url = "1.4.9"
 bytes = "1.0.1"
 failure = "0.1.8"
 failure_derive = "0.1.8"
 flatbuffers = "0.8.3"
+futures = "0.3.13"
+getrandom = "0.2.2"
 http = "0.2.3"
 lazy_static = "1.4.0"
 log = "0.4.14"
 log4rs = "1.0.0"
-rocksdb = "0.16.0"
+rocksdb = "0.15.0"
+serde = "1.0.124"
+serde_derive = "1.0.124"
 sha3 = "0.9.1"
 structopt = "0.3.21"
-tokio = { version = "1.6.1", features = ["rt-multi-thread", "macros", "process", "time"] }
-warp = "0.3.1"
+tarpc = { version = "0.25.1", features = ["tokio1", "serde-transport", "tcp"] }
+tokio = { version = "1.3.0", features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio-serde = { version = "0.8.0", features = ["bincode"] }
+warp = "0.3.0"
