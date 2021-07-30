@@ -1,10 +1,10 @@
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 //use tarpc::server::{self, Channel, Incoming};
-use tarpc::{context};
+use tarpc::context;
 use tokio::net::TcpStream;
 
-use samizdat_common::{Hash, transport};
+use samizdat_common::{transport, Hash};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Riddle {
@@ -38,7 +38,10 @@ pub struct HubConnection {
 
 impl HubConnection {
     pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let connect = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap()).channel(0).await.unwrap();
+        let connect = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap())
+            .channel(0)
+            .await
+            .unwrap();
         let client = HubClient::new(tarpc::client::Config::default(), connect)
             .spawn()
             .unwrap();
@@ -46,12 +49,12 @@ impl HubConnection {
         Ok(HubConnection { client })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Result<(), crate::Error>{
+    pub async fn query(&self, content_hash: Hash) -> Result<(), crate::Error> {
         let mut rand = [0; 28];
         getrandom::getrandom(&mut rand).expect("getrandom failed");
         let hash = Hash::build([rand, content_hash.0].concat());
-        let riddle = Riddle { rand, hash: hash.0};
-        dbg!(&riddle);
+        let riddle = Riddle { rand, hash: hash.0 };
+
         Ok(self.client.query(context::current(), riddle).await?)
     }
 }

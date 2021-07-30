@@ -18,7 +18,7 @@ pub fn init_logger() -> log4rs::Handle {
         .build(
             Root::builder()
                 .appender("stderr")
-                .build(log::LevelFilter::Debug),
+                .build(log::LevelFilter::Info),
         )
         .expect("could not config logger");
 

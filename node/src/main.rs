@@ -25,9 +25,7 @@ async fn init_hub() -> Result<(), crate::Error> {
 }
 
 pub fn hub<'a>() -> &'a rpc::HubConnection {
-    unsafe { 
-        HUB.as_ref().expect("hub connection not initialized")
-    }
+    unsafe { HUB.as_ref().expect("hub connection not initialized") }
 }
 
 static mut CLI: Option<cli::Cli> = None;
@@ -43,9 +41,7 @@ fn init_cli() -> Result<(), crate::Error> {
 }
 
 fn cli<'a>() -> &'a cli::Cli {
-    unsafe {
-        CLI.as_ref().expect("cli not initialized")
-    }
+    unsafe { CLI.as_ref().expect("cli not initialized") }
 }
 
 static mut DB: Option<rocksdb::DB> = None;
@@ -61,9 +57,7 @@ fn init_db() -> Result<(), crate::Error> {
 }
 
 fn db<'a>() -> &'a rocksdb::DB {
-    unsafe {
-        DB.as_ref().expect("db not initialized")
-    }
+    unsafe { DB.as_ref().expect("db not initialized") }
 }
 
 /// Utility for propagating panics through tasks.

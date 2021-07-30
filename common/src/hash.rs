@@ -1,8 +1,8 @@
-use std::str::FromStr;
-use std::fmt::{self, Display};
-use std::convert::TryInto;
-use std::ops::Deref;
 use sha3::{Digest, Sha3_224};
+use std::convert::TryInto;
+use std::fmt::{self, Display};
+use std::ops::Deref;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Hash(pub [u8; 28]);

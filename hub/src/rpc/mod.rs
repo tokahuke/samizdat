@@ -1,10 +1,10 @@
 use futures::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use tarpc::context;
+use tarpc::server::{self, Channel};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-use tarpc::server::{self, Channel, Incoming};
-use tarpc::{context};
 
 use samizdat_common::transport;
 
@@ -42,18 +42,20 @@ pub async fn run(addr: impl Into<SocketAddr>) {
         // Ignore accept errors.
         .filter_map(|r| async move { r.ok() })
         .then(|t| async move {
-            println!("{:?}", t.peer_addr());
-            server::BaseChannel::with_defaults(
-                transport::Multiplex::new(t).channel(0).await.unwrap()
-            )
+            log::info!("Incoming connection from{:?}", t.peer_addr());
+            let multiplex = transport::Multiplex::new(t);
+            let direct = multiplex.channel(0).await.unwrap();
+            let reverse = multiplex.reverse_channel(0).await.unwrap();
+
+            let client = NodeClient::new(tarpc::client::Config::default(), reverse)
+                .spawn()
+                .unwrap();
+
+            let server_task = server::BaseChannel::with_defaults(direct).execute(HubServer.serve());
+
+            server_task
         })
-        // .map(server::BaseChannel::with_defaults)
-        .map(|channel| {
-            println!("starting to serve");
-            let server = HubServer;
-            channel.execute(server.serve())
-        })
-        // // Max 1_000 channels.
+        // Max 1_000 channels.
         .buffer_unordered(1_000)
         .for_each(|_| async {})
         .await;
