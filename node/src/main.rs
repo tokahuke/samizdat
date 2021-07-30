@@ -1,17 +1,16 @@
 mod cli;
-mod error;
 mod flatbuffers;
 mod http;
-mod logger;
 mod rpc;
-mod hash;
 
-pub use error::Error;
+pub use samizdat_common::Error;
 
 use std::panic;
 use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
+
+use samizdat_common::logger;
 
 static mut HUB: Option<rpc::HubConnection> = None;
 

@@ -1,7 +1,6 @@
 mod cli;
 mod error;
 mod flatbuffers;
-mod logger;
 mod rpc;
 
 pub use error::Error;
@@ -9,6 +8,8 @@ pub use error::Error;
 use std::panic;
 use structopt::StructOpt;
 use tokio::task;
+
+use samizdat_common::logger;
 
 lazy_static::lazy_static! {
     pub static ref CLI: cli::Cli = cli::Cli::from_args();

@@ -97,6 +97,19 @@ impl Returnable for Vec<u8> {
     }
 }
 
+impl Returnable for crate::Error {
+    fn status_code(&self) -> http::StatusCode {
+        match self {
+            crate::Error::Base64(_) => http::StatusCode::BAD_REQUEST,
+            _ => http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn render(&self) -> Cow<[u8]> {
+        self.to_string().into_bytes().into()
+    }
+}
+
 impl<'a> Returnable for crate::flatbuffers::object::Object<'a> {
     fn content_type(&self) -> Cow<str> {
         self.content_type().into()

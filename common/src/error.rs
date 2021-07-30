@@ -1,9 +1,6 @@
 use base64_url::base64;
 use failure_derive::Fail;
-use std::borrow::Cow;
 use std::io;
-
-use crate::http::Returnable;
 
 #[derive(Debug, Fail)]
 pub enum Error {
@@ -18,6 +15,8 @@ pub enum Error {
     #[fail(display = "io error: {}", _0)]
     Io(io::Error),
 }
+
+impl warp::reject::Reject for crate::Error {}
 
 impl From<base64::DecodeError> for Error {
     fn from(e: base64::DecodeError) -> Error {
@@ -46,18 +45,5 @@ impl From<::flatbuffers::InvalidFlatbuffer> for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::Io(e)
-    }
-}
-
-impl Returnable for Error {
-    fn status_code(&self) -> http::StatusCode {
-        match self {
-            Error::Base64(_) => http::StatusCode::BAD_REQUEST,
-            _ => http::StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-
-    fn render(&self) -> Cow<[u8]> {
-        self.to_string().into_bytes().into()
     }
 }

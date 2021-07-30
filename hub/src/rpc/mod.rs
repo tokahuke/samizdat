@@ -1,8 +1,12 @@
 use futures::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use tokio_stream::wrappers::TcpListenerStream;
 use tarpc::server::{self, Channel, Incoming};
-use tarpc::{context, serde_transport};
+use tarpc::{context};
+
+use samizdat_common::transport;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Riddle {
@@ -32,23 +36,24 @@ impl Hub for HubServer {
 }
 
 pub async fn run(addr: impl Into<SocketAddr>) {
-    let mut listen =
-        serde_transport::tcp::listen(addr.into(), tokio_serde::formats::Bincode::default)
-            .await
-            .unwrap();
+    let listener = TcpListener::bind(addr.into()).await.unwrap();
 
-    listen.config_mut().max_frame_length(usize::MAX);
-
-    listen
+    TcpListenerStream::new(listener)
         // Ignore accept errors.
         .filter_map(|r| async move { r.ok() })
-        .map(server::BaseChannel::with_defaults)
+        .then(|t| async move {
+            println!("{:?}", t.peer_addr());
+            server::BaseChannel::with_defaults(
+                transport::Multiplex::new(t).channel(0).await.unwrap()
+            )
+        })
+        // .map(server::BaseChannel::with_defaults)
         .map(|channel| {
+            println!("starting to serve");
             let server = HubServer;
-            println!("here");
             channel.execute(server.serve())
         })
-        // Max 1_000 channels.
+        // // Max 1_000 channels.
         .buffer_unordered(1_000)
         .for_each(|_| async {})
         .await;

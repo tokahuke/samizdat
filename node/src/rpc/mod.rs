@@ -1,9 +1,10 @@
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 //use tarpc::server::{self, Channel, Incoming};
-use tarpc::{context, serde_transport};
+use tarpc::{context};
+use tokio::net::TcpStream;
 
-use crate::hash::Hash;
+use samizdat_common::{Hash, transport};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Riddle {
@@ -37,9 +38,8 @@ pub struct HubConnection {
 
 impl HubConnection {
     pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let connect =
-            serde_transport::tcp::connect(addr.into(), tokio_serde::formats::Bincode::default);
-        let client = HubClient::new(tarpc::client::Config::default(), connect.await.unwrap())
+        let connect = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap()).channel(0).await.unwrap();
+        let client = HubClient::new(tarpc::client::Config::default(), connect)
             .spawn()
             .unwrap();
 

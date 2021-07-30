@@ -3,14 +3,12 @@ mod returnable;
 pub use returnable::{Return, Returnable};
 
 use std::str::FromStr;
-use warp::reject::Reject;
 use warp::Filter;
+
+use samizdat_common::Hash;
 
 use crate::flatbuffers;
 use crate::{db, hub};
-use crate::hash::Hash;
-
-impl Reject for crate::Error {}
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where

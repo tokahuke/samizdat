@@ -936,12 +936,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a5b3dd1c072ee7963717671d1ca129f1048fda25edea6b752bfc71ac8854170"
 
 [[package]]
-name = "once_cell"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "692fcb63b64b1758029e0a96ee63e049ce8c5948587f2f7208df04625e5f6b56"
-
-[[package]]
 name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1254,6 +1248,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 
 [[package]]
+name = "samizdat-common"
+version = "0.1.0"
+dependencies = [
+ "base64-url",
+ "bincode",
+ "bytes",
+ "failure",
+ "failure_derive",
+ "flatbuffers",
+ "futures",
+ "log",
+ "log4rs",
+ "rocksdb",
+ "serde",
+ "serde_derive",
+ "sha3",
+ "tarpc",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "warp",
+]
+
+[[package]]
 name = "samizdat-hub"
 version = "0.1.0"
 dependencies = [
@@ -1266,12 +1284,13 @@ dependencies = [
  "log",
  "log4rs",
  "rocksdb",
+ "samizdat-common",
  "serde",
  "serde_derive",
  "structopt",
  "tarpc",
  "tokio",
- "tokio-serde",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1291,6 +1310,7 @@ dependencies = [
  "log",
  "log4rs",
  "rocksdb",
+ "samizdat-common",
  "serde",
  "serde_derive",
  "sha3",
@@ -1408,15 +1428,6 @@ name = "shlex"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42a568c8f2cd051a4d283bd6eb0343ac214c1b0f1ac19f93e1175b2dee38c73d"
-
-[[package]]
-name = "signal-hook-registry"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "slab"
@@ -1628,9 +1639,7 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
- "once_cell",
  "pin-project-lite",
- "signal-hook-registry",
  "tokio-macros",
  "winapi",
 ]

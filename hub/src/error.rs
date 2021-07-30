@@ -1,5 +1,6 @@
 use base64_url::base64;
 use failure_derive::Fail;
+use std::io;
 
 #[derive(Debug, Fail)]
 pub enum Error {
@@ -11,6 +12,8 @@ pub enum Error {
     Db(rocksdb::Error),
     #[fail(display = "invalid flatbuffer: {}", _0)]
     FlatBuffer(::flatbuffers::InvalidFlatbuffer),
+    #[fail(display = "io error: {}", _0)]
+    Io(io::Error),
 }
 
 impl From<base64::DecodeError> for Error {
@@ -34,5 +37,11 @@ impl From<rocksdb::Error> for Error {
 impl From<::flatbuffers::InvalidFlatbuffer> for Error {
     fn from(e: ::flatbuffers::InvalidFlatbuffer) -> Error {
         Error::FlatBuffer(e)
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::Io(e)
     }
 }

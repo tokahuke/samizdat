@@ -24,6 +24,7 @@ serde_derive = "1.0.124"
 sha3 = "0.9.1"
 structopt = "0.3.21"
 tarpc = { version = "0.25.1", features = ["tokio1", "serde-transport", "tcp"] }
-tokio = { version = "1.3.0", features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio = { version = "1.3.0", features = ["rt-multi-thread", "macros", "net", "time"] }
 tokio-serde = { version = "0.8.0", features = ["bincode"] }
 warp = "0.3.0"
+samizdat-common = { path = "../common" }
