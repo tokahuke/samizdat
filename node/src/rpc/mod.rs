@@ -1,7 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
-//use tarpc::server::{self, Channel, Incoming};
 use tarpc::context;
+use tarpc::server::{self, Channel};
 use tokio::net::TcpStream;
 
 use samizdat_common::{transport, Hash};
@@ -18,19 +18,20 @@ trait Hub {
     async fn query(riddle: Riddle);
 }
 
-// #[tarpc::service]
-// trait Node {
-//     async fn resolve(riddle: Riddle);
-// }
+#[tarpc::service]
+trait Node {
+    async fn resolve(riddle: Riddle);
+}
 
-// struct NodeServer;
+#[derive(Clone)]
+struct NodeServer;
 
-// #[tarpc::server]
-// impl Node for NodeServer {
-//     async fn resolve(self, _: context::Context, riddle: Riddle) {
-
-//     }
-// }
+#[tarpc::server]
+impl Node for NodeServer {
+    async fn resolve(self, _: context::Context, riddle: Riddle) {
+        log::info!("got {:?}", riddle);
+    }
+}
 
 pub struct HubConnection {
     client: HubClient,
@@ -38,13 +39,16 @@ pub struct HubConnection {
 
 impl HubConnection {
     pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let connect = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap())
-            .channel(0)
-            .await
-            .unwrap();
-        let client = HubClient::new(tarpc::client::Config::default(), connect)
+        let multiplex = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap());
+        let direct = multiplex.channel(0).await.unwrap();
+        let reverse = multiplex.channel(1).await.unwrap();
+
+        let client = HubClient::new(tarpc::client::Config::default(), direct)
             .spawn()
             .unwrap();
+
+        let server_task = server::BaseChannel::with_defaults(reverse).execute(NodeServer.serve());
+        tokio::spawn(server_task);
 
         Ok(HubConnection { client })
     }
