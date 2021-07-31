@@ -1,27 +1,10 @@
-use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::net::TcpStream;
 
 use samizdat_common::{transport, Hash};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Riddle {
-    rand: [u8; 28],
-    hash: [u8; 28],
-}
-
-#[tarpc::service]
-trait Hub {
-    /// Returns a greeting for name.
-    async fn query(riddle: Riddle);
-}
-
-#[tarpc::service]
-trait Node {
-    async fn resolve(riddle: Riddle);
-}
+use samizdat_common::rpc::{HubClient, Node, Riddle};
 
 #[derive(Clone)]
 struct NodeServer;

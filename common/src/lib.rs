@@ -1,5 +1,6 @@
 pub mod logger;
 pub mod transport;
+pub mod rpc;
 
 mod error;
 mod hash;

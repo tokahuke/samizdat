@@ -2,7 +2,6 @@ mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
-use serde_derive::{Deserialize, Serialize};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,25 +11,9 @@ use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 
 use samizdat_common::transport;
+use samizdat_common::rpc::{Riddle, Hub, NodeClient};
 
 use room::{Participant, Room};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Riddle {
-    rand: [u8; 28],
-    hash: [u8; 28],
-}
-
-#[tarpc::service]
-trait Hub {
-    /// Returns a greeting for name.
-    async fn query(riddle: Riddle);
-}
-
-#[tarpc::service]
-trait Node {
-    async fn resolve(riddle: Riddle);
-}
 
 #[derive(Clone)]
 struct HubServer {
@@ -42,7 +25,7 @@ struct HubServer {
 impl Hub for HubServer {
     async fn query(self, ctx: context::Context, riddle: Riddle) {
         log::debug!("got {:?}", riddle);
-        let client_id = self.client.id;
+        let client_id = self.client.id();
         let riddle = Arc::new(riddle);
 
         self.client.for_each_peer(|peer_id, peer| {
@@ -50,12 +33,16 @@ impl Hub for HubServer {
                 // TODO
             }
 
-            let peer = Arc::clone(peer);
+            let peer = peer.clone();
             let riddle = riddle.clone(); // clone the arc.
             tokio::spawn(async move {
+                log::debug!("starting resolve");
                 peer.resolve(ctx, Riddle::clone(&*riddle)).await.unwrap();
+                log::debug!("resolve done");
             });
-        });
+        }).await;
+
+        log::debug!("query done");
     }
 }
 
@@ -99,7 +86,7 @@ pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                         log::warn!("failed to spawn client from {}: {}", client_addr, err)
                     })
                     .ok()?,
-            );
+            ).await;
 
             // Set up server:
             let server = HubServer {

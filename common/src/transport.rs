@@ -49,7 +49,7 @@ impl Multiplex {
         reader_sends: SenderMap<Bytes>,
     ) {
         while let Some(message) = read.next().await {
-            log::debug!("got {:?}", message);
+            log::debug!("reading {:?}", message);
             match message {
                 Ok(message) if message.is_empty() => {
                     log::warn!("received empty message");
@@ -57,9 +57,9 @@ impl Multiplex {
                 Ok(message) => {
                     let channel = message[0]; // message not empty
                     if let Some(reader_send) = reader_sends.read().await.get(&channel) {
-                        log::debug!("sending payload to channel {}", channel);
+                        log::debug!("payload received to channel {}", channel);
                         reader_send.send(message.into()).await.ok();
-                        log::debug!("sent");
+                        log::debug!("read");
                     } else {
                         log::warn!("tried to send a message on inactive channel {}", channel);
                     }
@@ -81,8 +81,9 @@ impl Multiplex {
                 continue;
             }
 
-            log::debug!("sending {:?}", message);
+            log::debug!("writing {:?} to channel {}", message, message[0]);
             write.send(message).await.unwrap();
+            log::debug!("wrote");
         }
     }
 
