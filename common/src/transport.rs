@@ -150,7 +150,7 @@ where
 
     fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
         let channel = self.channel;
-        
+
         let mut bytes = BytesMut::new();
         bytes.put_u8(channel);
 

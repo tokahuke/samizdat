@@ -1,9 +1,9 @@
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::collections::BTreeMap;
 use tokio::sync::RwLock;
-use std::fmt::Debug;
 
 // TODO: failed to use CHashMap... bugs iterating... v2.2.2
 
@@ -73,7 +73,7 @@ impl<T: 'static + Sync + Send> Participant<T> {
     }
 
     pub async fn for_each_peer(&self, f: impl Fn(usize, &Arc<T>)) {
-        for (&id, participant) in self.0.peers.read().await.iter()  {
+        for (&id, participant) in self.0.peers.read().await.iter() {
             f(id, participant)
         }
     }

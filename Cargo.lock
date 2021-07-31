@@ -1348,6 +1348,7 @@ dependencies = [
  "failure_derive",
  "flatbuffers",
  "futures",
+ "getrandom 0.2.3",
  "log",
  "log4rs",
  "rocksdb",
@@ -1408,7 +1409,6 @@ dependencies = [
  "structopt",
  "tarpc",
  "tokio",
- "tokio-serde",
  "warp",
 ]
 
@@ -1767,7 +1767,6 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "911a61637386b789af998ee23f50aa30d5fd7edcec8d6d3dedae5e5815205466"
 dependencies = [
- "bincode",
  "bytes",
  "educe",
  "futures-core",

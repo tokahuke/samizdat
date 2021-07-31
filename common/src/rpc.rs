@@ -1,18 +1,29 @@
 use serde_derive::{Deserialize, Serialize};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Riddle {
-    pub rand: [u8; 28],
-    pub hash: [u8; 28],
+use crate::{ContentRiddle, LocationRiddle};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Query {
+    /// The riddle that will be sent to the other peers.
+    pub content_riddle: ContentRiddle,
+    /// The riddle that will be used by the peer that has the hash to find the IP of the client.
+    pub location_riddle: ContentRiddle,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Resolution {
+    pub content_riddle: ContentRiddle,
+    pub location_riddle: LocationRiddle,
 }
 
 #[tarpc::service]
 pub trait Hub {
     /// Returns a greeting for name.
-    async fn query(riddle: Riddle);
+    async fn query(query: Query);
 }
 
 #[tarpc::service]
 pub trait Node {
-    async fn resolve(riddle: Riddle);
+    async fn resolve(resolution: Arc<Resolution>);
 }

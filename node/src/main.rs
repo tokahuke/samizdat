@@ -1,16 +1,22 @@
 mod cli;
+mod db;
 mod flatbuffers;
 mod http;
 mod rpc;
 
 pub use samizdat_common::Error;
 
+pub use cli::cli;
+pub use db::{db, Table};
+
 use std::panic;
-use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
 
 use samizdat_common::logger;
+
+use cli::init_cli;
+use db::init_db;
 
 static mut HUB: Option<rpc::HubConnection> = None;
 
@@ -26,38 +32,6 @@ async fn init_hub() -> Result<(), crate::Error> {
 
 pub fn hub<'a>() -> &'a rpc::HubConnection {
     unsafe { HUB.as_ref().expect("hub connection not initialized") }
-}
-
-static mut CLI: Option<cli::Cli> = None;
-
-fn init_cli() -> Result<(), crate::Error> {
-    let cli = cli::Cli::from_args();
-
-    unsafe {
-        CLI = Some(cli);
-    }
-
-    Ok(())
-}
-
-fn cli<'a>() -> &'a cli::Cli {
-    unsafe { CLI.as_ref().expect("cli not initialized") }
-}
-
-static mut DB: Option<rocksdb::DB> = None;
-
-fn init_db() -> Result<(), crate::Error> {
-    let db = rocksdb::DB::open_default(&cli().db_path)?;
-
-    unsafe {
-        DB = Some(db);
-    }
-
-    Ok(())
-}
-
-fn db<'a>() -> &'a rocksdb::DB {
-    unsafe { DB.as_ref().expect("db not initialized") }
 }
 
 /// Utility for propagating panics through tasks.

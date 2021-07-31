@@ -7,6 +7,7 @@ use warp::Filter;
 
 use samizdat_common::Hash;
 
+use crate::db::Table;
 use crate::flatbuffers;
 use crate::{db, hub};
 
@@ -34,7 +35,7 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and(warp::get())
         .map(|hash: String| async move {
             let Hash(hash) = Hash::from_str(&hash)?;
-            let object = db().get(&hash)?;
+            let object = db().get_cf(Table::Content.get(), &hash)?;
 
             if let Some(object) = &object {
                 let object = flatbuffers::object::root_as_object(object)?;
@@ -60,7 +61,12 @@ pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::R
         .map(|content_type: String, bytes: bytes::Bytes| {
             let object = flatbuffers::build_object(&content_type, &*bytes);
             let hash = Hash::build(&object);
-            db().put(&hash, object)?;
+
+            let mut batch = rocksdb::WriteBatch::default();
+            batch.put_cf(Table::Hashes.get(), &hash, &[]);
+            batch.put_cf(Table::Content.get(), &hash, object);
+            db().write(batch)?;
+
             Ok(hash.to_string())
         })
         .map(reply)

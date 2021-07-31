@@ -10,8 +10,8 @@ use tarpc::server::{self, Channel};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 
+use samizdat_common::rpc::{Hub, NodeClient, Query, Resolution};
 use samizdat_common::transport;
-use samizdat_common::rpc::{Riddle, Hub, NodeClient};
 
 use room::{Participant, Room};
 
@@ -23,24 +23,30 @@ struct HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
-    async fn query(self, ctx: context::Context, riddle: Riddle) {
-        log::debug!("got {:?}", riddle);
+    async fn query(self, ctx: context::Context, query: Query) {
+        log::debug!("got {:?}", query);
         let client_id = self.client.id();
-        let riddle = Arc::new(riddle);
+        let location_riddle = query.location_riddle.riddle_for_location(self.client_addr);
+        let resolution = Arc::new(Resolution {
+            content_riddle: query.content_riddle,
+            location_riddle,
+        });
 
-        self.client.for_each_peer(|peer_id, peer| {
-            if peer_id != client_id {
-                // TODO
-            }
+        self.client
+            .for_each_peer(|peer_id, peer| {
+                if peer_id != client_id {
+                    // TODO
+                }
 
-            let peer = peer.clone();
-            let riddle = riddle.clone(); // clone the arc.
-            tokio::spawn(async move {
-                log::debug!("starting resolve");
-                peer.resolve(ctx, Riddle::clone(&*riddle)).await.unwrap();
-                log::debug!("resolve done");
-            });
-        }).await;
+                let peer = peer.clone();
+                let resolution = resolution.clone();
+                tokio::spawn(async move {
+                    log::debug!("starting resolve");
+                    peer.resolve(ctx, resolution).await.unwrap();
+                    log::debug!("resolve done");
+                });
+            })
+            .await;
 
         log::debug!("query done");
     }
@@ -79,14 +85,16 @@ pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                 .expect("channel 1 in use unexpectedly");
 
             // Set up client:
-            let client = ROOM.insert(
-                NodeClient::new(tarpc::client::Config::default(), reverse)
-                    .spawn()
-                    .map_err(|err| {
-                        log::warn!("failed to spawn client from {}: {}", client_addr, err)
-                    })
-                    .ok()?,
-            ).await;
+            let client = ROOM
+                .insert(
+                    NodeClient::new(tarpc::client::Config::default(), reverse)
+                        .spawn()
+                        .map_err(|err| {
+                            log::warn!("failed to spawn client from {}: {}", client_addr, err)
+                        })
+                        .ok()?,
+                )
+                .await;
 
             // Set up server:
             let server = HubServer {

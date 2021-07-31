@@ -1,10 +1,12 @@
 use sha3::{Digest, Sha3_224};
-use std::convert::TryInto;
+use std::convert::{TryInto, TryFrom};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::str::FromStr;
 
-#[derive(Debug)]
+use crate::ContentRiddle;
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Hash(pub [u8; 28]);
 
 impl FromStr for Hash {
@@ -35,6 +37,17 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
+impl<'a> TryFrom<&'a [u8]> for Hash {
+    type Error = crate::Error;
+    fn try_from(slice: &'a [u8]) -> Result<Hash, crate::Error> {
+        if slice.len() != 28 {
+            Err(crate::Error::BadHashLength(slice.len()))
+        } else {
+            Ok(Hash(slice.try_into().expect("aleady checked")))
+        }
+    }
+}
+
 impl Hash {
     /// # Panics
     ///
@@ -45,5 +58,17 @@ impl Hash {
 
     pub fn build(thing: impl AsRef<[u8]>) -> Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
+    }
+
+    pub fn rehash(&self, rand: [u8; 28]) -> Hash {
+        Hash::build([rand, self.0].concat())
+    }
+
+    pub fn gen_riddle(&self) -> ContentRiddle {
+        let mut rand = [0; 28];
+        getrandom::getrandom(&mut rand).expect("getrandom failed");
+        let hash = self.rehash(rand);
+
+        ContentRiddle { rand, hash: hash.0 }
     }
 }

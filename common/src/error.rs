@@ -14,6 +14,8 @@ pub enum Error {
     FlatBuffer(::flatbuffers::InvalidFlatbuffer),
     #[fail(display = "io error: {}", _0)]
     Io(io::Error),
+    #[fail(display = "bad hash length (should be 28): {}", _0)]
+    BadHashLength(usize),
 }
 
 impl warp::reject::Reject for crate::Error {}
