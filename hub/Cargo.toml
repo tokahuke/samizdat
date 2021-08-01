@@ -24,3 +24,4 @@ serde = { version = "1.0.124", features = ["rc"] }
 tokio-stream = { version = "0.1.4", features = ["net"] }
 samizdat-common = { path = "../common"}
 chashmap = "2.2.2"
+quinn = "0.7.0"

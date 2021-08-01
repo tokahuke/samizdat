@@ -34,7 +34,7 @@ async fn main() -> Result<(), crate::Error> {
     &*CLI;
     //&*DB;
 
-    let rpc_server = tokio::spawn(crate::rpc::run(([0, 0, 0, 0], 4511)));
+    let rpc_server = tokio::spawn(crate::rpc::run(([127, 0, 0, 1], 4511)));
 
     maybe_resume_panic(rpc_server.await);
 
