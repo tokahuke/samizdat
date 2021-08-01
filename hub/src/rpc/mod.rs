@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Interval, Duration, MissedTickBehavior};
 use tokio_stream::wrappers::TcpListenerStream;
 
-use samizdat_common::rpc::{Hub, NodeClient, Query, Resolution, Status};
+use samizdat_common::rpc::{Hub, NodeClient, Query, QueryResponse, Resolution, ResolutionStatus};
 use samizdat_common::transport;
 
 use crate::CLI;
@@ -20,22 +20,26 @@ use crate::CLI;
 use room::{Participant, Room};
 
 lazy_static! {
-    static ref ROOM: Room<NodeClient> = Room::new();
+    static ref ROOM: Room<Node> = Room::new();
+}
+
+struct Node {
+    client: NodeClient,
+    addr: SocketAddr,
 }
 
 struct HubServerInner {
     call_semaphore: Semaphore,
     call_throttle: Mutex<Interval>,
-    client_addr: SocketAddr,
-    client: Participant<NodeClient>,
+    client: Participant<Node>,
 }
 
 #[derive(Clone)]
 struct HubServer(Arc<HubServerInner>);
 
 impl HubServer {
-    fn new(client_addr: SocketAddr, client: NodeClient) -> HubServer {
-        let client = ROOM.insert(client);
+    fn new(addr: SocketAddr, client: NodeClient) -> HubServer {
+        let client = ROOM.insert(Node { client, addr });
 
         let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -43,11 +47,9 @@ impl HubServer {
         HubServer(Arc::new(HubServerInner {
             call_semaphore: Semaphore::new(CLI.max_queries_per_node),
             call_throttle: Mutex::new(interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node))),
-            client_addr,
             client,
         }))
     }
-
 
     /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
     /// client. This may mitigate DoS.
@@ -68,36 +70,46 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
-    async fn query(self, ctx: context::Context, query: Query) -> Status {
+    async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         self.throttle(Box::new(|server| async move {
             // Now, prepare resolution request:
             log::debug!("got {:?}", query);
             let client_id = server.0.client.id();
-            let location_riddle = query.location_riddle.riddle_for_location(server.0.client_addr);
+            let location_riddle = query.location_riddle.riddle_for_location(server.0.client.addr);
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 location_riddle,
             });
 
             // And then send the request to the peers:
-            server.0.client
+            let candidates = server.0.client
                 .stream_peers()
-                .for_each_concurrent(Some(CLI.max_resolutions_per_query), |(peer_id, peer)| {
+                .map(|(peer_id, peer)| {
                     if peer_id != client_id {
                         // TODO
                     }
+
                     let resolution = resolution.clone();
                     async move {
-                        log::debug!("starting resolve");
-                        peer.resolve(ctx, resolution).await.unwrap();
-                        log::debug!("resolve done");
+                        log::debug!("starting resolve for {}", peer_id);
+                        let response = peer.client.resolve(ctx, resolution).await.unwrap();
+                        log::debug!("resolve done for {}", peer_id);
+                        (peer.addr, response)
                     }
                 })
+                .buffer_unordered(CLI.max_resolutions_per_query)
+                .filter_map(|(addr, response)| async move { if let ResolutionStatus::Found = response.status {
+                    Some(addr)
+                } else {
+                    None
+                }})
+                .take(CLI.max_candidates)
+                .collect::<Vec<_>>()
                 .await;
 
             log::debug!("query done");
 
-            Status::Found
+            QueryResponse { candidates }
         })).await
     }
 }

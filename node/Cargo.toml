@@ -27,4 +27,8 @@ tarpc = { version = "0.25.1", features = ["tokio1", "serde-transport", "tcp"] }
 tokio = { version = "1.3.0", features = ["rt-multi-thread", "macros", "net", "time"] }
 warp = "0.3.0"
 samizdat-common = { path = "../common" }
+<<<<<<< HEAD
 quinn = "0.7.0"
+=======
+bincode = "1.3.2"
+>>>>>>> back-to-tcp

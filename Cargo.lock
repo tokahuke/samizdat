@@ -1549,6 +1549,7 @@ version = "0.1.0"
 dependencies = [
  "async_once",
  "base64-url",
+ "bincode",
  "bytes",
  "failure",
  "failure_derive",
