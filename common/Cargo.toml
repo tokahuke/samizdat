@@ -29,3 +29,7 @@ tokio-stream = { version = "0.1.4", features = ["net"] }
 sha3 = "0.9.1"
 warp = "0.3.0"
 getrandom = "0.2.2"
+quinn = "0.7.0"
+rustls = { version = "0.19.0", features = ["quic", "dangerous_configuration"] }
+webpki = "0.21.4"
+rcgen = "0.8.9"

@@ -37,18 +37,18 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             let Hash(hash) = Hash::from_str(&hash)?;
             let object = db().get_cf(Table::Content.get(), &hash)?;
 
-            if let Some(object) = &object {
-                let object = flatbuffers::object::root_as_object(object)?;
-                Ok(Some(Return {
-                    content_type: object.content_type().to_owned(),
-                    status_code: http::StatusCode::OK,
-                    // TODO: DANGER! double copy of large, large content!!
-                    content: object.content().to_owned(),
-                }))
-            } else {
+            // if let Some(object) = &object {
+            //     let object = flatbuffers::object::root_as_object(object)?;
+            //     Ok(Some(Return {
+            //         content_type: object.content_type().to_owned(),
+            //         status_code: http::StatusCode::OK,
+            //         // TODO: DANGER! double copy of large, large content!!
+            //         content: object.content().to_owned(),
+            //     }))
+            // } else {
                 hub().query(Hash(hash)).await?;
-                Ok(None)
-            }
+                Ok(None as Option<()>)
+            // }
         })
         .and_then(async_reply)
 }

@@ -8,52 +8,98 @@ use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::net::TcpListener;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{interval, Interval, Duration, MissedTickBehavior};
 use tokio_stream::wrappers::TcpListenerStream;
 
-use samizdat_common::rpc::{Hub, NodeClient, Query, Resolution};
+use samizdat_common::rpc::{Hub, NodeClient, Query, Resolution, Status};
 use samizdat_common::transport;
+
+use crate::CLI;
 
 use room::{Participant, Room};
 
-#[derive(Clone)]
-struct HubServer {
+lazy_static! {
+    static ref ROOM: Room<NodeClient> = Room::new();
+}
+
+struct HubServerInner {
+    call_semaphore: Semaphore,
+    call_throttle: Mutex<Interval>,
     client_addr: SocketAddr,
     client: Participant<NodeClient>,
 }
 
-#[tarpc::server]
-impl Hub for HubServer {
-    async fn query(self, ctx: context::Context, query: Query) {
-        log::debug!("got {:?}", query);
-        let client_id = self.client.id();
-        let location_riddle = query.location_riddle.riddle_for_location(self.client_addr);
-        let resolution = Arc::new(Resolution {
-            content_riddle: query.content_riddle,
-            location_riddle,
-        });
+#[derive(Clone)]
+struct HubServer(Arc<HubServerInner>);
 
-        self.client
-            .for_each_peer(|peer_id, peer| {
-                if peer_id != client_id {
-                    // TODO
-                }
+impl HubServer {
+    fn new(client_addr: SocketAddr, client: NodeClient) -> HubServer {
+        let client = ROOM.insert(client);
 
-                let peer = peer.clone();
-                let resolution = resolution.clone();
-                tokio::spawn(async move {
-                    log::debug!("starting resolve");
-                    peer.resolve(ctx, resolution).await.unwrap();
-                    log::debug!("resolve done");
-                });
-            })
-            .await;
+        let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
+        call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        log::debug!("query done");
+        HubServer(Arc::new(HubServerInner {
+            call_semaphore: Semaphore::new(CLI.max_queries_per_node),
+            call_throttle: Mutex::new(interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node))),
+            client_addr,
+            client,
+        }))
+    }
+
+
+    /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
+    /// client. This may mitigate DoS.
+    async fn throttle<'a, Fut, T>(&'a self, f: Box<dyn 'a + Send + FnOnce(&'a Self) -> Fut>) -> T
+    where
+        Fut: 'a + Future<Output=T>
+    {
+        // First, make sure we are not being trolled:
+        self.0.call_throttle.lock().await.tick().await;
+        let permit = self.0.call_semaphore.acquire().await.expect("semaphore never closed");
+        
+        let outcome = f(self).await;
+
+        drop(permit);
+        outcome
     }
 }
 
-lazy_static! {
-    static ref ROOM: Room<NodeClient> = Room::new();
+#[tarpc::server]
+impl Hub for HubServer {
+    async fn query(self, ctx: context::Context, query: Query) -> Status {
+        self.throttle(Box::new(|server| async move {
+            // Now, prepare resolution request:
+            log::debug!("got {:?}", query);
+            let client_id = server.0.client.id();
+            let location_riddle = query.location_riddle.riddle_for_location(server.0.client_addr);
+            let resolution = Arc::new(Resolution {
+                content_riddle: query.content_riddle,
+                location_riddle,
+            });
+
+            // And then send the request to the peers:
+            server.0.client
+                .stream_peers()
+                .for_each_concurrent(Some(CLI.max_resolutions_per_query), |(peer_id, peer)| {
+                    if peer_id != client_id {
+                        // TODO
+                    }
+                    let resolution = resolution.clone();
+                    async move {
+                        log::debug!("starting resolve");
+                        peer.resolve(ctx, resolution).await.unwrap();
+                        log::debug!("resolve done");
+                    }
+                })
+                .await;
+
+            log::debug!("query done");
+
+            Status::Found
+        })).await
+    }
 }
 
 pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
@@ -85,29 +131,23 @@ pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                 .expect("channel 1 in use unexpectedly");
 
             // Set up client:
-            let client = ROOM
-                .insert(
-                    NodeClient::new(tarpc::client::Config::default(), reverse)
-                        .spawn()
-                        .map_err(|err| {
-                            log::warn!("failed to spawn client from {}: {}", client_addr, err)
-                        })
-                        .ok()?,
-                )
-                .await;
-
+            let client = 
+                NodeClient::new(tarpc::client::Config::default(), reverse)
+                    .spawn()
+                    .map_err(|err| {
+                        log::warn!("failed to spawn client from {}: {}", client_addr, err)
+                    })
+                    .ok()?;
+            
             // Set up server:
-            let server = HubServer {
-                client_addr,
-                client,
-            };
+            let server = HubServer::new(client_addr, client);
             let server_task = server::BaseChannel::with_defaults(direct).execute(server.serve());
 
             Some(server_task)
         })
         .filter_map(|maybe_server| async move { maybe_server })
-        // Max 1_000 channels.
-        .buffer_unordered(1_000)
+        // Max number of channels.
+        .buffer_unordered(CLI.max_connections)
         .for_each(|_| async {})
         .await;
 

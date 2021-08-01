@@ -1,5 +1,5 @@
 use sha3::{Digest, Sha3_224};
-use std::convert::{TryInto, TryFrom};
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::str::FromStr;

@@ -2,6 +2,7 @@ pub mod logger;
 pub mod rpc;
 pub mod transport;
 
+mod quic;
 mod error;
 mod hash;
 mod riddles;

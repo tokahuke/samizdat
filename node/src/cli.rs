@@ -2,8 +2,10 @@ use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Cli {
-    #[structopt(env, default_value = "data/db")]
+    #[structopt(env, long, default_value = "data/db")]
     pub db_path: String,
+    #[structopt(env, long, default_value = "4510")]
+    pub port: u16,
 }
 
 static mut CLI: Option<Cli> = None;

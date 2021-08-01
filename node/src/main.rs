@@ -62,7 +62,7 @@ async fn main() -> Result<(), crate::Error> {
         .with(warp::log("api"));
 
     // Run server:
-    let http_server = tokio::spawn(warp::serve(server).run(([0, 0, 0, 0], 4510)));
+    let http_server = tokio::spawn(warp::serve(server).run(([0, 0, 0, 0], cli().port)));
     // let rpc_server = tokio::spawn(crate::rpc::run(([0, 0, 0, 0], 4511)));
 
     maybe_resume_panic(http_server.await);

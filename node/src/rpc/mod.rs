@@ -1,15 +1,15 @@
+use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::net::TcpStream;
-use lazy_static::lazy_static;
-use std::collections::BTreeMap;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{oneshot, RwLock};
 
-use samizdat_common::rpc::{HubClient, Node, Query, Resolution};
+use samizdat_common::rpc::{HubClient, Node, Query, Resolution, Status};
 use samizdat_common::{transport, Hash};
 
 use crate::{db, Table};
@@ -19,7 +19,7 @@ struct NodeServer;
 
 #[tarpc::server]
 impl Node for NodeServer {
-    async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) {
+    async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> Status {
         log::info!("got {:?}", resolution);
         let iter = db().iterator_cf(Table::Hashes.get(), IteratorMode::Start);
 
@@ -37,18 +37,22 @@ impl Node for NodeServer {
                 let peer_addr = match resolution.location_riddle.resolve(&hash) {
                     Some(peer_addr) => peer_addr,
                     None => {
-                        log::warn!("failed to resolve location riddle after resolving content riddle");
-                        return;
+                        log::warn!(
+                            "failed to resolve location riddle after resolving content riddle"
+                        );
+                        return Status::Found;
                     }
                 };
 
                 log::info!("found peer at {}", peer_addr);
 
-                return;
+                return Status::Found;
             }
         }
 
         log::info!("hash not found for resolution");
+
+        Status::NotFound
     }
 }
 
@@ -62,13 +66,20 @@ pub struct HubConnection {
 
 impl HubConnection {
     pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let multiplex = transport::Multiplex::new(TcpStream::connect(addr.into()).await.unwrap());
-        let direct = multiplex.channel(0).await.unwrap();
-        let reverse = multiplex.channel(1).await.unwrap();
+        let addr = addr.into();
+        let multiplex = transport::Multiplex::new(TcpStream::connect(addr).await?);
+        let direct = multiplex
+            .channel(0)
+            .await
+            .expect("channel 0 in use unexpectedly");
+        let reverse = multiplex
+            .channel(1)
+            .await
+            .expect("channel 0 in use unexpectedly");
 
         let client = HubClient::new(tarpc::client::Config::default(), direct)
             .spawn()
-            .unwrap();
+            .map_err(|err| format!("failed to spawn client for {}: {}", addr, err))?;
 
         let server_task = server::BaseChannel::with_defaults(reverse).execute(NodeServer.serve());
         tokio::spawn(server_task);
@@ -83,8 +94,7 @@ impl HubConnection {
         let (sender, receiver) = oneshot::channel();
         POST_BACK.write().await.insert(content_hash, sender);
 
-        self
-            .client
+        self.client
             .query(
                 context::current(),
                 Query {

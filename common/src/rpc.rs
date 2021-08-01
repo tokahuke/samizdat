@@ -17,13 +17,20 @@ pub struct Resolution {
     pub location_riddle: LocationRiddle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Status {
+    Rejected,
+    NotFound,
+    Found,
+}
+
 #[tarpc::service]
 pub trait Hub {
     /// Returns a greeting for name.
-    async fn query(query: Query);
+    async fn query(query: Query) -> Status;
 }
 
 #[tarpc::service]
 pub trait Node {
-    async fn resolve(resolution: Arc<Resolution>);
+    async fn resolve(resolution: Arc<Resolution>) -> Status;
 }
