@@ -70,35 +70,44 @@ pub struct HubConnection {
 }
 
 impl HubConnection {
-    pub async fn connect(local_addr: impl Into<SocketAddr>, remote_addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
+    pub async fn connect(
+        local_addr: impl Into<SocketAddr>,
+        remote_addr: impl Into<SocketAddr>,
+    ) -> Result<HubConnection, crate::Error> {
         let local_addr = local_addr.into();
         let remote_addr = remote_addr.into();
 
         let mut endpoint_builder = Endpoint::builder();
-        endpoint_builder.listen(ServerConfig::default());
+        endpoint_builder.listen(samizdat_common::quic::server_config());
+        endpoint_builder.default_client_config(samizdat_common::quic::insecure());
 
         let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
 
         let new_connection = endpoint
-            .connect(&remote_addr, "localhost")
+            .connect_with(samizdat_common::quic::insecure(), &remote_addr, "localhost")
             .expect("failed to start connecting")
             .await
             .expect("failed to connect");
-        let mut bi_streams = new_connection.bi_streams;
+        let mut connection = new_connection.connection;
+        let mut foo = connection
+        .open_bi()
+        .await
+        .expect("failed to open bidirectional channel");
+
+        foo.0.write(b"").await.unwrap();
+
+        let mut bar = connection
+        .open_bi()
+        .await
+        .expect("failed to open bidirectional channel");
+
+        bar.0.write(b"").await.unwrap();
 
         let direct = BincodeTransport::new(QuicTransport::new(
-            bi_streams
-                .next()
-                .await
-                .expect("no more streams")
-                .expect("failed to get stream"),
+            foo,
         ));
         let reverse = BincodeTransport::new(QuicTransport::new(
-            bi_streams
-                .next()
-                .await
-                .expect("no more streams")
-                .expect("failed to get stream"),
+            bar
         ));
 
         let client = HubClient::new(tarpc::client::Config::default(), direct)
@@ -108,16 +117,22 @@ impl HubConnection {
         let server_task = server::BaseChannel::with_defaults(reverse).execute(NodeServer.serve());
         tokio::spawn(server_task);
 
+        log::info!("client connected to server at {}", connection.remote_address());
+
         Ok(HubConnection { client })
     }
 
     pub async fn query(&self, content_hash: Hash) -> Result<Vec<u8>, crate::Error> {
+        log::info!("query for hash {}", content_hash);
+
         let content_riddle = content_hash.gen_riddle();
         let location_riddle = content_hash.gen_riddle();
 
+        log::info!("inscrbing postback channel");
         let (sender, receiver) = oneshot::channel();
         POST_BACK.write().await.insert(content_hash, sender);
 
+        log::info!("running rpc");
         self.client
             .query(
                 context::current(),
@@ -127,6 +142,7 @@ impl HubConnection {
                 },
             )
             .await?;
+        log::info!("rpc done");
 
         // TODO: timeout.
         Ok(receiver.await.unwrap())

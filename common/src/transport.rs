@@ -1,141 +1,142 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::channel::mpsc as futures_mpsc;
-use futures::{stream, Sink, SinkExt, Stream, StreamExt};
+use futures::prelude::*;
+use quinn::generic::{OpenBi, RecvStream, SendStream, ServerConfig};
+use quinn::{crypto::Session, Connection, Endpoint, Incoming};
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::marker::{PhantomData, Unpin};
+use std::fmt;
+use std::io::{self, IoSlice};
+use std::marker::PhantomData;
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::{fmt, io};
-use tokio::net::TcpStream;
-use tokio::sync::{mpsc as tokio_mpsc, RwLock};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::mpsc as tokio_mpsc;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+pub struct Transport {
+    addr: SocketAddr,
+    endpoint: Endpoint,
+    incoming: Incoming,
+}
+
+impl Transport {
+    pub async fn start(addr: SocketAddr) -> Result<Transport, crate::Error> {
+        let mut endpoint_builder = Endpoint::builder();
+        endpoint_builder.listen(ServerConfig::default());
+
+        let (endpoint, incoming) = endpoint_builder.bind(&addr).expect("failed to bind");
+
+        Ok(Transport {
+            addr,
+            endpoint,
+            incoming,
+        })
+    }
+}
+
+pub struct QuicTransport<S: Session> {
+    send: SendStream<S>,
+    recv: RecvStream<S>,
+}
+
+impl<S: Session> AsyncRead for QuicTransport<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.recv).poll_read(cx, buf)
+    }
+}
+
+impl<S: Session> AsyncWrite for QuicTransport<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self).poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.send.is_write_vectored()
+    }
+}
+
+impl<S: Session> QuicTransport<S> {
+    pub fn new((send, recv): (SendStream<S>, RecvStream<S>)) -> QuicTransport<S> {
+        QuicTransport { send, recv }
+    }
+}
 
 /// TODO: big thing... this limites the size of the file!!! But don't set it too big
 /// either (it's a trap!)
 const MAX_FRAME_LENGTH: usize = 64 * 1024 * 1024; // a generous 64MB!
+type FramedDelimtedQuic<S> = Framed<QuicTransport<S>, LengthDelimitedCodec>;
 
-type SenderMap<T> = Arc<RwLock<BTreeMap<u8, tokio_mpsc::Sender<T>>>>;
-type FramedDelimtedTcp = Framed<TcpStream, LengthDelimitedCodec>;
-
-pub struct Multiplex {
-    reader_sends: SenderMap<Bytes>,
-    writer_send: futures_mpsc::Sender<Bytes>,
+pub struct BincodeTransport<Ss: Session, S, R> {
+    read: stream::SplitStream<FramedDelimtedQuic<Ss>>,
+    write: stream::SplitSink<FramedDelimtedQuic<Ss>, Bytes>,
+    _request: PhantomData<S>,
+    _response: PhantomData<R>,
 }
 
-impl Multiplex {
-    pub fn new(stream: TcpStream) -> Multiplex {
-        let reader_sends = SenderMap::default();
-        let (writer_send, writer_recv) = futures_mpsc::channel(1);
-
+impl<Ss: Session, S, R> BincodeTransport<Ss, S, R> {
+    pub fn new(transport: QuicTransport<Ss>) -> BincodeTransport<Ss, S, R> {
         let codec = LengthDelimitedCodec::builder()
             .max_frame_length(MAX_FRAME_LENGTH)
             .new_codec();
-        let framed = Framed::new(stream, codec);
+        let framed = Framed::new(transport, codec);
         let (write, read) = framed.split();
 
-        tokio::spawn(Self::receive(read, reader_sends.clone()));
-        tokio::spawn(Self::send(write, writer_recv));
-
-        Multiplex {
-            reader_sends,
-            writer_send,
+        BincodeTransport {
+            read,
+            write,
+            _request: PhantomData,
+            _response: PhantomData,
         }
     }
-
-    async fn receive(
-        mut read: stream::SplitStream<FramedDelimtedTcp>,
-        reader_sends: SenderMap<Bytes>,
-    ) {
-        while let Some(message) = read.next().await {
-            log::debug!("reading {:?}", message);
-            match message {
-                Ok(message) if message.is_empty() => {
-                    log::warn!("received empty message");
-                }
-                Ok(message) => {
-                    let channel = message[0]; // message not empty
-                    if let Some(reader_send) = reader_sends.read().await.get(&channel) {
-                        log::debug!("payload received to channel {}", channel);
-                        reader_send.send(message.into()).await.ok();
-                        log::debug!("read");
-                    } else {
-                        log::warn!("tried to send a message on inactive channel {}", channel);
-                    }
-                }
-                Err(err) => {
-                    log::warn!("multiplex receiver error: {:?}", err);
-                }
-            }
-        }
-    }
-
-    async fn send(
-        mut write: stream::SplitSink<FramedDelimtedTcp, Bytes>,
-        mut writer_recv: futures_mpsc::Receiver<Bytes>,
-    ) {
-        while let Some(message) = writer_recv.next().await {
-            if message.is_empty() {
-                log::warn!("tried to send empty message");
-                continue;
-            }
-
-            log::debug!("writing {:?} to channel {}", message, message[0]);
-            write.send(message).await.unwrap();
-            log::debug!("wrote");
-        }
-    }
-
-    /// Returns `None` if channel is already occupied.
-    pub async fn channel<S, R>(&self, channel: u8) -> Option<ChannelTransport<S, R>> {
-        match self.reader_sends.write().await.entry(channel) {
-            Entry::Occupied(_) => None,
-            Entry::Vacant(vacant) => {
-                let (reader_send, reader_recv) = tokio_mpsc::channel(1);
-                vacant.insert(reader_send);
-                Some(ChannelTransport {
-                    channel,
-                    reader_recv,
-                    writer_send: self.writer_send.clone(),
-                    _request: PhantomData,
-                    _response: PhantomData,
-                })
-            }
-        }
-    }
-}
-
-pub struct ChannelTransport<S, R> {
-    channel: u8,
-    reader_recv: tokio_mpsc::Receiver<Bytes>,
-    writer_send: futures_mpsc::Sender<Bytes>,
-    _request: PhantomData<S>,
-    _response: PhantomData<R>,
 }
 
 fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
-impl<S, R> Stream for ChannelTransport<S, R>
+impl<Ss: Session, S, R> Stream for BincodeTransport<Ss, S, R>
 where
     S: Unpin,
     R: 'static + Send + Unpin + fmt::Debug + for<'a> Deserialize<'a>,
 {
     type Item = Result<R, io::Error>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.reader_recv).poll_recv(cx).map(|maybe| {
-            maybe.map(|msg| bincode::deserialize(&msg[1..]).map_err(bincode_error_to_io))
-        })
+        log::info!("poll next");
+        Pin::new(&mut self.read)
+            .poll_next(cx)
+            .map(|maybe| maybe.map(|msg| bincode::deserialize(&msg?).map_err(bincode_error_to_io)))
     }
 }
 
-fn send_error_to_io(err: futures_mpsc::SendError) -> io::Error {
-    io::Error::new(io::ErrorKind::ConnectionReset, err)
-}
-
-impl<S, R> Sink<S> for ChannelTransport<S, R>
+impl<Ss: Session, S, R> Sink<S> for BincodeTransport<Ss, S, R>
 where
     R: Unpin,
     S: 'static + Send + Unpin + fmt::Debug + Serialize,
@@ -143,36 +144,26 @@ where
     type Error = io::Error;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_ready(cx)
-            .map(|ready| ready.map_err(send_error_to_io))
+        log::info!("poll ready");
+        Pin::new(&mut self.write).poll_ready(cx)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
-        let channel = self.channel;
-
-        let mut bytes = BytesMut::new();
-        bytes.put_u8(channel);
-
-        let mut writer = bytes.writer();
-
-        bincode::serialize_into(&mut writer, &item).expect("can always serialize");
-        drop(item); // maybe can save a bit of memory?
-
-        Pin::new(&mut self.writer_send)
-            .start_send(writer.into_inner().into())
-            .map_err(send_error_to_io)
+        log::info!("starting to send");
+        Pin::new(&mut self.write).start_send(
+            bincode::serialize(&item)
+                .expect("can always serialize")
+                .into(),
+        )
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_flush(cx)
-            .map(|flush| flush.map_err(send_error_to_io))
+        log::info!("poll flush");
+        Pin::new(&mut self.write).poll_flush(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_close(cx)
-            .map(|close| close.map_err(send_error_to_io))
+        log::info!("poll close");
+        Pin::new(&mut self.write).poll_close(cx)
     }
 }
