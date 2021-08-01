@@ -39,20 +39,6 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             let Hash(hash) = Hash::from_str(&hash)?;
             let serialized = db().get_cf(Table::Content.get(), &hash)?;
 
-<<<<<<< HEAD
-            // if let Some(object) = &object {
-            //     let object = flatbuffers::object::root_as_object(object)?;
-            //     Ok(Some(Return {
-            //         content_type: object.content_type().to_owned(),
-            //         status_code: http::StatusCode::OK,
-            //         // TODO: DANGER! double copy of large, large content!!
-            //         content: object.content().to_owned(),
-            //     }))
-            // } else {
-            hub().query(Hash(hash)).await?;
-            Ok(None as Option<()>)
-            // }
-=======
             // Else, fallback to get from peers:
             let serialized = if let Some(serialized) = serialized {
                 Some(serialized)
@@ -73,7 +59,6 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             } else {
                 Ok(None)
             }
->>>>>>> back-to-tcp
         })
         .and_then(async_reply)
 }
