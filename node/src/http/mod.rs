@@ -46,8 +46,8 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             //         content: object.content().to_owned(),
             //     }))
             // } else {
-                hub().query(Hash(hash)).await?;
-                Ok(None as Option<()>)
+            hub().query(Hash(hash)).await?;
+            Ok(None as Option<()>)
             // }
         })
         .and_then(async_reply)

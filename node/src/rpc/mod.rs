@@ -1,3 +1,4 @@
+use futures::prelude::*;
 use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
 use std::collections::BTreeMap;
@@ -10,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{oneshot, RwLock};
 
 use samizdat_common::rpc::{HubClient, Node, Query, Resolution, Status};
+use samizdat_common::transport::{BincodeTransport, QuicTransport};
 use samizdat_common::{transport, Hash};
 
 use crate::{db, Table};
@@ -60,26 +62,48 @@ lazy_static! {
     static ref POST_BACK: RwLock<BTreeMap<Hash, oneshot::Sender<Vec<u8>>>> = RwLock::default();
 }
 
+use quinn::generic::{OpenBi, RecvStream, SendStream, ServerConfig};
+use quinn::{crypto::Session, Connection, Endpoint, Incoming};
+
 pub struct HubConnection {
     client: HubClient,
 }
 
 impl HubConnection {
-    pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let addr = addr.into();
-        let multiplex = transport::Multiplex::new(TcpStream::connect(addr).await?);
-        let direct = multiplex
-            .channel(0)
+    pub async fn connect(local_addr: impl Into<SocketAddr>, remote_addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
+        let local_addr = local_addr.into();
+        let remote_addr = remote_addr.into();
+
+        let mut endpoint_builder = Endpoint::builder();
+        endpoint_builder.listen(ServerConfig::default());
+
+        let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
+
+        let new_connection = endpoint
+            .connect(&remote_addr, "localhost")
+            .expect("failed to start connecting")
             .await
-            .expect("channel 0 in use unexpectedly");
-        let reverse = multiplex
-            .channel(1)
-            .await
-            .expect("channel 0 in use unexpectedly");
+            .expect("failed to connect");
+        let mut bi_streams = new_connection.bi_streams;
+
+        let direct = BincodeTransport::new(QuicTransport::new(
+            bi_streams
+                .next()
+                .await
+                .expect("no more streams")
+                .expect("failed to get stream"),
+        ));
+        let reverse = BincodeTransport::new(QuicTransport::new(
+            bi_streams
+                .next()
+                .await
+                .expect("no more streams")
+                .expect("failed to get stream"),
+        ));
 
         let client = HubClient::new(tarpc::client::Config::default(), direct)
             .spawn()
-            .map_err(|err| format!("failed to spawn client for {}: {}", addr, err))?;
+            .map_err(|err| format!("failed to spawn client for {}: {}", remote_addr, err))?;
 
         let server_task = server::BaseChannel::with_defaults(reverse).execute(NodeServer.serve());
         tokio::spawn(server_task);
