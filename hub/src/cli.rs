@@ -17,4 +17,7 @@ pub struct Cli {
     /// (e.g., 2 => delay 500ms).
     #[structopt(env, long, default_value = "12")]
     pub max_query_rate_per_node: f64,
+    /// The maximum number of candidates to return to the client.
+    #[structopt(env, long, default_value = "1")]
+    pub max_candidates: usize,
 }

@@ -110,16 +110,6 @@ impl Returnable for crate::Error {
     }
 }
 
-impl<'a> Returnable for crate::flatbuffers::object::Object<'a> {
-    fn content_type(&self) -> Cow<str> {
-        self.content_type().into()
-    }
-
-    fn render(&self) -> Cow<[u8]> {
-        self.content().into()
-    }
-}
-
 pub struct Return {
     pub content_type: String,
     pub status_code: http::StatusCode,

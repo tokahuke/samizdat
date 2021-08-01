@@ -9,7 +9,7 @@ use tarpc::server::{self, Channel};
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, RwLock};
 
-use samizdat_common::rpc::{HubClient, Node, Query, Resolution, Status};
+use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
 use samizdat_common::{transport, Hash};
 
 use crate::{db, Table};
@@ -19,7 +19,7 @@ struct NodeServer;
 
 #[tarpc::server]
 impl Node for NodeServer {
-    async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> Status {
+    async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got {:?}", resolution);
         let iter = db().iterator_cf(Table::Hashes.get(), IteratorMode::Start);
 
@@ -40,19 +40,19 @@ impl Node for NodeServer {
                         log::warn!(
                             "failed to resolve location riddle after resolving content riddle"
                         );
-                        return Status::Found;
+                        return ResolutionResponse::FOUND;
                     }
                 };
 
                 log::info!("found peer at {}", peer_addr);
 
-                return Status::Found;
+                return ResolutionResponse::FOUND;
             }
         }
 
         log::info!("hash not found for resolution");
 
-        Status::NotFound
+        ResolutionResponse::NOT_FOUND
     }
 }
 
@@ -87,14 +87,15 @@ impl HubConnection {
         Ok(HubConnection { client })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Result<Vec<u8>, crate::Error> {
+    pub async fn query(&self, content_hash: Hash) -> Result<Option<Vec<u8>>, crate::Error> {
         let content_riddle = content_hash.gen_riddle();
         let location_riddle = content_hash.gen_riddle();
 
+        // Need to preemptively do this if a candidate is faster than me.
         let (sender, receiver) = oneshot::channel();
         POST_BACK.write().await.insert(content_hash, sender);
 
-        self.client
+        let QueryResponse { candidates } = self.client
             .query(
                 context::current(),
                 Query {
@@ -104,7 +105,15 @@ impl HubConnection {
             )
             .await?;
 
+        log::info!("Candidates for {}: {:?}", content_hash, candidates);
+
+        if candidates.is_empty() {
+            // Forget it!
+            POST_BACK.write().await.remove(&content_hash);
+            return Ok(None);
+        }
+
         // TODO: timeout.
-        Ok(receiver.await.unwrap())
+        Ok(Some(receiver.await.unwrap()))
     }
 }
