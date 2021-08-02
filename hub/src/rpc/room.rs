@@ -35,6 +35,20 @@ impl<T: 'static + Send + Sync> Room<T> {
             arc,
         }))
     }
+
+    pub fn stream_peers(&self) -> mpsc::UnboundedReceiver<(usize, Arc<T>)> {
+        let (sender, receiver) = mpsc::unbounded();
+        let cloned = self.participants.clone();
+
+        tokio::spawn(async move {
+            cloned.retain(|&id, peer| {
+                sender.unbounded_send((id, peer.clone())).ok();
+                true
+            });
+        });
+
+        receiver
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -68,28 +82,15 @@ impl<T: 'static + Sync + Send> Deref for Participant<T> {
     }
 }
 
-impl<T: 'static + Sync + Send> Participant<T> {
-    pub fn id(&self) -> usize {
-        self.0.id
-    }
+// impl<T: 'static + Sync + Send> Participant<T> {
+//     pub fn id(&self) -> usize {
+//         self.0.id
+//     }
 
-    pub fn for_each_peer(&self, f: impl Fn(usize, &Arc<T>)) {
-        self.0.peers.retain(|&id, participant| {
-            f(id, participant);
-            true
-        })
-    }
-
-    pub fn stream_peers(&self) -> mpsc::UnboundedReceiver<(usize, Arc<T>)> {
-        let (sender, receiver) = mpsc::unbounded();
-        let cloned = self.clone();
-
-        tokio::spawn(async move {
-            cloned.for_each_peer(|id, peer| {
-                sender.unbounded_send((id, peer.clone())).ok();
-            })
-        });
-
-        receiver
-    }
-}
+//     pub fn for_each_peer(&self, f: impl Fn(usize, &Arc<T>)) {
+//         self.0.peers.retain(|&id, participant| {
+//             f(id, participant);
+//             true
+//         })
+//     }
+// }

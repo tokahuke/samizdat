@@ -1,141 +1,93 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::channel::mpsc as futures_mpsc;
-use futures::{stream, Sink, SinkExt, Stream, StreamExt};
+use futures::future::Fuse;
+use futures::prelude::*;
+use quinn::{Connection, ConnectionError, IncomingUniStreams};
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::marker::{PhantomData, Unpin};
+use std::fmt;
+use std::future::Future;
+use std::io;
+use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::{fmt, io};
-use tokio::net::TcpStream;
-use tokio::sync::{mpsc as tokio_mpsc, RwLock};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio::task::JoinHandle;
 
-/// TODO: big thing... this limites the size of the file!!! But don't set it too big
-/// either (it's a trap!)
-const MAX_FRAME_LENGTH: usize = 64 * 1024 * 1024; // a generous 64MB!
+const MAX_LENGTH: usize = 2_048;
 
-type SenderMap<T> = Arc<RwLock<BTreeMap<u8, tokio_mpsc::Sender<T>>>>;
-type FramedDelimtedTcp = Framed<TcpStream, LengthDelimitedCodec>;
-
-pub struct Multiplex {
-    reader_sends: SenderMap<Bytes>,
-    writer_send: futures_mpsc::Sender<Bytes>,
-}
-
-impl Multiplex {
-    pub fn new(stream: TcpStream) -> Multiplex {
-        let reader_sends = SenderMap::default();
-        let (writer_send, writer_recv) = futures_mpsc::channel(1);
-
-        let codec = LengthDelimitedCodec::builder()
-            .max_frame_length(MAX_FRAME_LENGTH)
-            .new_codec();
-        let framed = Framed::new(stream, codec);
-        let (write, read) = framed.split();
-
-        tokio::spawn(Self::receive(read, reader_sends.clone()));
-        tokio::spawn(Self::send(write, writer_recv));
-
-        Multiplex {
-            reader_sends,
-            writer_send,
-        }
-    }
-
-    async fn receive(
-        mut read: stream::SplitStream<FramedDelimtedTcp>,
-        reader_sends: SenderMap<Bytes>,
-    ) {
-        while let Some(message) = read.next().await {
-            log::debug!("reading {:?}", message);
-            match message {
-                Ok(message) if message.is_empty() => {
-                    log::warn!("received empty message");
-                }
-                Ok(message) => {
-                    let channel = message[0]; // message not empty
-                    if let Some(reader_send) = reader_sends.read().await.get(&channel) {
-                        log::debug!("payload received to channel {}", channel);
-                        reader_send.send(message.into()).await.ok();
-                        log::debug!("read");
-                    } else {
-                        log::warn!("tried to send a message on inactive channel {}", channel);
-                    }
-                }
-                Err(err) => {
-                    log::warn!("multiplex receiver error: {:?}", err);
-                }
-            }
-        }
-    }
-
-    async fn send(
-        mut write: stream::SplitSink<FramedDelimtedTcp, Bytes>,
-        mut writer_recv: futures_mpsc::Receiver<Bytes>,
-    ) {
-        while let Some(message) = writer_recv.next().await {
-            if message.is_empty() {
-                log::warn!("tried to send empty message");
-                continue;
-            }
-
-            log::debug!("writing {:?} to channel {}", message, message[0]);
-            write.send(message).await.unwrap();
-            log::debug!("wrote");
-        }
-    }
-
-    /// Returns `None` if channel is already occupied.
-    pub async fn channel<S, R>(&self, channel: u8) -> Option<ChannelTransport<S, R>> {
-        match self.reader_sends.write().await.entry(channel) {
-            Entry::Occupied(_) => None,
-            Entry::Vacant(vacant) => {
-                let (reader_send, reader_recv) = tokio_mpsc::channel(1);
-                vacant.insert(reader_send);
-                Some(ChannelTransport {
-                    channel,
-                    reader_recv,
-                    writer_send: self.writer_send.clone(),
-                    _request: PhantomData,
-                    _response: PhantomData,
-                })
-            }
-        }
-    }
-}
-
-pub struct ChannelTransport<S, R> {
-    channel: u8,
-    reader_recv: tokio_mpsc::Receiver<Bytes>,
-    writer_send: futures_mpsc::Sender<Bytes>,
+pub struct BincodeOverQuic<S, R> {
+    connection: Connection,
+    incoming: IncomingUniStreams,
+    ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
+    ongoing_recv: Option<Fuse<JoinHandle<Option<Result<R, io::Error>>>>>,
     _request: PhantomData<S>,
     _response: PhantomData<R>,
+}
+
+impl<S, R> BincodeOverQuic<S, R>
+where
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
+{
+    pub fn new(connection: Connection, incoming: IncomingUniStreams) -> BincodeOverQuic<S, R> {
+        BincodeOverQuic {
+            connection,
+            incoming,
+            ongoing_recv: None,
+            ongoing_send: None,
+            _request: PhantomData,
+            _response: PhantomData,
+        }
+    }
 }
 
 fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
-impl<S, R> Stream for ChannelTransport<S, R>
+impl<S, R> Stream for BincodeOverQuic<S, R>
 where
-    S: Unpin,
+    S: 'static + Send + Serialize + Unpin,
     R: 'static + Send + Unpin + fmt::Debug + for<'a> Deserialize<'a>,
 {
     type Item = Result<R, io::Error>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.reader_recv).poll_recv(cx).map(|maybe| {
-            maybe.map(|msg| bincode::deserialize(&msg[1..]).map_err(bincode_error_to_io))
-        })
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        log::trace!("poll next");
+        let this = self.get_mut();
+
+        if let Some(mut ongoing_recv) = this.ongoing_recv.as_mut() {
+            Pin::new(&mut ongoing_recv).poll(cx).map(|outcome| {
+                this.ongoing_recv = None;
+                outcome.expect("recv task panicked")
+            })
+        } else {
+            match Pin::new(&mut this.incoming).poll_next(cx) {
+                Poll::Ready(Some(Ok(recv_stream))) => {
+                    let recv_task = tokio::spawn(async move {
+                        let serialized = recv_stream
+                            .read_to_end(MAX_LENGTH)
+                            .await
+                            .expect("failed to read to end");
+
+                        Some(bincode::deserialize(&serialized).map_err(bincode_error_to_io))
+                    })
+                    .fuse();
+
+                    this.ongoing_recv = Some(recv_task);
+
+                    Pin::new(this).poll_next(cx)
+                }
+                Poll::Ready(Some(Err(ConnectionError::ApplicationClosed(close))))
+                    if close.error_code.into_inner() == 0 =>
+                {
+                    Poll::Ready(None)
+                }
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            }
+        }
     }
 }
 
-fn send_error_to_io(err: futures_mpsc::SendError) -> io::Error {
-    io::Error::new(io::ErrorKind::ConnectionReset, err)
-}
-
-impl<S, R> Sink<S> for ChannelTransport<S, R>
+impl<S, R> Sink<S> for BincodeOverQuic<S, R>
 where
     R: Unpin,
     S: 'static + Send + Unpin + fmt::Debug + Serialize,
@@ -143,36 +95,48 @@ where
     type Error = io::Error;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_ready(cx)
-            .map(|ready| ready.map_err(send_error_to_io))
+        log::trace!("poll ready");
+        if let Some(ongoing_send) = self.ongoing_send.as_mut() {
+            Pin::new(ongoing_send).poll(cx).map(|outcome| {
+                self.ongoing_send = None;
+                outcome.expect("send task panicked")
+            })
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
-        let channel = self.channel;
+    fn start_send(self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
+        log::trace!("starting to send");
 
-        let mut bytes = BytesMut::new();
-        bytes.put_u8(channel);
+        let this = self.get_mut();
+        let open_uni = this.connection.open_uni();
 
-        let mut writer = bytes.writer();
+        let send_task = async move {
+            let mut send_stream = open_uni.await?;
+            let serialized = bincode::serialize(&item).expect("can serialize");
+            send_stream.write_all(&serialized).await?;
+            send_stream.finish().await?;
 
-        bincode::serialize_into(&mut writer, &item).expect("can always serialize");
-        drop(item); // maybe can save a bit of memory?
+            Ok(())
+        };
 
-        Pin::new(&mut self.writer_send)
-            .start_send(writer.into_inner().into())
-            .map_err(send_error_to_io)
+        if this.ongoing_send.is_some() {
+            panic!("would drop ongoing send task");
+        }
+
+        this.ongoing_send = Some(tokio::spawn(send_task).fuse());
+
+        Ok(())
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_flush(cx)
-            .map(|flush| flush.map_err(send_error_to_io))
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        log::trace!("poll flush");
+        self.poll_ready(cx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.writer_send)
-            .poll_close(cx)
-            .map(|close| close.map_err(send_error_to_io))
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        log::trace!("poll close");
+        self.poll_ready(cx)
     }
 }

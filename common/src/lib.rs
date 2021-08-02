@@ -1,8 +1,8 @@
 pub mod logger;
 pub mod rpc;
 pub mod transport;
+pub mod quic;
 
-mod quic;
 mod error;
 mod hash;
 mod riddles;

@@ -6,11 +6,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
-use tokio::net::TcpStream;
 use tokio::sync::{oneshot, RwLock};
+use quinn::Endpoint;
 
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
-use samizdat_common::{transport, Hash};
+use samizdat_common::{Hash};
+use samizdat_common::transport::BincodeOverQuic;
 
 use crate::{db, Table};
 
@@ -65,24 +66,48 @@ pub struct HubConnection {
 }
 
 impl HubConnection {
-    pub async fn connect(addr: impl Into<SocketAddr>) -> Result<HubConnection, crate::Error> {
-        let addr = addr.into();
-        let multiplex = transport::Multiplex::new(TcpStream::connect(addr).await?);
-        let direct = multiplex
-            .channel(0)
-            .await
-            .expect("channel 0 in use unexpectedly");
-        let reverse = multiplex
-            .channel(1)
-            .await
-            .expect("channel 0 in use unexpectedly");
+    pub async fn connect(
+        local_addr: impl Into<SocketAddr>,
+        remote_addr: impl Into<SocketAddr>,
+    ) -> Result<HubConnection, crate::Error> {
+        let local_addr = local_addr.into();
+        let remote_addr = remote_addr.into();
 
-        let client = HubClient::new(tarpc::client::Config::default(), direct)
-            .spawn()
-            .map_err(|err| format!("failed to spawn client for {}: {}", addr, err))?;
+        let mut endpoint_builder = Endpoint::builder();
+        endpoint_builder.listen(samizdat_common::quic::server_config());
+        endpoint_builder.default_client_config(samizdat_common::quic::insecure());
 
-        let server_task = server::BaseChannel::with_defaults(reverse).execute(NodeServer.serve());
+        let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
+
+        let new_connection = endpoint
+            .connect_with(samizdat_common::quic::insecure(), &remote_addr, "localhost")
+            .expect("failed to start connecting")
+            .await
+            .expect("failed to connect");
+
+        let transport = BincodeOverQuic::new(new_connection.connection.clone(), new_connection.uni_streams);
+        let client = HubClient::new(tarpc::client::Config::default(), transport)
+            .spawn();
+
+        log::info!("client connected to direct server at {}", new_connection.connection.remote_address());
+
+        let mut endpoint_builder = Endpoint::builder();
+        endpoint_builder.listen(samizdat_common::quic::server_config());
+        endpoint_builder.default_client_config(samizdat_common::quic::insecure());
+
+        let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
+
+        let new_connection = endpoint
+            .connect_with(samizdat_common::quic::insecure(), &remote_addr, "localhost")
+            .expect("failed to start connecting")
+            .await
+            .expect("failed to connect");
+        
+        let transport = BincodeOverQuic::new(new_connection.connection.clone(), new_connection.uni_streams);
+        let server_task = server::BaseChannel::with_defaults(transport).execute(NodeServer.serve());
         tokio::spawn(server_task);
+
+        log::info!("client connected to reverse server at {}", new_connection.connection.remote_address());
 
         Ok(HubConnection { client })
     }

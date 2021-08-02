@@ -1,6 +1,5 @@
 mod cli;
 mod db;
-//mod flatbuffers;
 mod http;
 mod rpc;
 mod object;
@@ -22,7 +21,7 @@ use db::init_db;
 static mut HUB: Option<rpc::HubConnection> = None;
 
 async fn init_hub() -> Result<(), crate::Error> {
-    let hub = rpc::HubConnection::connect(([0, 0, 0, 0], 4511)).await?;
+    let hub = rpc::HubConnection::connect(([127, 0, 0, 1], 0), ([127, 0, 0, 1], 4511)).await?;
 
     unsafe {
         HUB = Some(hub);

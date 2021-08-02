@@ -7,17 +7,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
-use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Interval, Duration, MissedTickBehavior};
-use tokio_stream::wrappers::TcpListenerStream;
+use quinn::Endpoint;
 
 use samizdat_common::rpc::{Hub, NodeClient, Query, QueryResponse, Resolution, ResolutionStatus};
-use samizdat_common::transport;
+use samizdat_common::transport::BincodeOverQuic;
 
 use crate::CLI;
 
-use room::{Participant, Room};
+use room::{Room};
 
 lazy_static! {
     static ref ROOM: Room<Node> = Room::new();
@@ -31,23 +30,21 @@ struct Node {
 struct HubServerInner {
     call_semaphore: Semaphore,
     call_throttle: Mutex<Interval>,
-    client: Participant<Node>,
+    addr: SocketAddr,
 }
 
 #[derive(Clone)]
 struct HubServer(Arc<HubServerInner>);
 
 impl HubServer {
-    fn new(addr: SocketAddr, client: NodeClient) -> HubServer {
-        let client = ROOM.insert(Node { client, addr });
-
+    fn new(addr: SocketAddr) -> HubServer {
         let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         HubServer(Arc::new(HubServerInner {
             call_semaphore: Semaphore::new(CLI.max_queries_per_node),
             call_throttle: Mutex::new(interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node))),
-            client,
+            addr,
         }))
     }
 
@@ -74,20 +71,19 @@ impl Hub for HubServer {
         self.throttle(Box::new(|server| async move {
             // Now, prepare resolution request:
             log::debug!("got {:?}", query);
-            let client_id = server.0.client.id();
-            let location_riddle = query.location_riddle.riddle_for_location(server.0.client.addr);
+            let location_riddle = query.location_riddle.riddle_for_location(server.0.addr);
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 location_riddle,
             });
 
             // And then send the request to the peers:
-            let candidates = server.0.client
+            let candidates = ROOM
                 .stream_peers()
                 .map(|(peer_id, peer)| {
-                    if peer_id != client_id {
-                        // TODO
-                    }
+                    // if peer_id != client_id {
+                    //     // TODO
+                    // }
 
                     let resolution = resolution.clone();
                     async move {
@@ -114,46 +110,33 @@ impl Hub for HubServer {
     }
 }
 
-pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
-    let listener = TcpListener::bind(addr.into()).await?;
+pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
+    let mut endpoint_builder = Endpoint::builder();
+    endpoint_builder.listen(samizdat_common::quic::server_config());
+    endpoint_builder.default_client_config(samizdat_common::quic::insecure());
 
-    TcpListenerStream::new(listener)
-        .filter_map(|r| async move {
-            r.map_err(|err| log::warn!("failed to establish TCP connection: {}", err))
+    let (_, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+
+    incoming
+        .filter_map(|connecting| async move {
+            connecting
+                .await
+                .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
                 .ok()
         })
-        .then(|t| async move {
+        .then(|new_connection| async move {
             // Get peer address:
-            let client_addr = t
-                .peer_addr()
-                .map_err(|err| log::warn!("could not get peer address for connection: {}", err))
-                .ok()?;
+            let client_addr = new_connection.connection.remote_address();
 
             log::info!("Incoming connection from {}", client_addr);
 
-            // Multiplex connection:
-            let multiplex = transport::Multiplex::new(t);
-            let direct = multiplex
-                .channel(0)
-                .await
-                .expect("channel 0 in use unexpectedly");
-            let reverse = multiplex
-                .channel(1)
-                .await
-                .expect("channel 1 in use unexpectedly");
+            let transport = BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams);
 
-            // Set up client:
-            let client = 
-                NodeClient::new(tarpc::client::Config::default(), reverse)
-                    .spawn()
-                    .map_err(|err| {
-                        log::warn!("failed to spawn client from {}: {}", client_addr, err)
-                    })
-                    .ok()?;
-            
             // Set up server:
-            let server = HubServer::new(client_addr, client);
-            let server_task = server::BaseChannel::with_defaults(direct).execute(server.serve());
+            let server = HubServer::new(client_addr);
+            let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
+
+            log::info!("Connection from {} accepted", client_addr);
 
             Some(server_task)
         })
@@ -161,6 +144,42 @@ pub async fn run(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
         // Max number of channels.
         .buffer_unordered(CLI.max_connections)
         .for_each(|_| async {})
+        .await;
+
+    Ok(())
+}
+
+pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
+    let mut endpoint_builder = Endpoint::builder();
+    endpoint_builder.listen(samizdat_common::quic::server_config());
+    endpoint_builder.default_client_config(samizdat_common::quic::insecure());
+
+    let (_, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+
+    incoming
+        .filter_map(|connecting| async move {
+            connecting
+                .await
+                .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
+                .ok()
+        })
+        .for_each(|new_connection| async move {
+            // Get peer address:
+            let client_addr = new_connection.connection.remote_address();
+
+            log::info!("Incoming connection from {}", client_addr);
+
+            let transport = BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams);
+
+            // Set up server:
+            let client = NodeClient::new(tarpc::client::Config::default(), transport)
+            .spawn();
+
+            log::info!("Connection from {} accepted", client_addr);
+
+            ROOM.insert(Node { client, addr: client_addr });
+        })
+        // Max number of channels.
         .await;
 
     Ok(())
