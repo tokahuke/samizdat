@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use crate::ContentRiddle;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Hash(pub [u8; 28]);
 
 impl FromStr for Hash {

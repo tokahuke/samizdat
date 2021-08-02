@@ -12,13 +12,13 @@ pub fn init_logger() -> log4rs::Handle {
 
     let config = Config::builder()
         .appender(Appender::builder().build("stderr", Box::new(console)))
-        .logger(Logger::builder().build("neuromancer", log::LevelFilter::Debug))
+        .logger(Logger::builder().build("quinn", log::LevelFilter::Warn))
         // .logger(Logger::builder().build("yaque", log::LevelFilter::Trace))
         // .logger(Logger::builder().build("sled_to_postgres", log::LevelFilter::Trace))
         .build(
             Root::builder()
                 .appender("stderr")
-                .build(log::LevelFilter::Debug),
+                .build(log::LevelFilter::Info),
         )
         .expect("could not config logger");
 

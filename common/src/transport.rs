@@ -1,117 +1,37 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::channel::mpsc as futures_mpsc;
+use futures::future::Fuse;
 use futures::prelude::*;
-use quinn::generic::{OpenBi, RecvStream, SendStream, ServerConfig};
-use quinn::{crypto::Session, Connection, Endpoint, Incoming};
+use quinn::{Connection, ConnectionError, IncomingUniStreams};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::io::{self, IoSlice};
+use std::future::Future;
+use std::io;
 use std::marker::PhantomData;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::sync::mpsc as tokio_mpsc;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio::task::JoinHandle;
 
-pub struct Transport {
-    addr: SocketAddr,
-    endpoint: Endpoint,
-    incoming: Incoming,
-}
+const MAX_LENGTH: usize = 2_048;
 
-impl Transport {
-    pub async fn start(addr: SocketAddr) -> Result<Transport, crate::Error> {
-        let mut endpoint_builder = Endpoint::builder();
-        endpoint_builder.listen(ServerConfig::default());
-
-        let (endpoint, incoming) = endpoint_builder.bind(&addr).expect("failed to bind");
-
-        Ok(Transport {
-            addr,
-            endpoint,
-            incoming,
-        })
-    }
-}
-
-pub struct QuicTransport<S: Session> {
-    send: SendStream<S>,
-    recv: RecvStream<S>,
-}
-
-impl<S: Session> AsyncRead for QuicTransport<S> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.recv).poll_read(cx, buf)
-    }
-}
-
-impl<S: Session> AsyncWrite for QuicTransport<S> {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
-        Pin::new(&mut self).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self).poll_shutdown(cx)
-    }
-
-    fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bufs: &[IoSlice<'_>],
-    ) -> Poll<Result<usize, io::Error>> {
-        Pin::new(&mut self).poll_write_vectored(cx, bufs)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.send.is_write_vectored()
-    }
-}
-
-impl<S: Session> QuicTransport<S> {
-    pub fn new((send, recv): (SendStream<S>, RecvStream<S>)) -> QuicTransport<S> {
-        QuicTransport { send, recv }
-    }
-}
-
-/// TODO: big thing... this limites the size of the file!!! But don't set it too big
-/// either (it's a trap!)
-const MAX_FRAME_LENGTH: usize = 64 * 1024 * 1024; // a generous 64MB!
-type FramedDelimtedQuic<S> = Framed<QuicTransport<S>, LengthDelimitedCodec>;
-
-pub struct BincodeTransport<Ss: Session, S, R> {
-    read: stream::SplitStream<FramedDelimtedQuic<Ss>>,
-    write: stream::SplitSink<FramedDelimtedQuic<Ss>, Bytes>,
+pub struct BincodeOverQuic<S, R> {
+    connection: Connection,
+    incoming: IncomingUniStreams,
+    ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
+    ongoing_recv: Option<Fuse<JoinHandle<Option<Result<R, io::Error>>>>>,
     _request: PhantomData<S>,
     _response: PhantomData<R>,
 }
 
-impl<Ss: Session, S, R> BincodeTransport<Ss, S, R> {
-    pub fn new(transport: QuicTransport<Ss>) -> BincodeTransport<Ss, S, R> {
-        let codec = LengthDelimitedCodec::builder()
-            .max_frame_length(MAX_FRAME_LENGTH)
-            .new_codec();
-        let framed = Framed::new(transport, codec);
-        let (write, read) = framed.split();
-
-        BincodeTransport {
-            read,
-            write,
+impl<S, R> BincodeOverQuic<S, R>
+where
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
+{
+    pub fn new(connection: Connection, incoming: IncomingUniStreams) -> BincodeOverQuic<S, R> {
+        BincodeOverQuic {
+            connection,
+            incoming,
+            ongoing_recv: None,
+            ongoing_send: None,
             _request: PhantomData,
             _response: PhantomData,
         }
@@ -122,21 +42,52 @@ fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
-impl<Ss: Session, S, R> Stream for BincodeTransport<Ss, S, R>
+impl<S, R> Stream for BincodeOverQuic<S, R>
 where
-    S: Unpin,
+    S: 'static + Send + Serialize + Unpin,
     R: 'static + Send + Unpin + fmt::Debug + for<'a> Deserialize<'a>,
 {
     type Item = Result<R, io::Error>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        log::info!("poll next");
-        Pin::new(&mut self.read)
-            .poll_next(cx)
-            .map(|maybe| maybe.map(|msg| bincode::deserialize(&msg?).map_err(bincode_error_to_io)))
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        log::trace!("poll next");
+        let this = self.get_mut();
+
+        if let Some(mut ongoing_recv) = this.ongoing_recv.as_mut() {
+            Pin::new(&mut ongoing_recv).poll(cx).map(|outcome| {
+                this.ongoing_recv = None;
+                outcome.expect("recv task panicked")
+            })
+        } else {
+            match Pin::new(&mut this.incoming).poll_next(cx) {
+                Poll::Ready(Some(Ok(recv_stream))) => {
+                    let recv_task = tokio::spawn(async move {
+                        let serialized = recv_stream
+                            .read_to_end(MAX_LENGTH)
+                            .await
+                            .expect("failed to read to end");
+
+                        Some(bincode::deserialize(&serialized).map_err(bincode_error_to_io))
+                    })
+                    .fuse();
+
+                    this.ongoing_recv = Some(recv_task);
+
+                    Pin::new(this).poll_next(cx)
+                }
+                Poll::Ready(Some(Err(ConnectionError::ApplicationClosed(close))))
+                    if close.error_code.into_inner() == 0 =>
+                {
+                    Poll::Ready(None)
+                }
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            }
+        }
     }
 }
 
-impl<Ss: Session, S, R> Sink<S> for BincodeTransport<Ss, S, R>
+impl<S, R> Sink<S> for BincodeOverQuic<S, R>
 where
     R: Unpin,
     S: 'static + Send + Unpin + fmt::Debug + Serialize,
@@ -144,26 +95,48 @@ where
     type Error = io::Error;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::info!("poll ready");
-        Pin::new(&mut self.write).poll_ready(cx)
+        log::trace!("poll ready");
+        if let Some(ongoing_send) = self.ongoing_send.as_mut() {
+            Pin::new(ongoing_send).poll(cx).map(|outcome| {
+                self.ongoing_send = None;
+                outcome.expect("send task panicked")
+            })
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
-        log::info!("starting to send");
-        Pin::new(&mut self.write).start_send(
-            bincode::serialize(&item)
-                .expect("can always serialize")
-                .into(),
-        )
+    fn start_send(self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
+        log::trace!("starting to send");
+
+        let this = self.get_mut();
+        let open_uni = this.connection.open_uni();
+
+        let send_task = async move {
+            let mut send_stream = open_uni.await?;
+            let serialized = bincode::serialize(&item).expect("can serialize");
+            send_stream.write_all(&serialized).await?;
+            send_stream.finish().await?;
+
+            Ok(())
+        };
+
+        if this.ongoing_send.is_some() {
+            panic!("would drop ongoing send task");
+        }
+
+        this.ongoing_send = Some(tokio::spawn(send_task).fuse());
+
+        Ok(())
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::info!("poll flush");
-        Pin::new(&mut self.write).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        log::trace!("poll flush");
+        self.poll_ready(cx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::info!("poll close");
-        Pin::new(&mut self.write).poll_close(cx)
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        log::trace!("poll close");
+        self.poll_ready(cx)
     }
 }

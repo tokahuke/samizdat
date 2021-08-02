@@ -34,9 +34,11 @@ async fn main() -> Result<(), crate::Error> {
     &*CLI;
     //&*DB;
 
-    let rpc_server = tokio::spawn(crate::rpc::run(([127, 0, 0, 1], 4511)));
+    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(([127, 0, 0, 1], 4511)));
+    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(([127, 0, 0, 1], 4512)));
 
-    maybe_resume_panic(rpc_server.await);
+    maybe_resume_panic(direct_rpc_server.await);
+    maybe_resume_panic(reverse_rpc_server.await);
 
     // Exit:
     Ok(())

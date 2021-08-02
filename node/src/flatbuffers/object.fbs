@@ -1,8 +1,0 @@
-namespace Object;
-
-table Object {
-    content_type: string (required);
-    content: [ubyte] (required);
-}
-
-root_type Object;

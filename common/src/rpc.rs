@@ -1,5 +1,6 @@
 use serde_derive::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::net::SocketAddr;
 
 use crate::{ContentRiddle, LocationRiddle};
 
@@ -12,25 +13,39 @@ pub struct Query {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Resolution {
-    pub content_riddle: ContentRiddle,
-    pub location_riddle: LocationRiddle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Status {
-    Rejected,
-    NotFound,
-    Found,
+pub struct QueryResponse {
+    pub candidates: Vec<SocketAddr>,
 }
 
 #[tarpc::service]
 pub trait Hub {
     /// Returns a greeting for name.
-    async fn query(query: Query) -> Status;
+    async fn query(query: Query) -> QueryResponse;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Resolution {
+    pub content_riddle: ContentRiddle,
+    pub location_riddle: LocationRiddle,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResolutionResponse {
+    pub status: ResolutionStatus,
+}
+
+impl ResolutionResponse {
+    pub const FOUND: ResolutionResponse = ResolutionResponse { status: ResolutionStatus::Found };
+    pub const NOT_FOUND: ResolutionResponse = ResolutionResponse { status: ResolutionStatus::NotFound };
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ResolutionStatus {
+    Found,
+    NotFound,
 }
 
 #[tarpc::service]
 pub trait Node {
-    async fn resolve(resolution: Arc<Resolution>) -> Status;
+    async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
 }

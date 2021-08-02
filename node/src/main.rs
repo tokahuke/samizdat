@@ -1,8 +1,8 @@
 mod cli;
 mod db;
-mod flatbuffers;
 mod http;
 mod rpc;
+mod object;
 
 pub use samizdat_common::Error;
 

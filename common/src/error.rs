@@ -16,6 +16,8 @@ pub enum Error {
     Io(io::Error),
     #[fail(display = "bad hash length (should be 28): {}", _0)]
     BadHashLength(usize),
+    #[fail(display = "decode error: {}", _0)]
+    Bincode(Box<bincode::ErrorKind>),
 }
 
 impl warp::reject::Reject for crate::Error {}
@@ -47,5 +49,11 @@ impl From<::flatbuffers::InvalidFlatbuffer> for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::Io(e)
+    }
+}
+
+impl From<Box<bincode::ErrorKind>> for Error {
+    fn from(e: bincode::Error) -> Error {
+        Error::Bincode(e)
     }
 }
