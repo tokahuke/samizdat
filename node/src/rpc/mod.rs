@@ -1,3 +1,5 @@
+mod connection_manager;
+
 use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
 use std::collections::BTreeMap;
@@ -7,16 +9,19 @@ use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::{oneshot, RwLock};
-use quinn::Endpoint;
 
+use samizdat_common::quic;
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
-use samizdat_common::{Hash};
-use samizdat_common::transport::BincodeOverQuic;
+use samizdat_common::Hash;
 
 use crate::{db, Table};
 
+use connection_manager::{ConnectionManager, DropMode};
+
 #[derive(Clone)]
-struct NodeServer;
+struct NodeServer {
+    connection_manager: Arc<ConnectionManager>,
+}
 
 #[tarpc::server]
 impl Node for NodeServer {
@@ -47,6 +52,8 @@ impl Node for NodeServer {
 
                 log::info!("found peer at {}", peer_addr);
 
+                let new_connection = self.connection_manager.punch_hole_to(peer_addr, DropMode::DropIncoming).await;
+
                 return ResolutionResponse::FOUND;
             }
         }
@@ -63,6 +70,7 @@ lazy_static! {
 
 pub struct HubConnection {
     client: HubClient,
+    connection_manager: Arc<ConnectionManager>,
 }
 
 impl HubConnection {
@@ -70,46 +78,36 @@ impl HubConnection {
         local_addr: impl Into<SocketAddr>,
         remote_addr: impl Into<SocketAddr>,
     ) -> Result<HubConnection, crate::Error> {
+        // Define relevant addresses:
         let local_addr = local_addr.into();
         let remote_addr = remote_addr.into();
 
-        let mut endpoint_builder = Endpoint::builder();
-        endpoint_builder.listen(samizdat_common::quic::server_config());
-        endpoint_builder.default_client_config(samizdat_common::quic::insecure());
+        // Connect and create connection manager:
+        let (endpoint, incoming) = quic::new_default(local_addr);
+        let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
 
-        let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
+        // Create transport for client and create client:
+        let transport = connection_manager
+            .transport(&remote_addr, "localhost")
+            .await?;
+        let client = HubClient::new(tarpc::client::Config::default(), transport).spawn();
 
-        let new_connection = endpoint
-            .connect_with(samizdat_common::quic::insecure(), &remote_addr, "localhost")
-            .expect("failed to start connecting")
-            .await
-            .expect("failed to connect");
-
-        let transport = BincodeOverQuic::new(new_connection.connection.clone(), new_connection.uni_streams);
-        let client = HubClient::new(tarpc::client::Config::default(), transport)
-            .spawn();
-
-        log::info!("client connected to direct server at {}", new_connection.connection.remote_address());
-
-        let mut endpoint_builder = Endpoint::builder();
-        endpoint_builder.listen(samizdat_common::quic::server_config());
-        endpoint_builder.default_client_config(samizdat_common::quic::insecure());
-
-        let (endpoint, _) = endpoint_builder.bind(&local_addr).expect("failed to bind");
-
-        let new_connection = endpoint
-            .connect_with(samizdat_common::quic::insecure(), &remote_addr, "localhost")
-            .expect("failed to start connecting")
-            .await
-            .expect("failed to connect");
-        
-        let transport = BincodeOverQuic::new(new_connection.connection.clone(), new_connection.uni_streams);
-        let server_task = server::BaseChannel::with_defaults(transport).execute(NodeServer.serve());
+        // Create transport for server and spawn server:
+        let transport = connection_manager
+            .transport(&remote_addr, "localhost")
+            .await?;
+        let server_task = server::BaseChannel::with_defaults(transport).execute(
+            NodeServer {
+                connection_manager: connection_manager.clone(),
+            }
+            .serve(),
+        );
         tokio::spawn(server_task);
 
-        log::info!("client connected to reverse server at {}", new_connection.connection.remote_address());
-
-        Ok(HubConnection { client })
+        Ok(HubConnection {
+            client,
+            connection_manager,
+        })
     }
 
     pub async fn query(&self, content_hash: Hash) -> Result<Option<Vec<u8>>, crate::Error> {
@@ -120,7 +118,8 @@ impl HubConnection {
         let (sender, receiver) = oneshot::channel();
         POST_BACK.write().await.insert(content_hash, sender);
 
-        let QueryResponse { candidates } = self.client
+        let QueryResponse { candidates } = self
+            .client
             .query(
                 context::current(),
                 Query {
@@ -137,6 +136,13 @@ impl HubConnection {
             POST_BACK.write().await.remove(&content_hash);
             return Ok(None);
         }
+
+        // Only one candidate: experiment....
+        let candidate = candidates[0];
+        let new_connection = self
+            .connection_manager
+            .punch_hole_to(candidate, DropMode::DropOutgoing)
+            .await?;
 
         // TODO: timeout.
         Ok(Some(receiver.await.unwrap()))

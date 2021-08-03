@@ -1,7 +1,8 @@
-use quinn::{ClientConfig, ServerConfig};
+use quinn::{ClientConfig, ServerConfig, Endpoint, Incoming, NewConnection};
 use rustls::{ServerCertVerified};
 use std::fs;
 use std::sync::Arc;
+use std::net::SocketAddr;
 
 // Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
 struct SkipCertificationVerification;
@@ -65,4 +66,19 @@ pub fn generate_self_signed_cert(
     let key = quinn::PrivateKey::from_der(&serialized_key).expect("failed to load key");
 
     (cert, key)
+}
+
+pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
+    let mut endpoint_builder = Endpoint::builder();
+    endpoint_builder.listen(server_config());
+    endpoint_builder.default_client_config(insecure());
+
+    endpoint_builder.bind(&bind_addr).expect("failed to bind")
+}
+
+pub async fn connect(endpoint: &Endpoint, remote_addr: &SocketAddr, server_name: &str) -> Result<NewConnection, crate::Error> {
+    Ok(endpoint
+        .connect(&remote_addr, server_name)
+        .expect("failed to start connecting")
+        .await?)
 }

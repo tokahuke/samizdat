@@ -1,8 +1,8 @@
 mod cli;
 mod db;
 mod http;
-mod rpc;
 mod object;
+mod rpc;
 
 pub use samizdat_common::Error;
 
@@ -54,11 +54,26 @@ async fn main() -> Result<(), crate::Error> {
     init_hub().await?;
 
     // Describe server:
-    let server = warp::get()
-        .and(warp::path::end())
-        .map(|| warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html"))
-        .or(http::get_hash())
-        .or(http::post_content())
+    let server = warp::filters::addr::remote()
+        .and_then(|addr: Option<std::net::SocketAddr>| async move {
+            if let Some(addr) = addr {
+                if addr.ip().is_loopback() {
+                    return Err(warp::reject::not_found());
+                }
+            }
+
+            Ok(warp::reply::with_status(
+                "cannot connect outside loopback",
+                ::http::StatusCode::FORBIDDEN,
+            ))
+        })
+        .or(warp::get()
+            .and(warp::path::end())
+            .map(|| {
+                warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
+            })
+            .or(http::get_hash())
+            .or(http::post_content()))
         .with(warp::log("api"));
 
     // Run server:

@@ -18,6 +18,8 @@ pub enum Error {
     BadHashLength(usize),
     #[fail(display = "decode error: {}", _0)]
     Bincode(Box<bincode::ErrorKind>),
+    #[fail(display = "QUIC connection error: {}", _0)]
+    QuicConnectionError(quinn::ConnectionError),
 }
 
 impl warp::reject::Reject for crate::Error {}
@@ -55,5 +57,11 @@ impl From<io::Error> for Error {
 impl From<Box<bincode::ErrorKind>> for Error {
     fn from(e: bincode::Error) -> Error {
         Error::Bincode(e)
+    }
+}
+
+impl From<quinn::ConnectionError> for Error {
+    fn from(e: quinn::ConnectionError) -> Error {
+        Error::QuicConnectionError(e)
     }
 }

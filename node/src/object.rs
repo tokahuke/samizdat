@@ -1,4 +1,4 @@
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Object<'a> {
@@ -8,6 +8,9 @@ pub struct Object<'a> {
 
 impl<'a> Object<'a> {
     pub fn new(content_type: &'a str, content: &'a [u8]) -> Object<'a> {
-        Object { content_type, content }
+        Object {
+            content_type,
+            content,
+        }
     }
 }
