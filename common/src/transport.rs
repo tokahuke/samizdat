@@ -1,6 +1,6 @@
 use futures::future::Fuse;
 use futures::prelude::*;
-use quinn::{Connection, ConnectionError, IncomingUniStreams};
+use quinn::{Connection, ConnectionError, IncomingUniStreams, ReadToEndError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
@@ -10,13 +10,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::task::JoinHandle;
 
-const MAX_LENGTH: usize = 2_048;
-
 pub struct BincodeOverQuic<S, R> {
     connection: Connection,
     incoming: IncomingUniStreams,
     ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
-    ongoing_recv: Option<Fuse<JoinHandle<Option<Result<R, io::Error>>>>>,
+    ongoing_recv: Option<Fuse<JoinHandle<Result<R, io::Error>>>>,
+    max_length: usize,
     _request: PhantomData<S>,
     _response: PhantomData<R>,
 }
@@ -26,15 +25,24 @@ where
     S: 'static + Send + Serialize,
     R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    pub fn new(connection: Connection, incoming: IncomingUniStreams) -> BincodeOverQuic<S, R> {
+    pub fn new(
+        connection: Connection,
+        incoming: IncomingUniStreams,
+        max_length: usize,
+    ) -> BincodeOverQuic<S, R> {
         BincodeOverQuic {
             connection,
             incoming,
             ongoing_recv: None,
             ongoing_send: None,
+            max_length,
             _request: PhantomData,
             _response: PhantomData,
         }
+    }
+
+    pub fn into_inner(self) -> (Connection, IncomingUniStreams) {
+        (self.connection, self.incoming)
     }
 }
 
@@ -55,18 +63,24 @@ where
         if let Some(mut ongoing_recv) = this.ongoing_recv.as_mut() {
             Pin::new(&mut ongoing_recv).poll(cx).map(|outcome| {
                 this.ongoing_recv = None;
-                outcome.expect("recv task panicked")
+                Some(outcome.expect("recv task panicked"))
             })
         } else {
             match Pin::new(&mut this.incoming).poll_next(cx) {
                 Poll::Ready(Some(Ok(recv_stream))) => {
+                    let max_length = this.max_length;
                     let recv_task = tokio::spawn(async move {
-                        let serialized = recv_stream
-                            .read_to_end(MAX_LENGTH)
-                            .await
-                            .expect("failed to read to end");
+                        let serialized = recv_stream.read_to_end(max_length).await;
 
-                        Some(bincode::deserialize(&serialized).map_err(bincode_error_to_io))
+                        match serialized {
+                            Ok(serialized) => {
+                                bincode::deserialize(&serialized).map_err(bincode_error_to_io)
+                            }
+                            Err(ReadToEndError::TooLong) => {
+                                Err(io::Error::new(io::ErrorKind::InvalidData, "too long"))
+                            }
+                            Err(ReadToEndError::Read(read)) => Err(read.into()),
+                        }
                     })
                     .fuse();
 

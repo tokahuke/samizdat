@@ -69,9 +69,9 @@ impl<T: 'static + Sync + Send> Clone for Participant<T> {
 
 impl<T: 'static + Sync + Send> Drop for ParticipantInner<T> {
     fn drop(&mut self) {
-        log::debug!("droping participant");
-        let peers = self.peers.clone();
-        peers.remove(&self.id);
+        // log::debug!("droping participant");
+        // let peers = self.peers.clone();
+        // peers.remove(&self.id);
     }
 }
 

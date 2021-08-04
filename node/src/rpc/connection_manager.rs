@@ -7,8 +7,9 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::{sleep, Duration};
 
-use samizdat_common::quic;
-use samizdat_common::transport::BincodeOverQuic;
+use samizdat_common::{quic, BincodeOverQuic};
+
+const MAX_TRANSFER_SIZE: usize = 2_048;
 
 pub struct Matcher<T> {
     expecting: Arc<Mutex<BTreeMap<SocketAddr, oneshot::Sender<T>>>>,
@@ -111,6 +112,7 @@ impl ConnectionManager {
         Ok(BincodeOverQuic::new(
             new_connection.connection.clone(),
             new_connection.uni_streams,
+            MAX_TRANSFER_SIZE,
         ))
     }
 

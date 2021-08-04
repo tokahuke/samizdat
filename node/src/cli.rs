@@ -6,6 +6,8 @@ pub struct Cli {
     pub db_path: String,
     #[structopt(env, long, default_value = "4510")]
     pub port: u16,
+    #[structopt(env, long, default_value = "64000000")]
+    pub max_content_size: usize,
 }
 
 static mut CLI: Option<Cli> = None;

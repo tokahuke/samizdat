@@ -2,21 +2,23 @@ mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
+use quinn::Endpoint;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
-use tokio::time::{interval, Interval, Duration, MissedTickBehavior};
-use quinn::Endpoint;
+use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
 use samizdat_common::rpc::{Hub, NodeClient, Query, QueryResponse, Resolution, ResolutionStatus};
-use samizdat_common::transport::BincodeOverQuic;
+use samizdat_common::BincodeOverQuic;
 
 use crate::CLI;
 
-use room::{Room};
+use room::{Room, Participant};
+
+const MAX_LENGTH: usize = 2_048;
 
 lazy_static! {
     static ref ROOM: Room<Node> = Room::new();
@@ -43,7 +45,9 @@ impl HubServer {
 
         HubServer(Arc::new(HubServerInner {
             call_semaphore: Semaphore::new(CLI.max_queries_per_node),
-            call_throttle: Mutex::new(interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node))),
+            call_throttle: Mutex::new(interval(Duration::from_secs_f64(
+                1. / CLI.max_query_rate_per_node,
+            ))),
             addr,
         }))
     }
@@ -52,12 +56,17 @@ impl HubServer {
     /// client. This may mitigate DoS.
     async fn throttle<'a, Fut, T>(&'a self, f: Box<dyn 'a + Send + FnOnce(&'a Self) -> Fut>) -> T
     where
-        Fut: 'a + Future<Output=T>
+        Fut: 'a + Future<Output = T>,
     {
         // First, make sure we are not being trolled:
         self.0.call_throttle.lock().await.tick().await;
-        let permit = self.0.call_semaphore.acquire().await.expect("semaphore never closed");
-        
+        let permit = self
+            .0
+            .call_semaphore
+            .acquire()
+            .await
+            .expect("semaphore never closed");
+
         let outcome = f(self).await;
 
         drop(permit);
@@ -68,6 +77,7 @@ impl HubServer {
 #[tarpc::server]
 impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
+        let client_addr = self.0.addr;
         self.throttle(Box::new(|server| async move {
             // Now, prepare resolution request:
             log::debug!("got {:?}", query);
@@ -81,24 +91,35 @@ impl Hub for HubServer {
             let candidates = ROOM
                 .stream_peers()
                 .map(|(peer_id, peer)| {
-                    // if peer_id != client_id {
-                    //     // TODO
-                    // }
-
                     let resolution = resolution.clone();
                     async move {
+                        if peer.addr == client_addr {
+                            return None;
+                        }
+
                         log::debug!("starting resolve for {}", peer_id);
-                        let response = peer.client.resolve(ctx, resolution).await.unwrap();
+                        
+                        let response = match peer.client.resolve(ctx, resolution).await {
+                            Ok(response) => response,
+                            Err(err) => {
+                                log::warn!("error sending asking {} to resolve: {}", peer_id, err);
+                                return None
+                            }
+                        };
+
                         log::debug!("resolve done for {}", peer_id);
-                        (peer.addr, response)
+                        Some((peer.addr, response))
                     }
                 })
                 .buffer_unordered(CLI.max_resolutions_per_query)
-                .filter_map(|(addr, response)| async move { if let ResolutionStatus::Found = response.status {
-                    Some(addr)
-                } else {
-                    None
-                }})
+                .filter_map(|outcome| async move { outcome })
+                .filter_map(|(addr, response)| async move {
+                    if let ResolutionStatus::Found = response.status {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                })
                 .take(CLI.max_candidates)
                 .collect::<Vec<_>>()
                 .await;
@@ -106,7 +127,8 @@ impl Hub for HubServer {
             log::debug!("query done");
 
             QueryResponse { candidates }
-        })).await
+        }))
+        .await
     }
 }
 
@@ -130,7 +152,8 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 
             log::info!("Incoming connection from {}", client_addr);
 
-            let transport = BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams);
+            let transport =
+                BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
 
             // Set up server:
             let server = HubServer::new(client_addr);
@@ -169,15 +192,18 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 
             log::info!("Incoming connection from {}", client_addr);
 
-            let transport = BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams);
+            let transport =
+                BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
 
             // Set up server:
-            let client = NodeClient::new(tarpc::client::Config::default(), transport)
-            .spawn();
+            let client = NodeClient::new(tarpc::client::Config::default(), transport).spawn();
 
             log::info!("Connection from {} accepted", client_addr);
 
-            ROOM.insert(Node { client, addr: client_addr });
+            ROOM.insert(Node {
+                client,
+                addr: client_addr,
+            });
         })
         // Max number of channels.
         .await;

@@ -1,3 +1,4 @@
+use serde_derive::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_224};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
@@ -6,7 +7,7 @@ use std::str::FromStr;
 
 use crate::ContentRiddle;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 28]);
 
 impl FromStr for Hash {

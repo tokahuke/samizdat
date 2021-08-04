@@ -1,8 +1,8 @@
-use quinn::{ClientConfig, ServerConfig, Endpoint, Incoming, NewConnection};
-use rustls::{ServerCertVerified};
+use quinn::{ClientConfig, Endpoint, Incoming, NewConnection, ServerConfig};
+use rustls::ServerCertVerified;
 use std::fs;
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 // Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
 struct SkipCertificationVerification;
@@ -23,7 +23,9 @@ pub fn insecure() -> ClientConfig {
     let mut cfg = quinn::ClientConfigBuilder::default().build();
 
     // Allow idle connections:log
-    std::sync::Arc::get_mut(&mut cfg.transport).unwrap().keep_alive_interval(Some(std::time::Duration::from_millis(5_000)));
+    std::sync::Arc::get_mut(&mut cfg.transport)
+        .unwrap()
+        .keep_alive_interval(Some(std::time::Duration::from_millis(5_000)));
 
     // Get a mutable reference to the 'crypto' config in the 'client config'.
     let tls_cfg: &mut rustls::ClientConfig = std::sync::Arc::get_mut(&mut cfg.crypto).unwrap();
@@ -76,7 +78,11 @@ pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
     endpoint_builder.bind(&bind_addr).expect("failed to bind")
 }
 
-pub async fn connect(endpoint: &Endpoint, remote_addr: &SocketAddr, server_name: &str) -> Result<NewConnection, crate::Error> {
+pub async fn connect(
+    endpoint: &Endpoint,
+    remote_addr: &SocketAddr,
+    server_name: &str,
+) -> Result<NewConnection, crate::Error> {
     Ok(endpoint
         .connect(&remote_addr, server_name)
         .expect("failed to start connecting")

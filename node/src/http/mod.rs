@@ -36,15 +36,16 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and(warp::get())
         .map(|hash: String| async move {
             // Try get from local:
-            let Hash(hash) = Hash::from_str(&hash)?;
+            let hash = Hash::from_str(&hash)?;
             let serialized = db().get_cf(Table::Content.get(), &hash)?;
 
-            // Else, fallback to get from peers:
-            let serialized = if let Some(serialized) = serialized {
-                Some(serialized)
-            } else {
-                hub().query(Hash(hash)).await?
-            };
+            // // Else, fallback to get from peers:
+            // let serialized = if let Some(serialized) = serialized {
+            //     Some(serialized)
+            // } else {
+            //     hub().query(Hash(hash)).await?
+            // };
+            let serialized = hub().query(hash).await?;
 
             // Respond with found or not found.
             if let Some(serialized) = serialized {

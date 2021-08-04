@@ -7,7 +7,7 @@ pub struct Cli {
     /// Maximum number of simultaneous connections.
     #[structopt(env, long, default_value = "1024")]
     pub max_connections: usize,
-    /// Maximum number of _simultaneous_ resolutions per query. 
+    /// Maximum number of _simultaneous_ resolutions per query.
     #[structopt(env, long, default_value = "12")]
     pub max_resolutions_per_query: usize,
     /// The maximum number of _simultaneous_ queries a node can make.

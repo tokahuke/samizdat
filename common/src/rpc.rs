@@ -1,6 +1,6 @@
 use serde_derive::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use crate::{ContentRiddle, LocationRiddle};
 
@@ -35,8 +35,12 @@ pub struct ResolutionResponse {
 }
 
 impl ResolutionResponse {
-    pub const FOUND: ResolutionResponse = ResolutionResponse { status: ResolutionStatus::Found };
-    pub const NOT_FOUND: ResolutionResponse = ResolutionResponse { status: ResolutionStatus::NotFound };
+    pub const FOUND: ResolutionResponse = ResolutionResponse {
+        status: ResolutionStatus::Found,
+    };
+    pub const NOT_FOUND: ResolutionResponse = ResolutionResponse {
+        status: ResolutionStatus::NotFound,
+    };
 }
 
 #[derive(Debug, Serialize, Deserialize)]

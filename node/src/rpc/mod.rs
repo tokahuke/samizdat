@@ -1,4 +1,5 @@
 mod connection_manager;
+mod file_transfer;
 
 use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
@@ -52,7 +53,20 @@ impl Node for NodeServer {
 
                 log::info!("found peer at {}", peer_addr);
 
-                let new_connection = self.connection_manager.punch_hole_to(peer_addr, DropMode::DropIncoming).await;
+                tokio::spawn(async move {
+                    let new_connection = self
+                        .connection_manager
+                        .punch_hole_to(peer_addr, DropMode::DropIncoming)
+                        .await
+                        .expect("failed to punch hole");
+                    let content = db()
+                        .get_cf(Table::Content.get(), hash)
+                        .expect("db error")
+                        .expect("content exists");
+                    file_transfer::send(&new_connection.connection, hash, &content)
+                        .await
+                        .expect("failed to send file")
+                });
 
                 return ResolutionResponse::FOUND;
             }
@@ -75,26 +89,26 @@ pub struct HubConnection {
 
 impl HubConnection {
     pub async fn connect(
-        local_addr: impl Into<SocketAddr>,
-        remote_addr: impl Into<SocketAddr>,
+        direct_addr: impl Into<SocketAddr>,
+        reverse_addr: impl Into<SocketAddr>,
     ) -> Result<HubConnection, crate::Error> {
         // Define relevant addresses:
-        let local_addr = local_addr.into();
-        let remote_addr = remote_addr.into();
+        let direct_addr = direct_addr.into();
+        let reverse_addr = reverse_addr.into();
 
         // Connect and create connection manager:
-        let (endpoint, incoming) = quic::new_default(local_addr);
+        let (endpoint, incoming) = quic::new_default(([0, 0, 0, 0], 0).into());
         let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
 
         // Create transport for client and create client:
         let transport = connection_manager
-            .transport(&remote_addr, "localhost")
+            .transport(&direct_addr, "localhost")
             .await?;
         let client = HubClient::new(tarpc::client::Config::default(), transport).spawn();
 
         // Create transport for server and spawn server:
         let transport = connection_manager
-            .transport(&remote_addr, "localhost")
+            .transport(&reverse_addr, "localhost")
             .await?;
         let server_task = server::BaseChannel::with_defaults(transport).execute(
             NodeServer {
@@ -113,10 +127,6 @@ impl HubConnection {
     pub async fn query(&self, content_hash: Hash) -> Result<Option<Vec<u8>>, crate::Error> {
         let content_riddle = content_hash.gen_riddle();
         let location_riddle = content_hash.gen_riddle();
-
-        // Need to preemptively do this if a candidate is faster than me.
-        let (sender, receiver) = oneshot::channel();
-        POST_BACK.write().await.insert(content_hash, sender);
 
         let QueryResponse { candidates } = self
             .client
@@ -139,12 +149,14 @@ impl HubConnection {
 
         // Only one candidate: experiment....
         let candidate = candidates[0];
-        let new_connection = self
+        let mut new_connection = self
             .connection_manager
             .punch_hole_to(candidate, DropMode::DropOutgoing)
             .await?;
 
         // TODO: timeout.
-        Ok(Some(receiver.await.unwrap()))
+        Ok(Some(
+            file_transfer::recv(&mut new_connection.uni_streams, content_hash).await?,
+        ))
     }
 }

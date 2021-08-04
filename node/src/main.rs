@@ -21,7 +21,7 @@ use db::init_db;
 static mut HUB: Option<rpc::HubConnection> = None;
 
 async fn init_hub() -> Result<(), crate::Error> {
-    let hub = rpc::HubConnection::connect(([127, 0, 0, 1], 0), ([127, 0, 0, 1], 4511)).await?;
+    let hub = rpc::HubConnection::connect(([127, 0, 0, 1], 4511), ([127, 0, 0, 1], 4512)).await?;
 
     unsafe {
         HUB = Some(hub);
