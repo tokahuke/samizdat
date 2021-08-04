@@ -1,15 +1,14 @@
 mod connection_manager;
 mod file_transfer;
 
-use lazy_static::lazy_static;
+use futures::prelude::*;
+use futures::stream;
 use rocksdb::IteratorMode;
-use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 use tarpc::server::{self, Channel};
-use tokio::sync::{oneshot, RwLock};
 
 use samizdat_common::quic;
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
@@ -40,7 +39,7 @@ impl Node for NodeServer {
             };
 
             if resolution.content_riddle.resolves(&hash) {
-                log::info!("found {:?}", hash);
+                log::info!("found hash {}", hash);
                 let peer_addr = match resolution.location_riddle.resolve(&hash) {
                     Some(peer_addr) => peer_addr,
                     None => {
@@ -57,15 +56,11 @@ impl Node for NodeServer {
                     let new_connection = self
                         .connection_manager
                         .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                        .await
-                        .expect("failed to punch hole");
+                        .await?;
                     let content = db()
-                        .get_cf(Table::Content.get(), hash)
-                        .expect("db error")
-                        .expect("content exists");
-                    file_transfer::send(&new_connection.connection, hash, &content)
-                        .await
-                        .expect("failed to send file")
+                        .get_cf(Table::Content.get(), hash)?
+                        .expect("content exists in table because it was found");
+                    file_transfer::send(&new_connection.connection, hash, &content).await
                 });
 
                 return ResolutionResponse::FOUND;
@@ -76,10 +71,6 @@ impl Node for NodeServer {
 
         ResolutionResponse::NOT_FOUND
     }
-}
-
-lazy_static! {
-    static ref POST_BACK: RwLock<BTreeMap<Hash, oneshot::Sender<Vec<u8>>>> = RwLock::default();
 }
 
 pub struct HubConnection {
@@ -143,20 +134,33 @@ impl HubConnection {
 
         if candidates.is_empty() {
             // Forget it!
-            POST_BACK.write().await.remove(&content_hash);
             return Ok(None);
         }
 
-        // Only one candidate: experiment....
-        let candidate = candidates[0];
-        let mut new_connection = self
-            .connection_manager
-            .punch_hole_to(candidate, DropMode::DropOutgoing)
-            .await?;
+        let n_candidates = candidates.len();
+        let new_connection = stream::iter(candidates)
+            .map(|candidate| {
+                let connection_manager = self.connection_manager.clone();
+                Box::pin(async move {
+                    connection_manager
+                        .punch_hole_to(candidate, DropMode::DropOutgoing)
+                        .await
+                        .map_err(|err| {
+                            log::warn!("hole punching with {} failed: {}", candidate, err)
+                        })
+                        .ok()
+                })
+            })
+            .buffer_unordered(n_candidates)
+            .filter_map(|done| Box::pin(async move { done })) // pointless box, compiler!
+            .next()
+            .await;
 
-        // TODO: timeout.
-        Ok(Some(
-            file_transfer::recv(&mut new_connection.uni_streams, content_hash).await?,
-        ))
+        match new_connection {
+            Some(mut new_connection) => Ok(Some(
+                file_transfer::recv(&mut new_connection.uni_streams, content_hash).await?,
+            )),
+            None => Err(crate::Error::AllCandidatesFailed),
+        }
     }
 }

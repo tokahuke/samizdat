@@ -31,8 +31,8 @@ async fn main() -> Result<(), crate::Error> {
     let _ = logger::init_logger();
 
     // Init resources:
-    &*CLI;
-    //&*DB;
+    let _ = &*CLI;
+    //let _ = &*DB;
 
     let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(([127, 0, 0, 1], 4511)));
     let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(([127, 0, 0, 1], 4512)));

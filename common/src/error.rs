@@ -10,8 +10,6 @@ pub enum Error {
     Base64(base64::DecodeError),
     #[fail(display = "db error: {}", _0)]
     Db(rocksdb::Error),
-    #[fail(display = "invalid flatbuffer: {}", _0)]
-    FlatBuffer(::flatbuffers::InvalidFlatbuffer),
     #[fail(display = "io error: {}", _0)]
     Io(io::Error),
     #[fail(display = "bad hash length (should be 28): {}", _0)]
@@ -20,6 +18,8 @@ pub enum Error {
     Bincode(Box<bincode::ErrorKind>),
     #[fail(display = "QUIC connection error: {}", _0)]
     QuicConnectionError(quinn::ConnectionError),
+    #[fail(display = "All candidates failed")]
+    AllCandidatesFailed,
 }
 
 impl warp::reject::Reject for crate::Error {}
@@ -42,11 +42,6 @@ impl From<rocksdb::Error> for Error {
     }
 }
 
-impl From<::flatbuffers::InvalidFlatbuffer> for Error {
-    fn from(e: ::flatbuffers::InvalidFlatbuffer) -> Error {
-        Error::FlatBuffer(e)
-    }
-}
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {

@@ -16,7 +16,7 @@ use samizdat_common::BincodeOverQuic;
 
 use crate::CLI;
 
-use room::{Room, Participant};
+use room::{Room};
 
 const MAX_LENGTH: usize = 2_048;
 
@@ -146,11 +146,11 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                 .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
                 .ok()
         })
-        .then(|new_connection| async move {
+        .map(|new_connection| {
             // Get peer address:
             let client_addr = new_connection.connection.remote_address();
 
-            log::info!("Incoming connection from {}", client_addr);
+            log::debug!("Incoming connection from {}", client_addr);
 
             let transport =
                 BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
@@ -159,7 +159,7 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             let server = HubServer::new(client_addr);
             let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
 
-            log::info!("Connection from {} accepted", client_addr);
+            log::info!("Connection from node (as server) {} accepted", client_addr);
 
             Some(server_task)
         })
@@ -190,17 +190,25 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             // Get peer address:
             let client_addr = new_connection.connection.remote_address();
 
-            log::info!("Incoming connection from {}", client_addr);
+            log::debug!("Incoming connection from {}", client_addr);
 
             let transport =
                 BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
 
-            // Set up server:
-            let client = NodeClient::new(tarpc::client::Config::default(), transport).spawn();
+            // Set up client (remember to drop it when connection is severed):
+            let uninstrumented_client = NodeClient::new(tarpc::client::Config::default(), transport);
+            let client = tarpc::client::NewClient {
+                client: uninstrumented_client.client,
+                dispatch: uninstrumented_client.dispatch.map(move |outcome|  {
+                    ROOM.remove(client_addr);
+                    outcome
+                }),
+            }.spawn();
 
-            log::info!("Connection from {} accepted", client_addr);
 
-            ROOM.insert(Node {
+            log::info!("Connection from node (as client) {} accepted", client_addr);
+
+            ROOM.insert(client_addr, Node {
                 client,
                 addr: client_addr,
             });

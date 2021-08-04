@@ -75,7 +75,7 @@ pub async fn send(connection: &Connection, hash: Hash, content: &[u8]) -> Result
         hash,
         content_size: content.len(),
     };
-    
+
     let serialized_header = bincode::serialize(&header).expect("can serialize");
     send_header
         .write_all(&serialized_header)

@@ -53,12 +53,12 @@ impl ContentRiddle {
         })
         .expect("can always serialize");
 
-        for (confusing, byte) in StreamCipher::new(self.hash.clone()).zip(&mut serialized) {
+        for (confusing, byte) in StreamCipher::new(self.hash).zip(&mut serialized) {
             *byte ^= confusing;
         }
 
         LocationRiddle {
-            rand: self.rand.clone(),
+            rand: self.rand,
             masked: serialized,
         }
     }

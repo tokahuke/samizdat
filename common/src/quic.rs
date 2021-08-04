@@ -45,7 +45,7 @@ pub fn server_config() -> ServerConfig {
 
     let mut server_config = quinn::ServerConfigBuilder::default();
     server_config
-        .certificate(quinn::CertificateChain::from_certs(vec![cert.clone()]), key)
+        .certificate(quinn::CertificateChain::from_certs(vec![cert]), key)
         .unwrap();
 
     server_config.build()
@@ -84,7 +84,7 @@ pub async fn connect(
     server_name: &str,
 ) -> Result<NewConnection, crate::Error> {
     Ok(endpoint
-        .connect(&remote_addr, server_name)
+        .connect(remote_addr, server_name)
         .expect("failed to start connecting")
         .await?)
 }

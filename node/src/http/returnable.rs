@@ -101,6 +101,7 @@ impl Returnable for crate::Error {
     fn status_code(&self) -> http::StatusCode {
         match self {
             crate::Error::Base64(_) => http::StatusCode::BAD_REQUEST,
+            crate::Error::AllCandidatesFailed => http::StatusCode::BAD_GATEWAY,
             _ => http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
