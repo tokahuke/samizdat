@@ -1,10 +1,9 @@
 use chashmap::CHashMap;
 use futures::channel::mpsc;
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Room<T> {

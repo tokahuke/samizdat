@@ -16,7 +16,7 @@ use samizdat_common::BincodeOverQuic;
 
 use crate::CLI;
 
-use room::{Room};
+use room::Room;
 
 const MAX_LENGTH: usize = 2_048;
 
@@ -76,6 +76,10 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
+    async fn reverse_port(self, _: context::Context) -> u16 {
+        CLI.reverse_port
+    }
+
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(Box::new(|server| async move {
@@ -98,12 +102,12 @@ impl Hub for HubServer {
                         }
 
                         log::debug!("starting resolve for {}", peer_id);
-                        
+
                         let response = match peer.client.resolve(ctx, resolution).await {
                             Ok(response) => response,
                             Err(err) => {
                                 log::warn!("error sending asking {} to resolve: {}", peer_id, err);
-                                return None
+                                return None;
                             }
                         };
 
@@ -152,8 +156,11 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 
             log::debug!("Incoming connection from {}", client_addr);
 
-            let transport =
-                BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
+            let transport = BincodeOverQuic::new(
+                new_connection.connection,
+                new_connection.uni_streams,
+                MAX_LENGTH,
+            );
 
             // Set up server:
             let server = HubServer::new(client_addr);
@@ -192,26 +199,33 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 
             log::debug!("Incoming connection from {}", client_addr);
 
-            let transport =
-                BincodeOverQuic::new(new_connection.connection, new_connection.uni_streams, MAX_LENGTH);
+            let transport = BincodeOverQuic::new(
+                new_connection.connection,
+                new_connection.uni_streams,
+                MAX_LENGTH,
+            );
 
             // Set up client (remember to drop it when connection is severed):
-            let uninstrumented_client = NodeClient::new(tarpc::client::Config::default(), transport);
+            let uninstrumented_client =
+                NodeClient::new(tarpc::client::Config::default(), transport);
             let client = tarpc::client::NewClient {
                 client: uninstrumented_client.client,
-                dispatch: uninstrumented_client.dispatch.map(move |outcome|  {
+                dispatch: uninstrumented_client.dispatch.map(move |outcome| {
                     ROOM.remove(client_addr);
                     outcome
                 }),
-            }.spawn();
-
+            }
+            .spawn();
 
             log::info!("Connection from node (as client) {} accepted", client_addr);
 
-            ROOM.insert(client_addr, Node {
-                client,
-                addr: client_addr,
-            });
+            ROOM.insert(
+                client_addr,
+                Node {
+                    client,
+                    addr: client_addr,
+                },
+            );
         })
         // Max number of channels.
         .await;
