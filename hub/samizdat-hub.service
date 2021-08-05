@@ -1,0 +1,14 @@
+[Unit]
+Description=Samizdat Hub
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+ExecStart=/usr/local/bin/samizdat-hub
+
+[Install]
+WantedBy=multi-user.target
