@@ -10,6 +10,10 @@ This is only a proof of concept implementation. It might work in a small scenari
 
 And, as always, be aware that, since this is a nascent project, vulnerabilities might exist that nobody has any idea of yet. By now, tread carefully.
 
+## Project goals
+
+1. 
+
 ## Quick setup
 
 
