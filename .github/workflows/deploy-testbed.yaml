@@ -18,6 +18,9 @@ jobs:
         with:
           toolchain: stable
           profile: minimal
+
+      - name: Running cache
+        uses: Swatinem/rust-cache@v1
       
       - name: Running build
         run: cargo build --all --release
