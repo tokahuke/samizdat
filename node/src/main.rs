@@ -9,6 +9,7 @@ pub use samizdat_common::Error;
 pub use cli::cli;
 pub use db::{db, Table};
 
+use futures::prelude::*;
 use std::panic;
 use tokio::task;
 use warp::Filter;
@@ -17,21 +18,27 @@ use samizdat_common::logger;
 
 use cli::init_cli;
 use db::init_db;
+use rpc::Hubs;
 
-static mut HUB: Option<rpc::HubConnection> = None;
+static mut HUBS: Option<Hubs> = None;
 
-async fn init_hub() -> Result<(), crate::Error> {
-    let hub = rpc::HubConnection::connect(([127, 0, 0, 1], 4511), ([127, 0, 0, 1], 4512)).await?;
+async fn init_hubs() -> Result<(), crate::Error> {
+    let resolved = futures::stream::iter(&cli().hubs)
+        .map(cli::AddrToResolve::resolve)
+        .buffer_unordered(cli().hubs.len())
+        .try_collect::<Vec<_>>()
+        .await?;
+    let hubs = Hubs::init(resolved).await?;
 
     unsafe {
-        HUB = Some(hub);
+        HUBS = Some(hubs);
     }
 
     Ok(())
 }
 
-pub fn hub<'a>() -> &'a rpc::HubConnection {
-    unsafe { HUB.as_ref().expect("hub connection not initialized") }
+pub fn hubs<'a>() -> &'a Hubs {
+    unsafe { HUBS.as_ref().expect("hubs not initialized") }
 }
 
 /// Utility for propagating panics through tasks.
@@ -51,7 +58,7 @@ async fn main() -> Result<(), crate::Error> {
     // Init resources:
     init_cli()?;
     init_db()?;
-    init_hub().await?;
+    init_hubs().await?;
 
     // Describe server:
     let server = warp::filters::addr::remote()
@@ -78,10 +85,8 @@ async fn main() -> Result<(), crate::Error> {
 
     // Run server:
     let http_server = tokio::spawn(warp::serve(server).run(([0, 0, 0, 0], cli().port)));
-    // let rpc_server = tokio::spawn(crate::rpc::run(([0, 0, 0, 0], 4511)));
 
     maybe_resume_panic(http_server.await);
-    // maybe_resume_panic(rpc_server.await);
 
     // Exit:
     Ok(())

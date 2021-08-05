@@ -10,6 +10,23 @@ This is only a proof of concept implementation. It might work in a small scenari
 
 And, as always, be aware that, since this is a nascent project, vulnerabilities might exist that nobody has any idea of yet. By now, tread carefully.
 
+## Quick setup
+
+
+## Open issues
+
+* Sending large files. By now, an arbitrary 64MB limit imposed. Use chunks and Merkle Trees, like torrent.
+* Scalability:
+    1. Hubs broadcast queries.
+    2. Clients are forced to do an `O(n)` search, instead of the typical `O(lg n)`. Blessing in disguise?
+* Identities: how to know it was Goldstein who really wrote The Book?
+* Incentives: how to make it profitable for people to run large nodes and hubs?
+* Anti-censorship: it is hard for hubs to censor, but malicious nodes run by _them_ can exploit the system to
+    1. Query if you have a copy of The Book.
+    2. Serve you a copy of The Book and then send you to room 101.
+* UX: do you have a freakin' mobile app?
+
+
 ## Licensing
 
 Copyright 2021 Pedro B. Arruda

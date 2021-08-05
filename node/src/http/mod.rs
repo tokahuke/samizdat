@@ -10,7 +10,7 @@ use samizdat_common::Hash;
 use crate::db::Table;
 //use crate::flatbuffers;
 use crate::object::Object;
-use crate::{db, hub};
+use crate::{db, hubs};
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
@@ -44,7 +44,7 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
                 log::info!("found local hash {}", hash);
                 Some(serialized)
             } else {
-                hub().query(hash).await?
+                hubs().query(hash).await
             };
 
             // Respond with found or not found.

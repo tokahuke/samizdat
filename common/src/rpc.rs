@@ -19,6 +19,8 @@ pub struct QueryResponse {
 
 #[tarpc::service]
 pub trait Hub {
+    /// Returns the port for the node to connect as server.
+    async fn reverse_port() -> u16;
     /// Returns a greeting for name.
     async fn query(query: Query) -> QueryResponse;
 }

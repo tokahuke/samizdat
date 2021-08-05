@@ -1,5 +1,8 @@
 mod connection_manager;
 mod file_transfer;
+mod reconnect;
+
+pub use reconnect::Reconnect;
 
 use futures::prelude::*;
 use futures::stream;
@@ -7,8 +10,11 @@ use rocksdb::IteratorMode;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tarpc::client::NewClient;
 use tarpc::context;
 use tarpc::server::{self, Channel};
+use tokio::sync::oneshot;
+use tokio::time::Duration;
 
 use samizdat_common::quic;
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
@@ -73,29 +79,39 @@ impl Node for NodeServer {
     }
 }
 
-pub struct HubConnection {
+pub struct HubConnectionInner {
     client: HubClient,
     connection_manager: Arc<ConnectionManager>,
 }
 
-impl HubConnection {
-    pub async fn connect(
-        direct_addr: impl Into<SocketAddr>,
-        reverse_addr: impl Into<SocketAddr>,
-    ) -> Result<HubConnection, crate::Error> {
-        // Define relevant addresses:
-        let direct_addr = direct_addr.into();
-        let reverse_addr = reverse_addr.into();
-
-        // Connect and create connection manager:
-        let (endpoint, incoming) = quic::new_default(([0, 0, 0, 0], 0).into());
-        let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
+impl HubConnectionInner {
+    async fn connect_direct(
+        direct_addr: SocketAddr,
+        connection_manager: Arc<ConnectionManager>,
+    ) -> Result<(HubClient, oneshot::Receiver<()>), crate::Error> {
+        let (client_reset_trigger, client_reset_recv) = oneshot::channel();
 
         // Create transport for client and create client:
         let transport = connection_manager
             .transport(&direct_addr, "localhost")
             .await?;
-        let client = HubClient::new(tarpc::client::Config::default(), transport).spawn();
+        let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
+        let client = NewClient {
+            client: uninstrumented_client.client,
+            dispatch: uninstrumented_client.dispatch.inspect(|_| {
+                client_reset_trigger.send(()).ok();
+            }),
+        }
+        .spawn();
+
+        Ok((client, client_reset_recv))
+    }
+
+    async fn connect_reverse(
+        reverse_addr: SocketAddr,
+        connection_manager: Arc<ConnectionManager>,
+    ) -> Result<oneshot::Receiver<()>, crate::Error> {
+        let (server_reset_trigger, server_reset_recv) = oneshot::channel();
 
         // Create transport for server and spawn server:
         let transport = connection_manager
@@ -107,11 +123,62 @@ impl HubConnection {
             }
             .serve(),
         );
-        tokio::spawn(server_task);
+        tokio::spawn(async move {
+            server_task.await;
+            server_reset_trigger.send(()).ok();
+        });
 
+        Ok(server_reset_recv)
+    }
+
+    async fn connect(
+        direct_addr: SocketAddr,
+        reverse_addr: SocketAddr,
+    ) -> Result<(HubConnectionInner, impl Future<Output = ()>), crate::Error> {
+        // Connect and create connection manager:
+        let (endpoint, incoming) = quic::new_default(([0, 0, 0, 0], 0).into());
+        let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
+
+        let (client, client_reset_recv) =
+            Self::connect_direct(direct_addr, connection_manager.clone()).await?;
+        let server_reset_recv =
+            Self::connect_reverse(reverse_addr, connection_manager.clone()).await?;
+
+        let reset_trigger = future::select(server_reset_recv, client_reset_recv).map(|_| ());
+
+        Ok((
+            HubConnectionInner {
+                client,
+                connection_manager,
+            },
+            reset_trigger,
+        ))
+    }
+}
+
+pub struct HubConnection {
+    name: &'static str,
+    inner: Reconnect<HubConnectionInner>,
+}
+
+impl HubConnection {
+    pub async fn connect(
+        name: &'static str,
+        direct_addr: SocketAddr,
+        reverse_addr: SocketAddr,
+    ) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
-            client,
-            connection_manager,
+            name,
+            inner: Reconnect::init(
+                move || HubConnectionInner::connect(direct_addr, reverse_addr),
+                || {
+                    reconnect::exponential_backoff(
+                        Duration::from_millis(100),
+                        Duration::from_secs(100),
+                    )
+                },
+            )
+            .await?,
         })
     }
 
@@ -119,7 +186,9 @@ impl HubConnection {
         let content_riddle = content_hash.gen_riddle();
         let location_riddle = content_hash.gen_riddle();
 
-        let QueryResponse { candidates } = self
+        let inner = self.inner.get().await;
+
+        let QueryResponse { candidates } = inner
             .client
             .query(
                 context::current(),
@@ -140,7 +209,7 @@ impl HubConnection {
         let n_candidates = candidates.len();
         let new_connection = stream::iter(candidates)
             .map(|candidate| {
-                let connection_manager = self.connection_manager.clone();
+                let connection_manager = inner.connection_manager.clone();
                 Box::pin(async move {
                     connection_manager
                         .punch_hole_to(candidate, DropMode::DropOutgoing)
@@ -162,5 +231,49 @@ impl HubConnection {
             )),
             None => Err(crate::Error::AllCandidatesFailed),
         }
+    }
+}
+
+pub struct Hubs {
+    hubs: Vec<Arc<HubConnection>>,
+}
+
+impl Hubs {
+    pub async fn init<I>(addrs: I) -> Result<Hubs, crate::Error>
+    where
+        I: IntoIterator<Item = (&'static str, SocketAddr)>,
+    {
+        let hubs = stream::iter(addrs)
+            .map(|(name, addr)| {
+                let direct_addr = addr;
+                let mut reverse_addr = addr;
+                reverse_addr.set_port(reverse_addr.port() + 1);
+
+                HubConnection::connect(name, direct_addr, reverse_addr)
+            })
+            .buffer_unordered(10) // 'cause 10!
+            .map(|outcome| outcome.map(Arc::new))
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Hubs { hubs })
+    }
+
+    pub async fn query(&self, content_hash: Hash) -> Option<Vec<u8>> {
+        let mut results = stream::iter(self.hubs.iter().cloned())
+            .map(|hub| async move { (hub.name, hub.query(content_hash).await) })
+            .buffer_unordered(self.hubs.len());
+
+        while let Some((hub_name, result)) = results.next().await {
+            match result {
+                Ok(Some(found)) => return Some(found),
+                Ok(None) => {}
+                Err(err) => {
+                    log::error!("Error while querying {}: {}", hub_name, err)
+                }
+            }
+        }
+
+        None
     }
 }
