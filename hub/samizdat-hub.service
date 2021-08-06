@@ -8,7 +8,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
-ExecStart=/usr/local/bin/samizdat-hub --db-data /var/samizdat/hub/db
+ExecStart=/usr/local/bin/samizdat-hub --db-path /var/samizdat/hub/db
 
 [Install]
 WantedBy=multi-user.target
