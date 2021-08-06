@@ -4,7 +4,7 @@ use std::net::IpAddr;
 #[derive(StructOpt)]
 pub struct Cli {
     /// The IP to which to bind.
-    #[structopt(env, long, default_value = "0.0.0.0")]
+    #[structopt(env, long, default_value = "::")]
     pub address: IpAddr,
     /// The port for nodes to connect as clients.
     #[structopt(env, long, default_value = "4511")]

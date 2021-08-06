@@ -136,7 +136,7 @@ impl HubConnectionInner {
         reverse_addr: SocketAddr,
     ) -> Result<(HubConnectionInner, impl Future<Output = ()>), crate::Error> {
         // Connect and create connection manager:
-        let (endpoint, incoming) = quic::new_default(([0, 0, 0, 0], 0).into());
+        let (endpoint, incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
         let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
 
         let (client, client_reset_recv) =
