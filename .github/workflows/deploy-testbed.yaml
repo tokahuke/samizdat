@@ -10,42 +10,42 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository code
-        uses: actions/checkout@v2
-      
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
+    - name: Check out repository code
+      uses: actions/checkout@v2
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
 
-      - name: Running cache
-        uses: Swatinem/rust-cache@v1
-      
-      - name: Running build
-        run: cargo build --all --release
+    - name: Running cache
+      uses: Swatinem/rust-cache@v1
+    
+    # - name: Running build
+    #   run: cargo build --all --release
 
-      - name: Install SSH Key
-        uses: shimataro/ssh-key-action@v2
-        with:
-          key: ${{ secrets.SSH_KEY }} 
+    - name: Install SSH Key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSH_KEY }} 
 
-      - name: Get known hosts
-        run: ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+    - name: Get known hosts
+      run: ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Upload with rsync
+      run: |
+        rsync -avz \
+          ./target/release/samizdat-hub \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
+        rsync -avz \
+          ./hub/samizdat-hub.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service
       
-      - name: Upload with rsync
-        run: |
-          rsync -avz \
-            ./target/release/samizdat-hub \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
-          rsync -avz \
-            ./hub/samizdat-hub.service \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service
-        
-      - name: Restart hub
-        run: |
-          ssh {{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
-            "systemd disable --now samizdat-hub && systemd enable --now samizdat-hub"
-      
-      - name: Done
-        run: echo Done
+    - name: Restart hub
+      run: |
+        ssh {{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
+          "systemd disable --now samizdat-hub && systemd enable --now samizdat-hub"
+    
+    - name: Done
+      run: echo Done
