@@ -141,7 +141,9 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
     endpoint_builder.listen(samizdat_common::quic::server_config());
     endpoint_builder.default_client_config(samizdat_common::quic::insecure());
 
-    let (_, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+    let (endpoint, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+
+    log::info!("Direct server started at {}", endpoint.local_addr()?);
 
     incoming
         .filter_map(|connecting| async move {
@@ -184,7 +186,9 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
     endpoint_builder.listen(samizdat_common::quic::server_config());
     endpoint_builder.default_client_config(samizdat_common::quic::insecure());
 
-    let (_, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+    let (endpoint, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+
+    log::info!("Reverse server started at {}", endpoint.local_addr()?);
 
     incoming
         .filter_map(|connecting| async move {

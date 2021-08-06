@@ -12,7 +12,21 @@ And, as always, be aware that, since this is a nascent project, vulnerabilities 
 
 ## Project goals
 
-1. 
+Samizdat (from a Russian term meaning "self-publishing") aims to provide a decentralized internet application that enables one to do the following:
+
+1. Be able to allow one to serve a public, static site without the need for a hosting service. The content is to be hosted in the person's own device or in caches from people who visit the site.
+
+2. Provide a human-friendly identifier for resources contained in this network, i.e., a URL scheme. This URL is to be content-addressed, not location-addressed.
+
+3. Oblivious hosting: only the device serving the content and the device asking for the content can extract any information about the content or its metadata.
+
+4. Do all this _easily_ and _conveniently_. Graphical interfaces and 
+
+We are not quite there yet...
+
+## Architecture
+
+The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The nodes are the consumers and producers of content; all content transmission is handled by the nodes. The hubs are used for signaling and NAT traversal. One node can connect to many hubs simultaneously so that content can diffuse through different tribes with time.
 
 ## Quick setup
 
