@@ -22,8 +22,8 @@ jobs:
     - name: Running cache
       uses: Swatinem/rust-cache@v1
     
-    # - name: Running build
-    #   run: cargo build --all --release
+    - name: Running build
+      run: cargo build --all --release
 
     - name: Install SSH Key
       uses: shimataro/ssh-key-action@v2
