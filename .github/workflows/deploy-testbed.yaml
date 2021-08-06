@@ -42,8 +42,8 @@ jobs:
       
     - name: Restart hub
       run: |
-        ssh {{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
-          "systemd disable --now samizdat-hub && systemd enable --now samizdat-hub"
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
+          "systemctl disable --now samizdat-hub && systemctl enable --now samizdat-hub"
     
     - name: Done
       run: echo Done
