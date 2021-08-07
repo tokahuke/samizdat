@@ -14,7 +14,7 @@ pub fn init_db() -> Result<(), crate::Error> {
     let db = rocksdb::DB::open_cf(
         &db_opts,
         &cli().db_path,
-        &vec![Table::Hashes, Table::Content]
+        &vec![Table::Roots, Table::Chunks, Table::MerkleTrees]
             .into_iter()
             .map(Table::name)
             .collect::<Vec<_>>(),
@@ -30,21 +30,21 @@ pub fn init_db() -> Result<(), crate::Error> {
 #[derive(Debug, Clone, Copy)]
 pub enum Table {
     /// The list of all inscribed hashes.
-    Hashes,
-    /// The map of content for hashes.
-    Content,
+    Roots,
+    /// The map of all (hashes, chunk_number) to chunk data.
+    MerkleTrees,
+    /// The table of all chunks, indexed by chunk hash.
+    Chunks,
 }
 
 impl Table {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Hashes => "hashes",
-            Self::Content => "content",
-        }
+    pub fn name(self) -> String {
+        format!("{:?}", self)
     }
 
     pub fn get<'a>(self) -> &'a rocksdb::ColumnFamily {
         let db = db();
-        db.cf_handle(self.name()).expect("column family exists")
+        db.cf_handle(format!("{:?}", self))
+            .expect("column family exists")
     }
 }

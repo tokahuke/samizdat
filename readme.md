@@ -20,7 +20,7 @@ Samizdat (from a Russian term meaning "self-publishing") aims to provide a decen
 
 3. Oblivious hosting: only the device serving the content and the device asking for the content can extract any information about the content or its metadata.
 
-4. Do all this _easily_ and _conveniently_. Graphical interfaces and 
+4. Do all this _easily_ and _conveniently_. Graphical interfaces, mobile apps and amenities are welcome.
 
 We are not quite there yet...
 
@@ -30,6 +30,35 @@ The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The
 
 ## Quick setup
 
+### Linux
+
+If you are interested in running this in your computer, you will need to build it from source, by now (convenient scripts are "todo"):
+```
+cargo build --release --all
+sudo cp target/release/samizdat-node /usr/local/bin
+```
+Then, you can run it (on a `screen`, for example; systemd service follows) simply with
+```
+samizdat-node
+```
+This will spin up a server in `localhost:4510`, to where you can upload content using
+```
+curl -X POST http://localhost:4510/_content \
+     -H "Content-Type: <your content type>" \
+     --data-binary <your file>
+```
+Then, you can view it in your preferred browser in
+```
+http://localhost:4510/_hash/<the hash you received from CURL>
+```
+
+### MacOS
+
+Should be similar to the above, no changes needed (although I have not tested).
+
+### Windows
+
+Some translation needed, but the compilation will work and produce a working binary. 
 
 ## Open issues
 

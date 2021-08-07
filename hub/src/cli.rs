@@ -1,5 +1,5 @@
-use structopt::StructOpt;
 use std::net::IpAddr;
+use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Cli {

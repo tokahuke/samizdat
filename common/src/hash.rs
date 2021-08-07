@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use crate::ContentRiddle;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 28]);
 
 impl FromStr for Hash {
@@ -61,15 +61,123 @@ impl Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
     }
 
-    pub fn rehash(&self, rand: [u8; 28]) -> Hash {
-        Hash::build([rand, self.0].concat())
+    pub fn rand() -> Hash {
+        let mut rand = [0; 28];
+        getrandom::getrandom(&mut rand).expect("getrandom failed");
+
+        Hash(rand)
+    }
+
+    pub fn rehash(&self, rand: &Hash) -> Hash {
+        Hash::build([rand.0, self.0].concat())
     }
 
     pub fn gen_riddle(&self) -> ContentRiddle {
-        let mut rand = [0; 28];
-        getrandom::getrandom(&mut rand).expect("getrandom failed");
-        let hash = self.rehash(rand);
+        let rand = Hash::rand();
+        let hash = self.rehash(&rand);
 
-        ContentRiddle { rand, hash: hash.0 }
+        ContentRiddle { rand, hash: hash }
+    }
+
+    pub fn is_proved_by(&self, root: &Hash, proof: &InclusionProof) -> bool {
+        let mut mask = 1;
+        let mut current = *self;
+
+        for hash in proof.path.iter() {
+            // The proof completes the left side if 1, else, right.
+            current = if proof.index & mask != 0 {
+                hash.rehash(&current)
+            } else {
+                current.rehash(hash)
+            };
+
+            if hash != &current {
+                return false;
+            }
+
+            mask <<= 1;
+        }
+
+        &current == root
+    }
+}
+
+pub struct MerkleTree {
+    tree: Vec<Vec<Hash>>,
+}
+
+impl From<Vec<Hash>> for MerkleTree {
+    fn from(vec: Vec<Hash>) -> MerkleTree {
+        fn iterate_level(slice: &[Hash]) -> Vec<Hash> {
+            slice
+                .chunks(2)
+                .map(|chunk| match chunk {
+                    [single] => single.rehash(&Hash::default()),
+                    [left, right] => left.rehash(&right),
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>()
+        }
+
+        MerkleTree {
+            tree: std::iter::successors(Some(vec), |vec| {
+                if vec.len() > 1 {
+                    Some(iterate_level(&*vec))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        }
+    }
+}
+
+impl MerkleTree {
+    pub fn root(&self) -> Hash {
+        self.tree[0][0]
+    }
+
+    pub fn len(&self) -> usize {
+        self.tree.last().expect("not empty").len()
+    }
+
+    pub fn hashes(&self) -> &[Hash] {
+        self.tree.last().expect("not empty")
+    }
+
+    /// Returns `None` if `index` out of range.
+    pub fn proof_for(&self, index: usize) -> Option<InclusionProof> {
+        if index > self.len() {
+            return None;
+        }
+
+        let mut level_index = index;
+        
+        let path = self.tree.iter().map(|level| {
+            let sibling_index = level_index ^ 1;
+            level_index >>= 1;
+
+            if let Some(sibling) = level.get(sibling_index) {
+                *sibling
+            } else {
+                // Incomplete level. Filling up.
+                Hash::default()
+            }
+        }).collect::<Box<[_]>>();
+
+
+        Some(InclusionProof { path, index })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InclusionProof {
+    pub path: Box<[Hash]>,
+    pub index: usize,
+}
+
+impl InclusionProof {
+    pub fn proves(&self, root: &Hash, hash: &Hash) -> bool {
+        hash.is_proved_by(root, self)
     }
 }

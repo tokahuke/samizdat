@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use crate::Hash;
 
 struct StreamCipher {
-    current_hash: [u8; 28],
+    current_hash: Hash,
     idx: usize,
 }
 
@@ -14,7 +14,7 @@ impl Iterator for StreamCipher {
         let ret = if self.idx < 28 {
             self.current_hash[self.idx]
         } else {
-            self.current_hash = Hash::build(&self.current_hash).0;
+            self.current_hash = Hash::build(&self.current_hash);
             self.idx = 0;
             self.current_hash[0]
         };
@@ -24,7 +24,7 @@ impl Iterator for StreamCipher {
 }
 
 impl StreamCipher {
-    fn new(hash: [u8; 28]) -> StreamCipher {
+    fn new(hash: Hash) -> StreamCipher {
         StreamCipher {
             current_hash: hash,
             idx: 0,
@@ -40,8 +40,8 @@ struct AddressMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentRiddle {
-    pub rand: [u8; 28],
-    pub hash: [u8; 28],
+    pub rand: Hash,
+    pub hash: Hash,
 }
 
 impl ContentRiddle {
@@ -64,22 +64,22 @@ impl ContentRiddle {
     }
 
     pub fn resolves(&self, hash: &Hash) -> bool {
-        hash.rehash(self.rand).0 == self.hash
+        hash.rehash(&self.rand) == self.hash
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LocationRiddle {
-    pub rand: [u8; 28],
+    pub rand: Hash,
     pub masked: Vec<u8>,
 }
 
 impl LocationRiddle {
     pub fn resolve(&self, hash: &Hash) -> Option<SocketAddr> {
-        let key = hash.rehash(self.rand);
+        let key = hash.rehash(&self.rand);
         let mut serialized = self.masked.clone();
 
-        for (confusing, byte) in StreamCipher::new(key.0).zip(&mut serialized) {
+        for (confusing, byte) in StreamCipher::new(key).zip(&mut serialized) {
             *byte ^= confusing;
         }
 

@@ -8,6 +8,6 @@ mod riddles;
 mod transport;
 
 pub use error::Error;
-pub use hash::Hash;
+pub use hash::{Hash, MerkleTree, InclusionProof};
 pub use riddles::{ContentRiddle, LocationRiddle};
 pub use transport::BincodeOverQuic;
