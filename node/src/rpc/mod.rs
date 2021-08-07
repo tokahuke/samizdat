@@ -6,8 +6,6 @@ pub use reconnect::Reconnect;
 
 use futures::prelude::*;
 use futures::stream;
-use rocksdb::IteratorMode;
-use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::client::NewClient;
@@ -20,7 +18,7 @@ use samizdat_common::quic;
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
 use samizdat_common::Hash;
 
-use crate::{db, Table};
+use crate::cache::ObjectRef;
 
 use connection_manager::{ConnectionManager, DropMode};
 
@@ -33,49 +31,38 @@ struct NodeServer {
 impl Node for NodeServer {
     async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got {:?}", resolution);
-        let iter = db().iterator_cf(Table::Hashes.get(), IteratorMode::Start);
 
-        for (key, _) in iter {
-            let hash: Hash = match key.as_ref().try_into() {
-                Ok(hash) => hash,
-                Err(err) => {
-                    log::warn!("{}", err);
-                    continue;
-                }
-            };
+        let object = match ObjectRef::find(&resolution.content_riddle) {
+            Some(object) => object,
+            None => {
+                log::info!("hash not found for resolution");
+                return ResolutionResponse::NOT_FOUND;
+            }
+        };
 
-            if resolution.content_riddle.resolves(&hash) {
-                log::info!("found hash {}", hash);
-                let peer_addr = match resolution.location_riddle.resolve(&hash) {
-                    Some(peer_addr) => peer_addr,
-                    None => {
-                        log::warn!(
-                            "failed to resolve location riddle after resolving content riddle"
-                        );
-                        return ResolutionResponse::FOUND;
-                    }
-                };
+        // Code smell?
+        let hash = object.hash;
 
-                log::info!("found peer at {}", peer_addr);
-
-                tokio::spawn(async move {
-                    let new_connection = self
-                        .connection_manager
-                        .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                        .await?;
-                    let content = db()
-                        .get_cf(Table::Content.get(), hash)?
-                        .expect("content exists in table because it was found");
-                    file_transfer::send(&new_connection.connection, hash, &content).await
-                });
-
+        log::info!("found hash {}", object.hash);
+        let peer_addr = match resolution.location_riddle.resolve(&hash) {
+            Some(peer_addr) => peer_addr,
+            None => {
+                log::warn!("failed to resolve location riddle after resolving content riddle");
                 return ResolutionResponse::FOUND;
             }
-        }
+        };
 
-        log::info!("hash not found for resolution");
+        log::info!("found peer at {}", peer_addr);
 
-        ResolutionResponse::NOT_FOUND
+        tokio::spawn(async move {
+            let new_connection = self
+                .connection_manager
+                .punch_hole_to(peer_addr, DropMode::DropIncoming)
+                .await?;
+            file_transfer::send(&new_connection.connection, object).await
+        });
+
+        return ResolutionResponse::FOUND;
     }
 }
 
@@ -182,7 +169,7 @@ impl HubConnection {
         })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Result<Option<Vec<u8>>, crate::Error> {
+    pub async fn query(&self, content_hash: Hash) -> Result<Option<ObjectRef>, crate::Error> {
         let content_riddle = content_hash.gen_riddle();
         let location_riddle = content_hash.gen_riddle();
 
@@ -259,7 +246,7 @@ impl Hubs {
         Ok(Hubs { hubs })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Option<Vec<u8>> {
+    pub async fn query(&self, content_hash: Hash) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.query(content_hash).await) })
             .buffer_unordered(self.hubs.len());

@@ -2,15 +2,15 @@ mod returnable;
 
 pub use returnable::{Return, Returnable};
 
+use futures::stream;
+use hyper::Body;
 use std::str::FromStr;
 use warp::Filter;
 
 use samizdat_common::Hash;
 
-use crate::db::Table;
-//use crate::flatbuffers;
-use crate::object::Object;
-use crate::{db, hubs};
+use crate::cache::{ObjectRef, ObjectStream};
+use crate::{hubs};
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
@@ -34,34 +34,43 @@ where
 pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("_hash" / String)
         .and(warp::get())
-        .map(|hash: String| async move {
+        .and_then(|hash: String| async move {
             // Try get from local:
-            let hash = Hash::from_str(&hash)?;
-            let serialized = db().get_cf(Table::Content.get(), &hash)?;
+            let object = ObjectRef::new(Hash::from_str(&hash)?);
 
-            // Else, fallback to get from peers:
-            let serialized = if let Some(serialized) = serialized {
-                log::info!("found local hash {}", hash);
-                Some(serialized)
+            let stream = if let Some(stream) = object.iter()? {
+                log::info!("found local hash {}", object.hash);
+                Some(stream)
             } else {
-                hubs().query(hash).await
+                hubs().query(object.hash).await;
+                object.iter()?
             };
 
             // Respond with found or not found.
-            if let Some(serialized) = serialized {
-                let object: Object = bincode::deserialize(&serialized)?;
+            if let Some(ObjectStream {
+                metadata,
+                iter_chunks,
+            }) = stream
+            {
+                let response = http::Response::builder()
+                    .header("Content-Type", metadata.content_type)
+                    .header("Content-Size", metadata.content_size)
+                    .status(http::StatusCode::OK)
+                    // TODO: Bleh! Tidy-up this mess!
+                    .body(Body::wrap_stream(stream::iter(
+                        iter_chunks.map(|thing| thing.map_err(|err| err.to_string())),
+                    )));
 
-                Ok(Some(Return {
-                    content_type: object.content_type.to_owned(),
-                    status_code: http::StatusCode::OK,
-                    // TODO: DANGER! double copy of large, large content!!
-                    content: object.content.to_owned(),
-                }))
+                Ok(response) as Result<_, warp::Rejection>
             } else {
-                Ok(None)
+                let response = http::Response::builder()
+                    .header("Content-Type", "text/plain")
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Body::from(""));
+
+                Ok(response)
             }
         })
-        .and_then(async_reply)
 }
 
 pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -69,17 +78,14 @@ pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::R
         .and(warp::post())
         .and(warp::header("content-type"))
         .and(warp::body::bytes())
-        .map(|content_type: String, bytes: bytes::Bytes| {
-            let object = Object::new(&content_type, &*bytes);
-            let serialized = bincode::serialize(&object).expect("can serialize");
-            let hash = Hash::build(&serialized);
-
-            let mut batch = rocksdb::WriteBatch::default();
-            batch.put_cf(Table::Hashes.get(), &hash, &[]);
-            batch.put_cf(Table::Content.get(), &hash, serialized);
-            db().write(batch)?;
-
-            Ok(hash.to_string())
+        .map(|content_type: String, bytes: bytes::Bytes| async move {
+            let (_, object) = ObjectRef::build(
+                content_type,
+                bytes.len(),
+                stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
+            )
+            .await?;
+            Ok(object.hash.to_string())
         })
-        .map(reply)
+        .and_then(async_reply)
 }

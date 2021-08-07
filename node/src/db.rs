@@ -14,7 +14,7 @@ pub fn init_db() -> Result<(), crate::Error> {
     let db = rocksdb::DB::open_cf(
         &db_opts,
         &cli().db_path,
-        &vec![Table::Roots, Table::Chunks, Table::MerkleTrees]
+        &vec![Table::Roots, Table::Chunks, Table::Metadata]
             .into_iter()
             .map(Table::name)
             .collect::<Vec<_>>(),
@@ -31,8 +31,8 @@ pub fn init_db() -> Result<(), crate::Error> {
 pub enum Table {
     /// The list of all inscribed hashes.
     Roots,
-    /// The map of all (hashes, chunk_number) to chunk data.
-    MerkleTrees,
+    /// The map of all chunk hashed by root.
+    Metadata,
     /// The table of all chunks, indexed by chunk hash.
     Chunks,
 }

@@ -152,25 +152,28 @@ impl MerkleTree {
         }
 
         let mut level_index = index;
-        
-        let path = self.tree.iter().map(|level| {
-            let sibling_index = level_index ^ 1;
-            level_index >>= 1;
 
-            if let Some(sibling) = level.get(sibling_index) {
-                *sibling
-            } else {
-                // Incomplete level. Filling up.
-                Hash::default()
-            }
-        }).collect::<Box<[_]>>();
+        let path = self
+            .tree
+            .iter()
+            .map(|level| {
+                let sibling_index = level_index ^ 1;
+                level_index >>= 1;
 
+                if let Some(sibling) = level.get(sibling_index) {
+                    *sibling
+                } else {
+                    // Incomplete level. Filling up.
+                    Hash::default()
+                }
+            })
+            .collect::<Box<[_]>>();
 
         Some(InclusionProof { path, index })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InclusionProof {
     pub path: Box<[Hash]>,
     pub index: usize,

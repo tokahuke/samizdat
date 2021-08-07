@@ -52,6 +52,8 @@ Then, you can view it in your preferred browser in
 http://localhost:4510/_hash/<the hash you received from CURL>
 ```
 
+This link **can be copied and shared** just as if it were a true URL, because it actually is! Somebody running Samizdat on their computer will be able to see your file by accessing that same link.
+
 ### MacOS
 
 Should be similar to the above, no changes needed (although I have not tested).

@@ -3,6 +3,7 @@ mod cli;
 mod db;
 mod http;
 mod object;
+mod public_folder;
 mod rpc;
 
 pub use samizdat_common::Error;
