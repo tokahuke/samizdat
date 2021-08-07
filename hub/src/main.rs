@@ -1,9 +1,11 @@
 mod cli;
-mod error;
+mod db;
 mod flatbuffers;
+mod replay_resistance;
 mod rpc;
 
-pub use error::Error;
+pub use db::db;
+pub use samizdat_common::Error;
 
 use std::panic;
 use structopt::StructOpt;
@@ -32,7 +34,7 @@ async fn main() -> Result<(), crate::Error> {
 
     // Init resources:
     let _ = &*CLI;
-    //let _ = &*DB;
+    db::init_db()?;
 
     let direct_rpc_server = tokio::spawn(crate::rpc::run_direct((CLI.address, CLI.direct_port)));
     let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse((CLI.address, CLI.reverse_port)));

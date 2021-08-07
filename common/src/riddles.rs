@@ -30,67 +30,101 @@ impl StreamCipher {
             idx: 0,
         }
     }
+
+    fn xor(&mut self, slice: &mut [u8]) {
+        for (confusing, byte) in self.zip(slice) {
+            *byte ^= confusing;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AddressMessage {
-    socket_addr: SocketAddr,
-    validation: u8,
+pub struct Message {
+    pub socket_addr: SocketAddr,
+    /// A short which is always zero, for validation purposes.
+    validation: u16,
+}
+
+impl Message {
+    pub fn new(socket_addr: SocketAddr) -> Message {
+        Message {
+            socket_addr,
+            validation: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentRiddle {
+    pub timestamp: i64,
     pub rand: Hash,
     pub hash: Hash,
 }
 
 impl ContentRiddle {
-    pub fn riddle_for_location(&self, socket_addr: SocketAddr) -> LocationRiddle {
-        // TODO: ooops! leaks IP type. Problem?
-        let mut serialized = bincode::serialize(&AddressMessage {
-            socket_addr,
-            validation: 0,
-        })
-        .expect("can always serialize");
+    pub fn new(content_hash: &Hash) -> ContentRiddle {
+        let timestamp = chrono::Utc::now().timestamp();
+        let rand = Hash::rand();
+        let hash = content_hash.rehash(&timestamp.into()).rehash(&rand);
 
-        for (confusing, byte) in StreamCipher::new(self.hash).zip(&mut serialized) {
-            *byte ^= confusing;
+        ContentRiddle {
+            timestamp,
+            rand,
+            hash,
         }
+    }
 
-        LocationRiddle {
+    pub fn riddle_for_message(&self, message: &Message) -> MessageRiddle {
+        // TODO: ooops! leaks IP type. Problem?
+        let mut serialized = bincode::serialize(&message).expect("can always serialize");
+
+        StreamCipher::new(self.hash).xor(&mut serialized);
+
+        MessageRiddle {
+            timestamp: self.timestamp,
             rand: self.rand,
             masked: serialized,
         }
     }
 
     pub fn resolves(&self, hash: &Hash) -> bool {
-        hash.rehash(&self.rand) == self.hash
+        hash.rehash(&self.timestamp.into()).rehash(&self.rand) == self.hash
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LocationRiddle {
+pub struct MessageRiddle {
+    pub timestamp: i64,
     pub rand: Hash,
     pub masked: Vec<u8>,
 }
 
-impl LocationRiddle {
-    pub fn resolve(&self, hash: &Hash) -> Option<SocketAddr> {
-        let key = hash.rehash(&self.rand);
+impl MessageRiddle {
+    pub fn resolve(&self, content_hash: &Hash) -> Option<Message> {
+        let key = content_hash.rehash(&self.timestamp.into()).rehash(&self.rand);
         let mut serialized = self.masked.clone();
 
-        for (confusing, byte) in StreamCipher::new(key).zip(&mut serialized) {
-            *byte ^= confusing;
-        }
+        StreamCipher::new(key).xor(&mut serialized);
 
         bincode::deserialize(&serialized)
             .ok()
-            .and_then(|message: AddressMessage| {
+            .and_then(|message: Message| {
                 if message.validation == 0 {
-                    Some(message.socket_addr)
+                    Some(message)
                 } else {
                     None
                 }
             })
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     fn test_propose_resolve_message_riddle() {
+//         let hash = Hash::rand();
+//         let content_riddle = ContentRiddle::new(&hash);
+
+//     }
+// }

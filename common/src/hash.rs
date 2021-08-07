@@ -1,13 +1,11 @@
 use serde_derive::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_224};
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Debug};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use crate::ContentRiddle;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 28]);
 
 impl FromStr for Hash {
@@ -20,6 +18,12 @@ impl FromStr for Hash {
 }
 
 impl Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", base64_url::encode(&self.0))
+    }
+}
+
+impl Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", base64_url::encode(&self.0))
     }
@@ -49,6 +53,18 @@ impl<'a> TryFrom<&'a [u8]> for Hash {
     }
 }
 
+impl From<i64> for Hash {
+    fn from(int: i64) -> Hash {
+        let mut hash = Hash::default();
+        let bytes = int.to_be_bytes();
+        for i in 0..8 {
+            hash.0[i] = bytes[i];
+        }
+
+        hash
+    }
+}
+
 impl Hash {
     /// # Panics
     ///
@@ -70,13 +86,6 @@ impl Hash {
 
     pub fn rehash(&self, rand: &Hash) -> Hash {
         Hash::build([rand.0, self.0].concat())
-    }
-
-    pub fn gen_riddle(&self) -> ContentRiddle {
-        let rand = Hash::rand();
-        let hash = self.rehash(&rand);
-
-        ContentRiddle { rand, hash: hash }
     }
 
     pub fn is_proved_by(&self, root: &Hash, proof: &InclusionProof) -> bool {
@@ -127,7 +136,7 @@ impl From<Vec<Hash>> for MerkleTree {
                     None
                 }
             })
-            .collect(),
+            .collect::<Vec<_>>().into_iter().rev().collect(),
         }
     }
 }

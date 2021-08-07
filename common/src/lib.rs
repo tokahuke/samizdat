@@ -9,5 +9,5 @@ mod transport;
 
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
-pub use riddles::{ContentRiddle, LocationRiddle};
+pub use riddles::{ContentRiddle, Message, MessageRiddle};
 pub use transport::BincodeOverQuic;

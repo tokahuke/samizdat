@@ -1,4 +1,4 @@
-use crate::cli;
+use crate::CLI;
 
 static mut DB: Option<rocksdb::DB> = None;
 
@@ -13,8 +13,8 @@ pub fn init_db() -> Result<(), crate::Error> {
 
     let db = rocksdb::DB::open_cf(
         &db_opts,
-        &cli().db_path,
-        &vec![Table::Roots, Table::Chunks, Table::Metadata]
+        &CLI.db_path,
+        &vec![Table::RecentNonces]
             .into_iter()
             .map(Table::name)
             .collect::<Vec<_>>(),
@@ -29,12 +29,8 @@ pub fn init_db() -> Result<(), crate::Error> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Table {
-    /// The list of all inscribed hashes.
-    Roots,
-    /// The map of all chunk hashed by root.
-    Metadata,
-    /// The table of all chunks, indexed by chunk hash.
-    Chunks,
+    /// The list of all recent nonces. This is to mitigate replay attacks.
+    RecentNonces,
 }
 
 impl Table {

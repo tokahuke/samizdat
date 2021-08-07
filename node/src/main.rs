@@ -2,7 +2,7 @@ mod cache;
 mod cli;
 mod db;
 mod http;
-mod object;
+//mod object;
 mod public_folder;
 mod rpc;
 

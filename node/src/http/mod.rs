@@ -10,7 +10,7 @@ use warp::Filter;
 use samizdat_common::Hash;
 
 use crate::cache::{ObjectRef, ObjectStream};
-use crate::{hubs};
+use crate::hubs;
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where

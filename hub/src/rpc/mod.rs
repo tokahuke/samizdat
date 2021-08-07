@@ -12,8 +12,9 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
 use samizdat_common::rpc::{Hub, NodeClient, Query, QueryResponse, Resolution, ResolutionStatus};
-use samizdat_common::BincodeOverQuic;
+use samizdat_common::{BincodeOverQuic, Message};
 
+use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
 use room::Room;
@@ -22,6 +23,7 @@ const MAX_LENGTH: usize = 2_048;
 
 lazy_static! {
     static ref ROOM: Room<Node> = Room::new();
+    static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
 }
 
 struct Node {
@@ -83,12 +85,25 @@ impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(Box::new(|server| async move {
-            // Now, prepare resolution request:
             log::debug!("got {:?}", query);
-            let location_riddle = query.location_riddle.riddle_for_location(server.0.addr);
+
+            // Se if you are not being replayed:
+            match REPLAY_RESISTANCE.lock().await.check(&query) {
+                Ok(false) => return QueryResponse::Replayed,
+                Err(err) => {
+                    log::error!("error while checking for replay: {}", err);
+                    return QueryResponse::InternalError;
+                }
+                _ => {}
+            }
+
+            // Now, prepare resolution request:
+            let message_riddle = query
+                .content_riddle
+                .riddle_for_message(&Message::new(server.0.addr));
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
-                location_riddle,
+                message_riddle,
             });
 
             // And then send the request to the peers:
@@ -130,7 +145,7 @@ impl Hub for HubServer {
 
             log::debug!("query done");
 
-            QueryResponse { candidates }
+            QueryResponse::Resolved { candidates }
         }))
         .await
     }

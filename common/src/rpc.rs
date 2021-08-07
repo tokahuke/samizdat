@@ -2,7 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::{ContentRiddle, LocationRiddle};
+use crate::{ContentRiddle, MessageRiddle};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
@@ -13,8 +13,13 @@ pub struct Query {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct QueryResponse {
-    pub candidates: Vec<SocketAddr>,
+pub enum QueryResponse {
+    /// Server experienced internal error (please report bug!)
+    InternalError,
+    /// Query was replayed. Therefore, it was rejected.
+    Replayed,
+    /// Query was run and returned with these candidates (may be empty).
+    Resolved { candidates: Vec<SocketAddr> },
 }
 
 #[tarpc::service]
@@ -28,7 +33,7 @@ pub trait Hub {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Resolution {
     pub content_riddle: ContentRiddle,
-    pub location_riddle: LocationRiddle,
+    pub message_riddle: MessageRiddle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -8,7 +8,7 @@ use samizdat_common::{ContentRiddle, Hash, InclusionProof, MerkleTree};
 use crate::db;
 use crate::db::Table;
 
-const CHUNK_SIZE: usize = 256_000_000;
+pub const CHUNK_SIZE: usize = 256_000;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChunkMetadata {
@@ -62,6 +62,8 @@ impl ObjectRef {
         expected_content_size: usize,
         mut source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
     ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
+        log::debug!("building new object");
+
         let mut content_size = 0;
         let mut buffer = Vec::with_capacity(CHUNK_SIZE);
         let mut hashes = Vec::new();
@@ -87,6 +89,7 @@ impl ObjectRef {
                 &buffer,
             )?;
             hashes.push(chunk_hash);
+            log::debug!("created chunk {}", chunk_hash);
 
             if content_size == expected_content_size {
                 break;
@@ -106,6 +109,8 @@ impl ObjectRef {
             content_size,
             hashes: merkle_tree.hashes().to_vec(),
         };
+
+        log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
         let mut batch = rocksdb::WriteBatch::default();
         batch.put_cf(Table::Roots.get(), &hash, &[]);

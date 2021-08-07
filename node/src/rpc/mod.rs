@@ -16,7 +16,7 @@ use tokio::time::Duration;
 
 use samizdat_common::quic;
 use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
-use samizdat_common::Hash;
+use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cache::ObjectRef;
 
@@ -44,10 +44,10 @@ impl Node for NodeServer {
         let hash = object.hash;
 
         log::info!("found hash {}", object.hash);
-        let peer_addr = match resolution.location_riddle.resolve(&hash) {
-            Some(peer_addr) => peer_addr,
+        let peer_addr = match resolution.message_riddle.resolve(&hash) {
+            Some(message) => message.socket_addr,
             None => {
-                log::warn!("failed to resolve location riddle after resolving content riddle");
+                log::warn!("failed to resolve message riddle after resolving content riddle");
                 return ResolutionResponse::FOUND;
             }
         };
@@ -60,7 +60,7 @@ impl Node for NodeServer {
                 .punch_hole_to(peer_addr, DropMode::DropIncoming)
                 .await?;
             file_transfer::send(&new_connection.connection, object).await
-        });
+        }.map(move |outcome| outcome.map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))));
 
         return ResolutionResponse::FOUND;
     }
@@ -170,12 +170,12 @@ impl HubConnection {
     }
 
     pub async fn query(&self, content_hash: Hash) -> Result<Option<ObjectRef>, crate::Error> {
-        let content_riddle = content_hash.gen_riddle();
-        let location_riddle = content_hash.gen_riddle();
+        let content_riddle = ContentRiddle::new(&content_hash);
+        let location_riddle = ContentRiddle::new(&content_hash);
 
         let inner = self.inner.get().await;
 
-        let QueryResponse { candidates } = inner
+        let query_response = inner
             .client
             .query(
                 context::current(),
@@ -185,6 +185,16 @@ impl HubConnection {
                 },
             )
             .await?;
+
+        let candidates = match query_response {
+            QueryResponse::Replayed => {
+                return Err(format!("hub has suspected replay attack").into())
+            }
+            QueryResponse::InternalError => {
+                return Err(format!("hub has experienced an internal error").into())
+            }
+            QueryResponse::Resolved { candidates } => candidates,
+        };
 
         log::info!("Candidates for {}: {:?}", content_hash, candidates);
 

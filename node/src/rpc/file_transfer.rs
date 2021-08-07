@@ -11,7 +11,7 @@ use crate::cache::{ObjectRef, ObjectStream};
 use crate::cli;
 
 const MAX_HEADER_LENGTH: usize = 2_048;
-const MAX_STREAM_SIZE: usize = 256_000_000;
+const MAX_STREAM_SIZE: usize = crate::cache::CHUNK_SIZE;
 
 fn read_error_to_io(error: ReadToEndError) -> io::Error {
     match error {
@@ -61,6 +61,7 @@ pub async fn recv(
     let content_stream = uni_streams
         .map_err(io::Error::from)
         .and_then(|stream| async move {
+            log::debug!("receiving chunk");
             stream
                 .read_to_end(MAX_STREAM_SIZE)
                 .await
@@ -137,6 +138,8 @@ pub async fn send(connection: &Connection, object: ObjectRef) -> Result<(), crat
         send_data.finish().await.map_err(io::Error::from)?;
         log::debug!("data sent");
     }
+
+    log::info!("finished sending {} to {}", object.hash, connection.remote_address());
 
     Ok(())
 }

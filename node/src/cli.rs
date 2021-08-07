@@ -13,10 +13,10 @@ pub struct Cli {
     #[structopt(env, long, default_value = "4510")]
     pub port: u16,
     /// The maximum size in bytes of the content that can be sent from a peer to this machine.
-    #[structopt(env, long, default_value = "64000000")]
+    #[structopt(env, long, default_value = "1000000000")]
     pub max_content_size: usize,
     /// A list of hubs to which to connect.
-    #[structopt(env, long)]
+    #[structopt(env, long, default_value = "[::1]:4511")]
     pub hubs: Vec<AddrToResolve>,
 }
 
