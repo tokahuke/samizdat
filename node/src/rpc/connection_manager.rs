@@ -128,22 +128,22 @@ impl ConnectionManager {
 
         let outgoing = async move {
             if let Some(connecting) = self.matcher.expect(peer_addr).await {
-                Some(connecting.await)
+                Ok(connecting.await?)
             } else {
-                None
+                Err(format!("peer not expected").into()) as Result<_, crate::Error>
             }
         };
 
         match join(incoming, outgoing).await {
-            (Err(_), Some(Ok(outgoing))) => {
+            (Err(_), Ok(outgoing)) => {
                 log::info!("only outgoing succeeded");
                 Ok(outgoing)
             }
-            (Ok(incoming), None | Some(Err(_))) => {
+            (Ok(incoming), Err(_)) => {
                 log::info!("only incoming succeeded");
                 Ok(incoming)
             }
-            (Ok(incoming), Some(Ok(outgoing))) => {
+            (Ok(incoming), Ok(outgoing)) => {
                 log::info!("both connections succeeded");
                 Ok(match drop_mode {
                     DropMode::DropIncoming => {
@@ -156,7 +156,12 @@ impl ConnectionManager {
                     }
                 })
             }
-            (Err(_), None | Some(Err(_))) => Err("failed miserably".to_owned().into()),
+            (Err(incoming_err), Err(outgoing_err)) => {
+                log::info!("both connections failed");
+                log::info!("incoming error: {}", incoming_err);
+                log::info!("outgoing error: {}", outgoing_err);
+                Err("failed miserably".to_owned().into())
+            },
         }
     }
 }
