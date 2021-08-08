@@ -32,14 +32,9 @@ The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The
 
 ### Linux
 
-If you are interested in running this in your computer, you will need to build it from source, by now (convenient scripts are "todo"):
+If you are interested in running this in your computer, you will need to build it from source, by now. An install script is provided to compile, install and enable the systemd service. Just run
 ```
-cargo build --release --all
-sudo cp target/release/samizdat-node /usr/local/bin
-```
-Then, you can run it (on a `screen`, for example; systemd service follows) simply with
-```
-samizdat-node
+./install.sh
 ```
 This will spin up a server in `localhost:4510`, to where you can upload content using
 ```
@@ -53,6 +48,11 @@ http://localhost:4510/_hash/<the hash you received from CURL>
 ```
 
 This link **can be copied and shared** just as if it were a true URL, because it actually is! Somebody running Samizdat on their computer will be able to see your file by accessing that same link.
+
+To uninstall the node, a script is also provided:
+```
+./uninstall.sh
+```
 
 ### MacOS
 

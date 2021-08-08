@@ -1,3 +1,6 @@
 [workspace]
 
 members = ["common", "node", "hub"]
+
+[profile.release]
+lto = "thin"
