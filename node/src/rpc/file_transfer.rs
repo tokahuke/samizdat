@@ -83,7 +83,8 @@ pub async fn recv(
         .try_flatten()
         .map_err(crate::Error::from);
 
-    // Build content from stream (this limits content size to the advertised amount)
+    // Build content from stream (ObjectRef::build limits content size to the advertised
+    // amount).
     let (metadata, object) = ObjectRef::build(
         header.content_type,
         header.content_size,
@@ -93,12 +94,14 @@ pub async fn recv(
 
     // Check if the peer is up to any extra sneaky tricks.
     if metadata.content_size != header.content_size {
+        object.drop_if_exists()?;
         Err(format!(
             "actual data length did not match content-size: expected {}, got {}",
             metadata.content_size, header.content_size
         )
         .into())
     } else if object.hash != hash {
+        object.clone().drop_if_exists()?;
         Err(format!(
             "bad content from peer: expected {}, got {}",
             object.hash, hash
