@@ -66,20 +66,21 @@ pub async fn recv(
         .and_then(|stream| {
             let cipher = cipher.clone();
             async move {
-            log::debug!("receiving chunk");
-            stream
-                .read_to_end(MAX_STREAM_SIZE)
-                .await
-                .map_err(read_error_to_io)
-                .map(|mut buffer| {
-                    cipher.decrypt(&mut buffer);
-                    stream::iter(
-                        buffer
-                            .into_iter()
-                            .map(|byte| Ok(byte) as Result<_, io::Error>),
-                    )
-                })
-        }})
+                log::debug!("receiving chunk");
+                stream
+                    .read_to_end(MAX_STREAM_SIZE)
+                    .await
+                    .map_err(read_error_to_io)
+                    .map(|mut buffer| {
+                        cipher.decrypt(&mut buffer);
+                        stream::iter(
+                            buffer
+                                .into_iter()
+                                .map(|byte| Ok(byte) as Result<_, io::Error>),
+                        )
+                    })
+            }
+        })
         .try_flatten()
         .map_err(crate::Error::from);
 
@@ -140,23 +141,23 @@ pub async fn send(connection: &Connection, object: ObjectRef) -> Result<(), crat
         let mut send_data = connection.open_uni().await?;
         log::debug!("stream for data opened");
         cipher.encrypt(&mut chunk);
-        send_data
-            .write_all(&chunk)
-            .await
-            .map_err(io::Error::from)?;
+        send_data.write_all(&chunk).await.map_err(io::Error::from)?;
         log::debug!("data streamed");
         send_data.finish().await.map_err(io::Error::from)?;
         log::debug!("data sent");
     }
 
-    log::info!("finished sending {} to {}", object.hash, connection.remote_address());
+    log::info!(
+        "finished sending {} to {}",
+        object.hash,
+        connection.remote_address()
+    );
 
     Ok(())
 }
 
-
+use aes_gcm_siv::aead::{AeadInPlace, NewAead};
 use aes_gcm_siv::{Aes256GcmSiv, Key, Nonce};
-use aes_gcm_siv::aead::{NewAead, AeadInPlace};
 
 struct TransferCipher {
     nonce: Nonce,
@@ -165,7 +166,7 @@ struct TransferCipher {
 
 impl TransferCipher {
     fn new(content_hash: &Hash, nonce: &Hash) -> TransferCipher {
-        fn extend(a: &[u8;28]) -> [u8;32] {
+        fn extend(a: &[u8; 28]) -> [u8; 32] {
             let mut ext = [0; 32];
             for (i, byte) in a.iter().enumerate() {
                 ext[i] = *byte;
@@ -182,7 +183,7 @@ impl TransferCipher {
 
         TransferCipher { cipher, nonce }
     }
-    
+
     fn encrypt(&self, buf: &mut Vec<u8>) {
         self.cipher.encrypt_in_place(&self.nonce, b"", buf).ok();
     }

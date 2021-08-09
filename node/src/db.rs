@@ -14,10 +14,17 @@ pub fn init_db() -> Result<(), crate::Error> {
     let db = rocksdb::DB::open_cf(
         &db_opts,
         &cli().db_path,
-        &vec![Table::Roots, Table::Chunks, Table::Metadata]
-            .into_iter()
-            .map(Table::name)
-            .collect::<Vec<_>>(),
+        &vec![
+            Table::Objects,
+            Table::ObjectMetadata,
+            Table::ObjectChunks,
+            Table::Collections,
+            Table::CollectionMetadata,
+            Table::CollectionItems,
+        ]
+        .into_iter()
+        .map(Table::name)
+        .collect::<Vec<_>>(),
     )?;
 
     unsafe {
@@ -30,11 +37,17 @@ pub fn init_db() -> Result<(), crate::Error> {
 #[derive(Debug, Clone, Copy)]
 pub enum Table {
     /// The list of all inscribed hashes.
-    Roots,
+    Objects,
     /// The map of all chunk hashed by root.
-    Metadata,
+    ObjectMetadata,
     /// The table of all chunks, indexed by chunk hash.
-    Chunks,
+    ObjectChunks,
+    /// The list of all known collections.
+    Collections,
+    /// The list of all collection metadata.
+    CollectionMetadata,
+    /// The list of all collection items.
+    CollectionItems,
 }
 
 impl Table {

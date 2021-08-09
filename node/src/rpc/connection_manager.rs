@@ -161,7 +161,7 @@ impl ConnectionManager {
                 log::info!("incoming error: {}", incoming_err);
                 log::info!("outgoing error: {}", outgoing_err);
                 Err("failed miserably".to_owned().into())
-            },
+            }
         }
     }
 }

@@ -54,13 +54,19 @@ impl Node for NodeServer {
 
         log::info!("found peer at {}", peer_addr);
 
-        tokio::spawn(async move {
-            let new_connection = self
-                .connection_manager
-                .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                .await?;
-            file_transfer::send(&new_connection.connection, object).await
-        }.map(move |outcome| outcome.map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))));
+        tokio::spawn(
+            async move {
+                let new_connection = self
+                    .connection_manager
+                    .punch_hole_to(peer_addr, DropMode::DropIncoming)
+                    .await?;
+                file_transfer::send(&new_connection.connection, object).await
+            }
+            .map(move |outcome| {
+                outcome
+                    .map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))
+            }),
+        );
 
         return ResolutionResponse::FOUND;
     }
