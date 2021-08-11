@@ -3,10 +3,10 @@ mod returnable;
 pub use returnable::{Return, Returnable};
 
 use futures::stream;
+use http::Response;
 use hyper::Body;
 use warp::path::Tail;
 use warp::Filter;
-use http::Response;
 
 use samizdat_common::Hash;
 
@@ -32,7 +32,9 @@ where
     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
 }
 
-async fn get_object(object: ObjectRef) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+async fn get_object(
+    object: ObjectRef,
+) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     let stream = if let Some(stream) = object.iter()? {
         log::info!("found local hash {}", object.hash);
         Some(stream)
@@ -71,7 +73,7 @@ pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
     warp::path!("_hash" / Hash)
         .and(warp::get())
         .and_then(|hash: Hash| async move {
-            Ok(get_object(ObjectRef::new(hash)).await?) as  Result<_, warp::Rejection>
+            Ok(get_object(ObjectRef::new(hash)).await?) as Result<_, warp::Rejection>
         })
 }
 
@@ -126,7 +128,9 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and(warp::get())
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
-            let item = collection.get(name.as_str().to_owned())?.expect("object exists");
+            let item = collection
+                .get(name.as_str().to_owned())?
+                .expect("object exists");
 
             Ok(get_object(item.object).await?) as Result<_, warp::Rejection>
         })

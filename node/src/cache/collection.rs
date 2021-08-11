@@ -59,7 +59,6 @@ impl CollectionRef {
 
         let mut batch = rocksdb::WriteBatch::default();
 
-        
         for (idx, (name, object)) in it.as_ref().iter().enumerate() {
             let key = collection.locator_for(name.as_ref().to_owned());
             let value = CollectionItem {

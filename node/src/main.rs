@@ -85,8 +85,7 @@ async fn main() -> Result<(), crate::Error> {
             .or(http::post_content())
             .or(http::delete_hash())
             .or(http::post_collection())
-            .or(http::get_item())
-        )
+            .or(http::get_item()))
         .with(warp::log("api"));
 
     // Run server:
