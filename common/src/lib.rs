@@ -16,3 +16,4 @@ pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use riddles::{ContentRiddle, Message, MessageRiddle};
 pub use transport::BincodeOverQuic;
 //pub use merkle_map::MerkleMap;
+pub use patricia_map::PatriciaMap;
