@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{ContentRiddle, MessageRiddle};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
     /// The hash corresponds to an object hash.
     Object,

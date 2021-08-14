@@ -7,15 +7,36 @@ use crate::Table;
 use super::ObjectRef;
 
 #[derive(Serialize, Deserialize)]
-struct Locator<'a> {
-    collection: CollectionRef,
-    name: &'a str,
+pub struct CollectionItem {
+    pub collection: CollectionRef,
+    pub name: String,
+    pub inclusion_proof: PatriciaProof,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct CollectionItem {
-    pub object: ObjectRef,
-    pub inclusion_proof: PatriciaProof,
+impl CollectionItem {
+    pub fn is_valid(&self) -> bool {
+        let is_included = self.inclusion_proof.is_in(&self.collection.hash);
+        let key = self.collection.locator_for(&self.name).hash();
+
+        is_included && &key == self.inclusion_proof.claimed_key()
+    }
+
+    /// Returns an object reference if item is valid. Else, returns
+    /// `Ok(Error::InvalidCollectionItem)`.
+    pub fn object(&self) -> Result<ObjectRef, crate::Error> {
+        if self.is_valid() {
+            Ok(ObjectRef::new(*self.inclusion_proof.claimed_value()))
+        } else {
+            Err(crate::Error::InvalidCollectionItem)
+        }
+    }
+
+    pub fn locator(&self) -> Locator {
+        Locator {
+            collection: self.collection.clone(),
+            name: &self.name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,19 +66,19 @@ impl CollectionRef {
 
         let mut batch = rocksdb::WriteBatch::default();
 
-        for (name, object) in objects.as_ref() {
-            let key = collection.locator_for(name.as_ref());
+        for (name, _object) in objects.as_ref() {
+            let key = collection.locator_for(name.as_ref()).hash();
             let value = CollectionItem {
-                object: object.clone(),
+                collection: collection.clone(),
+                name: name.as_ref().to_owned(),
                 inclusion_proof: patricia_map
                     .proof_for(Hash::build(name.as_ref().as_bytes()))
                     .expect("name exists in map"),
             };
-            dbg!(name.as_ref());
             batch.put_cf(
                 Table::CollectionItems.get(),
-                bincode::serialize(&key).expect("can serialize"),
-                dbg!(bincode::serialize(&value).expect("can serialize")),
+                key,
+                bincode::serialize(&value).expect("can serialize"),
             );
         }
 
@@ -68,7 +89,7 @@ impl CollectionRef {
         Ok(collection)
     }
 
-    fn locator_for<'a>(&self, name: &'a str) -> Locator<'a> {
+    pub fn locator_for<'a>(&self, name: &'a str) -> Locator<'a> {
         Locator {
             collection: self.clone(),
             name,
@@ -77,16 +98,36 @@ impl CollectionRef {
 
     pub fn get(&self, name: &str) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
-        let maybe_item = db().get_cf(
-            Table::CollectionItems.get(),
-            bincode::serialize(&locator).expect("can serialize"),
-        )?;
+        let maybe_item = db().get_cf(Table::CollectionItems.get(), locator.hash())?;
         dbg!(&maybe_item);
 
         if let Some(item) = maybe_item {
             Ok(Some(bincode::deserialize(&item)?))
         } else {
             Ok(None)
+        }
+    }
+}
+
+pub struct Locator<'a> {
+    collection: CollectionRef,
+    name: &'a str,
+}
+
+impl<'a> Locator<'a> {
+    pub fn hash(&self) -> Hash {
+        self.collection.hash.rehash(&Hash::build(self.name))
+    }
+
+    pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
+        self.collection.get(self.name)
+    }
+
+    pub fn with_proof(&self, inclusion_proof: PatriciaProof) -> CollectionItem {
+        CollectionItem {
+            collection: self.collection.clone(),
+            name: self.name.to_owned(),
+            inclusion_proof,
         }
     }
 }

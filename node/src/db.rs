@@ -21,6 +21,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Collections,
             Table::CollectionMetadata,
             Table::CollectionItems,
+            Table::CollectionItemMetadata,
             Table::Projects,
         ]
         .into_iter()
@@ -39,7 +40,7 @@ pub fn init_db() -> Result<(), crate::Error> {
 pub enum Table {
     /// The list of all inscribed hashes.
     Objects,
-    /// The map of all chunk hashed by root.
+    /// The map of all object (out-of-band) metadata, indexed by object hash.
     ObjectMetadata,
     /// The table of all chunks, indexed by chunk hash.
     ObjectChunks,
@@ -49,6 +50,7 @@ pub enum Table {
     CollectionMetadata,
     /// The list of all collection items.
     CollectionItems,
+    CollectionItemMetadata,
     /// The list of all projects.
     Projects,
 }

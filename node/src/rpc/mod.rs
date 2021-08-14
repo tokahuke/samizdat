@@ -21,6 +21,7 @@ use samizdat_common::rpc::{
 use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cache::ObjectRef;
+use crate::cli;
 
 use connection_manager::{ConnectionManager, DropMode};
 
@@ -62,7 +63,7 @@ impl Node for NodeServer {
                     .connection_manager
                     .punch_hole_to(peer_addr, DropMode::DropIncoming)
                     .await?;
-                file_transfer::send(&new_connection.connection, object).await
+                file_transfer::send_object(&new_connection.connection, &object).await
             }
             .map(move |outcome| {
                 outcome
@@ -177,7 +178,11 @@ impl HubConnection {
         })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Result<Option<ObjectRef>, crate::Error> {
+    pub async fn query(
+        &self,
+        content_hash: Hash,
+        kind: QueryKind,
+    ) -> Result<Option<ObjectRef>, crate::Error> {
         let content_riddle = ContentRiddle::new(&content_hash);
         let location_riddle = ContentRiddle::new(&content_hash);
 
@@ -190,7 +195,7 @@ impl HubConnection {
                 Query {
                     content_riddle,
                     location_riddle,
-                    kind: QueryKind::Object,
+                    kind,
                 },
             )
             .await?;
@@ -233,7 +238,7 @@ impl HubConnection {
 
         match new_connection {
             Some(mut new_connection) => Ok(Some(
-                file_transfer::recv(&mut new_connection.uni_streams, content_hash).await?,
+                file_transfer::recv_object(&mut new_connection.uni_streams, content_hash).await?,
             )),
             None => Err(crate::Error::AllCandidatesFailed),
         }
@@ -265,10 +270,10 @@ impl Hubs {
         Ok(Hubs { hubs })
     }
 
-    pub async fn query(&self, content_hash: Hash) -> Option<ObjectRef> {
+    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.query(content_hash).await) })
-            .buffer_unordered(self.hubs.len());
+            .map(|hub| async move { (hub.name, hub.query(content_hash, kind).await) })
+            .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {
             match result {

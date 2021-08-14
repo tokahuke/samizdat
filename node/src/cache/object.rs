@@ -23,8 +23,15 @@ pub struct ObjectMetadata {
 }
 
 pub struct ObjectStream {
-    pub metadata: ObjectMetadata,
     pub iter_chunks: Box<dyn Send + Unpin + Iterator<Item = Result<Vec<u8>, crate::Error>>>,
+}
+
+impl IntoIterator for ObjectStream {
+    type Item = Result<Vec<u8>, crate::Error>;
+    type IntoIter = Box<dyn Send + Unpin + Iterator<Item = Result<Vec<u8>, crate::Error>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_chunks
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +42,13 @@ pub struct ObjectRef {
 impl ObjectRef {
     pub fn new(hash: Hash) -> ObjectRef {
         ObjectRef { hash }
+    }
+
+    pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
+        match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
+            Some(serialized) => Ok(bincode::deserialize(&serialized)?),
+            None => Ok(None),
+        }
     }
 
     pub fn find(content_riddle: &ContentRiddle) -> Option<ObjectRef> {
@@ -145,9 +159,10 @@ impl ObjectRef {
 
     /// TODO: lock for reading. Reading is not atomic. (snapshots?)
     pub fn iter(&self) -> Result<Option<ObjectStream>, crate::Error> {
-        let metadata: ObjectMetadata = match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
-            Some(serialized) => bincode::deserialize(&serialized)?,
-            None => return Ok(None),
+        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+            metadata
+        } else {
+            return Ok(None);
         };
 
         // Not as efficient as iterating, but large chunk => don't matter.
@@ -159,7 +174,6 @@ impl ObjectRef {
         });
 
         Ok(Some(ObjectStream {
-            metadata,
             iter_chunks: Box::new(iter_chunks),
         }))
     }

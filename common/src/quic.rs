@@ -22,7 +22,7 @@ impl rustls::ServerCertVerifier for SkipCertificationVerification {
 pub fn insecure() -> ClientConfig {
     let mut cfg = quinn::ClientConfigBuilder::default().build();
 
-    // Allow idle connections:log
+    // Allow idle connections:
     std::sync::Arc::get_mut(&mut cfg.transport)
         .unwrap()
         .keep_alive_interval(Some(std::time::Duration::from_millis(5_000)));

@@ -8,9 +8,10 @@ use hyper::Body;
 use warp::path::Tail;
 use warp::Filter;
 
+use samizdat_common::rpc::QueryKind;
 use samizdat_common::Hash;
 
-use crate::cache::{CollectionRef, ObjectRef, ObjectStream};
+use crate::cache::{CollectionRef, Locator, ObjectRef, ObjectStream};
 use crate::hubs;
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
@@ -39,23 +40,20 @@ async fn resolve_object(
         log::info!("found local hash {}", object.hash);
         Some(stream)
     } else {
-        hubs().query(object.hash).await;
+        hubs().query(object.hash, QueryKind::Object).await;
         object.iter()?
     };
 
     // Respond with found or not found.
-    if let Some(ObjectStream {
-        metadata,
-        iter_chunks,
-    }) = stream
-    {
+    if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
         let response = http::Response::builder()
             .header("Content-Type", metadata.content_type)
             .header("Content-Size", metadata.content_size)
             .status(http::StatusCode::OK)
             // TODO: Bleh! Tidy-up this mess!
             .body(Body::wrap_stream(stream::iter(
-                iter_chunks.map(|thing| thing.map_err(|err| err.to_string())),
+                iter.into_iter()
+                    .map(|thing| thing.map_err(|err| err.to_string())),
             )));
 
         Ok(response)
@@ -67,6 +65,13 @@ async fn resolve_object(
 
         Ok(response)
     }
+}
+
+async fn resolve_item(
+    locator: Locator<'_>,
+) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    hubs().query(locator.hash(), QueryKind::Item).await;
+    todo!()
 }
 
 pub fn get_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -128,11 +133,11 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and(warp::get())
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
-            if let Some(item) = collection.get(name.as_str())? {
-                assert!(item.inclusion_proof.is_in(&hash));
-                Ok(resolve_object(item.object).await?) as Result<_, warp::Rejection>
+            let locator = collection.locator_for(name.as_str());
+            if let Some(item) = locator.get()? {
+                Ok(resolve_object(item.object()?).await?) as Result<_, warp::Rejection>
             } else {
-                Err(warp::reject::not_found())
+                Ok(resolve_item(locator).await?)
             }
         })
 }
