@@ -48,7 +48,7 @@ impl<'a> TryFrom<&'a [u8]> for Hash {
         if slice.len() != 28 {
             Err(crate::Error::BadHashLength(slice.len()))
         } else {
-            Ok(Hash(slice.try_into().expect("aleady checked")))
+            Ok(Hash(slice.try_into().expect("already checked")))
         }
     }
 }

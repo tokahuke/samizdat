@@ -3,6 +3,7 @@
 //! and it is some times faster. Therefore, by Amdahl s Law, this impl is ok.
 
 use crate::Hash;
+use serde_derive::{Deserialize, Serialize};
 use std::iter::FromIterator;
 
 fn bits<'a>(hash: &'a Hash) -> impl 'a + DoubleEndedIterator<Item = Side> {
@@ -365,7 +366,7 @@ impl PatriciaMap {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatriciaProof {
     claimed_key: Hash,
     claimed_value: Hash,
@@ -435,10 +436,10 @@ impl<'a> Iter<'a> {
                         self.is_backtracking = true;
                     }
                 }
-            },
+            }
             Some(Side::Right) => {
                 self.is_backtracking = true;
-            },
+            }
             None => {}
         }
     }
@@ -466,19 +467,19 @@ impl<'a> Iterator for Iter<'a> {
                 self.choice_stack.push(Side::Right);
             } else {
                 // Found leaf. Use the stack to recover the key.
-                let bits =
-                    self.stack
-                        .iter()
-                        .zip(&self.choice_stack)
-                        .flat_map(|(node, choice)| {
-                            Some(*choice).into_iter().chain(
-                                node.get(*choice)
-                                    .as_ref()
-                                    .expect("choice exists")
-                                    .segment
-                                    .bits(),
-                            )
-                        });
+                let bits = self
+                    .stack
+                    .iter()
+                    .zip(&self.choice_stack)
+                    .flat_map(|(node, choice)| {
+                        Some(*choice).into_iter().chain(
+                            node.get(*choice)
+                                .as_ref()
+                                .expect("choice exists")
+                                .segment
+                                .bits(),
+                        )
+                    });
                 let rebuilt_segment = Segment::from_bits(bits);
                 let key = rebuilt_segment.slice;
                 assert_eq!(rebuilt_segment.len, 224);

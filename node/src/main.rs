@@ -81,9 +81,9 @@ async fn main() -> Result<(), crate::Error> {
             .map(|| {
                 warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
             })
-            .or(http::get_hash())
-            .or(http::post_content())
-            .or(http::delete_hash())
+            .or(http::get_object())
+            .or(http::post_object())
+            .or(http::delete_object())
             .or(http::post_collection())
             .or(http::get_item()))
         .with(warp::log("api"));

@@ -32,7 +32,7 @@ where
     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
 }
 
-async fn get_object(
+async fn resolve_object(
     object: ObjectRef,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     let stream = if let Some(stream) = object.iter()? {
@@ -69,16 +69,16 @@ async fn get_object(
     }
 }
 
-pub fn get_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("_hash" / Hash)
+pub fn get_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_objects" / Hash)
         .and(warp::get())
         .and_then(|hash: Hash| async move {
-            Ok(get_object(ObjectRef::new(hash)).await?) as Result<_, warp::Rejection>
+            Ok(resolve_object(ObjectRef::new(hash)).await?) as Result<_, warp::Rejection>
         })
 }
 
-pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("_hash")
+pub fn post_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_objects")
         .and(warp::post())
         .and(warp::header("content-type"))
         .and(warp::body::bytes())
@@ -94,8 +94,8 @@ pub fn post_content() -> impl Filter<Extract = impl warp::Reply, Error = warp::R
         .and_then(async_reply)
 }
 
-pub fn delete_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("_hash" / Hash)
+pub fn delete_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_objects" / Hash)
         .and(warp::delete())
         .map(|hash| ObjectRef::new(hash).drop_if_exists())
         .map(reply)
@@ -103,35 +103,33 @@ pub fn delete_hash() -> impl Filter<Extract = impl warp::Reply, Error = warp::Re
 
 pub fn post_collection() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
 {
-    warp::path!("_collection")
+    warp::path!("_collections")
         .and(warp::post())
         .and(warp::body::json())
-        .map(|hashes: Vec<(String, Hash)>| {
+        .map(|hashes: Vec<(String, String)>| {
             let collection = CollectionRef::build(
                 hashes
                     .into_iter()
-                    .map(|(name, hash)| (name, ObjectRef::new(hash)))
-                    .collect::<Vec<_>>(),
+                    .map(|(name, hash)| Ok((name, ObjectRef::new(hash.parse()?))))
+                    .collect::<Result<Vec<_>, crate::Error>>()?,
             )?;
             Ok(Return {
                 content_type: "text/plain".to_owned(),
                 status_code: http::StatusCode::OK,
-                content: collection.hash.0.into(),
+                content: collection.hash.to_string().as_bytes().to_vec(),
             })
         })
         .map(reply)
 }
 
 pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("_collection" / Hash / ..)
+    warp::path!("_collections" / Hash / ..)
         .and(warp::path::tail())
         .and(warp::get())
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
-            let item = collection
-                .get(name.as_str().to_owned())?
-                .expect("object exists");
+            let item = collection.get(name.as_str())?.expect("object exists");
 
-            Ok(get_object(item.object).await?) as Result<_, warp::Rejection>
+            Ok(resolve_object(item.object).await?) as Result<_, warp::Rejection>
         })
 }

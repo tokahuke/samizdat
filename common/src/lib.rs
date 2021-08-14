@@ -6,14 +6,12 @@ pub mod rpc;
 
 mod error;
 mod hash;
+mod patricia_map;
 mod riddles;
 mod transport;
-//mod merkle_map;
-mod patricia_map;
 
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
+pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use riddles::{ContentRiddle, Message, MessageRiddle};
 pub use transport::BincodeOverQuic;
-//pub use merkle_map::MerkleMap;
-pub use patricia_map::PatriciaMap;

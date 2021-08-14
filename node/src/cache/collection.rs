@@ -1,4 +1,4 @@
-use samizdat_common::{Hash, InclusionProof, MerkleTree};
+use samizdat_common::{Hash, PatriciaMap, PatriciaProof};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::db;
@@ -6,30 +6,16 @@ use crate::Table;
 
 use super::ObjectRef;
 
-struct Naming<'a>(&'a str, &'a ObjectRef);
-
-impl<'a> Naming<'a> {
-    fn hash(&self) -> Hash {
-        Hash::build(self.0.as_bytes()).rehash(&self.1.hash)
-    }
-}
-
 #[derive(Serialize, Deserialize)]
-struct Locator {
+struct Locator<'a> {
     collection: CollectionRef,
-    name: String,
-}
-
-impl Locator {
-    pub fn hash(&self) -> Hash {
-        self.collection.hash.rehash(&Hash::build(&self.name))
-    }
+    name: &'a str,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct CollectionItem {
     pub object: ObjectRef,
-    pub inclusion_proof: InclusionProof,
+    pub inclusion_proof: PatriciaProof,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,28 +28,30 @@ impl CollectionRef {
         CollectionRef { hash }
     }
 
-    pub fn build<I, N>(it: I) -> Result<CollectionRef, crate::Error>
+    pub fn build<I, N>(objects: I) -> Result<CollectionRef, crate::Error>
     where
         I: AsRef<[(N, ObjectRef)]>,
         N: AsRef<str>,
     {
-        let hashes = it
+        // Note: this is the slow part of the process (by a long stretch)
+        let patricia_map = objects
             .as_ref()
             .iter()
-            .map(|(name, object)| Naming(name.as_ref(), object).hash())
-            .collect::<Vec<_>>();
+            .map(|(name, object)| (Hash::build(name.as_ref().as_bytes()), object.hash))
+            .collect::<PatriciaMap>();
 
-        let merkle_tree = MerkleTree::from(hashes);
-        let root = merkle_tree.root();
+        let root = *patricia_map.root();
         let collection = CollectionRef { hash: root };
 
         let mut batch = rocksdb::WriteBatch::default();
 
-        for (idx, (name, object)) in it.as_ref().iter().enumerate() {
-            let key = collection.locator_for(name.as_ref().to_owned());
+        for (name, object) in objects.as_ref() {
+            let key = collection.locator_for(name.as_ref());
             let value = CollectionItem {
                 object: object.clone(),
-                inclusion_proof: merkle_tree.proof_for(idx).expect("index exists in list"),
+                inclusion_proof: patricia_map
+                    .proof_for(Hash::build(name.as_ref().as_bytes()))
+                    .expect("name exists in map"),
             };
 
             batch.put_cf(
@@ -80,14 +68,14 @@ impl CollectionRef {
         Ok(collection)
     }
 
-    fn locator_for(&self, name: String) -> Locator {
+    fn locator_for<'a>(&self, name: &'a str) -> Locator<'a> {
         Locator {
             collection: self.clone(),
             name,
         }
     }
 
-    pub fn get(&self, name: String) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn get(&self, name: &str) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
         let maybe_item = db().get_cf(
             Table::CollectionItems.get(),

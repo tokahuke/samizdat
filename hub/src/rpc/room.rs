@@ -65,7 +65,7 @@ impl<T: 'static + Send + Sync> Room<T> {
 
 // impl<T: 'static + Sync + Send> Drop for ParticipantInner<T> {
 //     fn drop(&mut self) {
-//         // log::debug!("droping participant");
+//         // log::debug!("dropping participant");
 //         // let peers = self.peers.clone();
 //         // peers.remove(&self.id);
 //     }

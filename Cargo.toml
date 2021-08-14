@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["common", "node", "hub"]
+members = ["common", "node", "hub", "cli"]
 
 [profile.release]
 lto = "thin"

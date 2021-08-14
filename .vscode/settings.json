@@ -1,7 +1,34 @@
 {
     "cSpell.words": [
+        "addrs",
+        "amdahl",
+        "appender",
         "backoff",
+        "bincode",
+        "bleh",
+        "chashmap",
+        "chrono",
+        "concat",
+        "getrandom",
+        "is",
+        "loopback",
         "merkle",
-        "tree"
+        "oneshot",
+        "ooops",
+        "postgres",
+        "quic",
+        "rcgen",
+        "reqwest",
+        "rocksdb",
+        "rustls",
+        "sled",
+        "structopt",
+        "symlink",
+        "tarpc",
+        "to",
+        "toctou",
+        "tree",
+        "uninstrumented",
+        "webpki"
     ]
 }
