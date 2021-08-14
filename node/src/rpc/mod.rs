@@ -15,7 +15,9 @@ use tokio::sync::oneshot;
 use tokio::time::Duration;
 
 use samizdat_common::quic;
-use samizdat_common::rpc::{HubClient, Node, Query, QueryResponse, Resolution, ResolutionResponse};
+use samizdat_common::rpc::{
+    HubClient, Node, Query, QueryKind, QueryResponse, Resolution, ResolutionResponse,
+};
 use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cache::ObjectRef;
@@ -188,6 +190,7 @@ impl HubConnection {
                 Query {
                     content_riddle,
                     location_riddle,
+                    kind: QueryKind::Object,
                 },
             )
             .await?;

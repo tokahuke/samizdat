@@ -128,8 +128,11 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and(warp::get())
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
-            let item = collection.get(name.as_str())?.expect("object exists");
-
-            Ok(resolve_object(item.object).await?) as Result<_, warp::Rejection>
+            if let Some(item) = collection.get(name.as_str())? {
+                assert!(item.inclusion_proof.is_in(&hash));
+                Ok(resolve_object(item.object).await?) as Result<_, warp::Rejection>
+            } else {
+                Err(warp::reject::not_found())
+            }
         })
 }

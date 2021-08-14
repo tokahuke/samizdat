@@ -9,6 +9,7 @@
         "chashmap",
         "chrono",
         "concat",
+        "dedup",
         "getrandom",
         "is",
         "loopback",

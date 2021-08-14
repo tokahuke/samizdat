@@ -5,11 +5,21 @@ use std::sync::Arc;
 use crate::{ContentRiddle, MessageRiddle};
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum QueryKind {
+    /// The hash corresponds to an object hash.
+    Object,
+    /// The hash corresponds to an item location (collection + path) hash.
+    Item,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
     /// The riddle that will be sent to the other peers.
     pub content_riddle: ContentRiddle,
     /// The riddle that will be used by the peer that has the hash to find the IP of the client.
     pub location_riddle: ContentRiddle,
+    /// The kind of query.
+    pub kind: QueryKind,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,7 +36,7 @@ pub enum QueryResponse {
 pub trait Hub {
     /// Returns the port for the node to connect as server.
     async fn reverse_port() -> u16;
-    /// Returns a greeting for name.
+    /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
 }
 
@@ -34,6 +44,7 @@ pub trait Hub {
 pub struct Resolution {
     pub content_riddle: ContentRiddle,
     pub message_riddle: MessageRiddle,
+    pub kind: QueryKind,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

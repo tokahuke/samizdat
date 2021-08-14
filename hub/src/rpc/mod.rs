@@ -104,6 +104,7 @@ impl Hub for HubServer {
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 message_riddle,
+                kind: query.kind,
             });
 
             // And then send the request to the peers:

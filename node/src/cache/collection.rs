@@ -53,11 +53,11 @@ impl CollectionRef {
                     .proof_for(Hash::build(name.as_ref().as_bytes()))
                     .expect("name exists in map"),
             };
-
+            dbg!(name.as_ref());
             batch.put_cf(
                 Table::CollectionItems.get(),
                 bincode::serialize(&key).expect("can serialize"),
-                bincode::serialize(&value).expect("can serialize"),
+                dbg!(bincode::serialize(&value).expect("can serialize")),
             );
         }
 
@@ -81,9 +81,10 @@ impl CollectionRef {
             Table::CollectionItems.get(),
             bincode::serialize(&locator).expect("can serialize"),
         )?;
+        dbg!(&maybe_item);
 
         if let Some(item) = maybe_item {
-            Ok(bincode::deserialize(&item)?)
+            Ok(Some(bincode::deserialize(&item)?))
         } else {
             Ok(None)
         }
