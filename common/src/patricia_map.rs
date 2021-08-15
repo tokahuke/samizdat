@@ -382,7 +382,7 @@ impl PatriciaProof {
     pub fn claimed_key(&self) -> &Hash {
         &self.claimed_key
     }
-    
+
     pub fn is_in(&self, root: &Hash) -> bool {
         // Check if proof is the right length:
         // (`usize` mitigates overflow shenanigans).

@@ -1,5 +1,8 @@
-use samizdat_common::{Hash, PatriciaMap, PatriciaProof};
+use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
+use std::convert::TryInto;
+
+use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
 
 use crate::db;
 use crate::Table;
@@ -36,6 +39,26 @@ impl CollectionItem {
             collection: self.collection.clone(),
             name: &self.name,
         }
+    }
+
+    pub fn find(content_riddle: &ContentRiddle) -> Result<Option<CollectionItem>, crate::Error> {
+        let iter = db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start);
+
+        for (key, value) in iter {
+            let hash: Hash = match key.as_ref().try_into() {
+                Ok(hash) => hash,
+                Err(err) => {
+                    log::warn!("{}", err);
+                    continue;
+                }
+            };
+
+            if content_riddle.resolves(&hash) {
+                return Ok(Some(bincode::deserialize(&*value)?));
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -123,11 +146,11 @@ impl<'a> Locator<'a> {
         self.collection.get(self.name)
     }
 
-    pub fn with_proof(&self, inclusion_proof: PatriciaProof) -> CollectionItem {
-        CollectionItem {
-            collection: self.collection.clone(),
-            name: self.name.to_owned(),
-            inclusion_proof,
-        }
-    }
+    // pub fn with_proof(&self, inclusion_proof: PatriciaProof) -> CollectionItem {
+    //     CollectionItem {
+    //         collection: self.collection.clone(),
+    //         name: self.name.to_owned(),
+    //         inclusion_proof,
+    //     }
+    // }
 }

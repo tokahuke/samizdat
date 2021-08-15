@@ -1,5 +1,3 @@
-//! TODO also secure **headers** using the focus hash in each case.
-
 mod cipher;
 
 use futures::prelude::*;
@@ -14,7 +12,7 @@ use std::sync::Arc;
 use samizdat_common::Hash;
 use samizdat_common::PatriciaProof;
 
-use crate::cache::{CollectionItem, Locator, ObjectRef};
+use crate::cache::{CollectionItem, ObjectRef};
 use crate::cli;
 
 use self::cipher::TransferCipher;
@@ -31,7 +29,10 @@ fn read_error_to_io(error: ReadToEndError) -> io::Error {
 
 #[async_trait::async_trait]
 trait Header: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<'a> {
-    async fn recv(uni_streams: &mut IncomingUniStreams, cipher: &TransferCipher) -> Result<Self, crate::Error> {
+    async fn recv(
+        uni_streams: &mut IncomingUniStreams,
+        cipher: &TransferCipher,
+    ) -> Result<Self, crate::Error> {
         // Receive header from peer:
         let header_stream = uni_streams
             .next()
@@ -47,7 +48,11 @@ trait Header: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<
         Ok(header)
     }
 
-    async fn send(&self, connection: &Connection, cipher: &TransferCipher) -> Result<(), crate::Error> {
+    async fn send(
+        &self,
+        connection: &Connection,
+        cipher: &TransferCipher,
+    ) -> Result<(), crate::Error> {
         let mut send_header = connection.open_uni().await?;
         log::debug!("stream for header opened");
 
@@ -83,18 +88,24 @@ impl NonceHeader {
         TransferCipher::new(&hash, &self.nonce)
     }
 
-    async fn recv_negotiate(uni_streams: &mut IncomingUniStreams, hash: Hash) -> Result<TransferCipher, crate::Error> {
+    async fn recv_negotiate(
+        uni_streams: &mut IncomingUniStreams,
+        hash: Hash,
+    ) -> Result<TransferCipher, crate::Error> {
         let init_cipher = NonceHeader::default().cipher(hash);
         let nonce_header = NonceHeader::recv(uni_streams, &init_cipher).await?;
-        
+
         Ok(nonce_header.cipher(hash))
     }
 
-    async fn send_negotiate(connection: &Connection, hash: Hash) -> Result<TransferCipher, crate::Error> {
+    async fn send_negotiate(
+        connection: &Connection,
+        hash: Hash,
+    ) -> Result<TransferCipher, crate::Error> {
         let init_cipher = NonceHeader::default().cipher(hash);
         let nonce_header = NonceHeader::new();
         nonce_header.send(connection, &init_cipher).await?;
-    
+
         Ok(nonce_header.cipher(hash))
     }
 }
@@ -252,21 +263,18 @@ pub async fn send_object(connection: &Connection, object: &ObjectRef) -> Result<
 
 pub async fn recv_item(
     uni_streams: &mut IncomingUniStreams,
-    locator: Locator<'_>,
+    hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
-    let hash = locator.hash();
     let transfer_cipher = NonceHeader::recv_negotiate(uni_streams, hash).await?;
     let header = ItemHeader::recv(uni_streams, &transfer_cipher).await?;
-    header
-        .object_header
-        .recv_data(uni_streams, hash)
-        .await
+    header.object_header.recv_data(uni_streams, hash).await
 }
 
 pub async fn send_item(connection: &Connection, item: CollectionItem) -> Result<(), crate::Error> {
     let object = item.object()?;
     let hash = item.locator().hash();
     let header = ItemHeader::for_item(item)?;
+
     let transfer_cipher = NonceHeader::send_negotiate(connection, hash).await?;
     header.send(connection, &transfer_cipher).await?;
     header.object_header.send_data(connection, &object).await

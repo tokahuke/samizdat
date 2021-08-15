@@ -20,7 +20,7 @@ pub enum Error {
     QuicConnectionError(quinn::ConnectionError),
     #[fail(display = "All candidates failed")]
     AllCandidatesFailed,
-    #[failt(display = "invalid collection item")]
+    #[fail(display = "invalid collection item")]
     InvalidCollectionItem,
 }
 

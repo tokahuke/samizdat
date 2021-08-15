@@ -11,7 +11,7 @@ use warp::Filter;
 use samizdat_common::rpc::QueryKind;
 use samizdat_common::Hash;
 
-use crate::cache::{CollectionRef, Locator, ObjectRef, ObjectStream};
+use crate::cache::{CollectionRef, Locator, ObjectRef};
 use crate::hubs;
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply

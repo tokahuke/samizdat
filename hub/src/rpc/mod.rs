@@ -11,7 +11,9 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
-use samizdat_common::rpc::{Hub, NodeClient, Query, QueryResponse, Resolution, ResolutionStatus};
+use samizdat_common::rpc::{
+    Hub, NodeClient, Query, QueryKind, QueryResponse, Resolution, ResolutionStatus,
+};
 use samizdat_common::{BincodeOverQuic, Message};
 
 use crate::replay_resistance::ReplayResistance;
@@ -108,6 +110,7 @@ impl Hub for HubServer {
             });
 
             // And then send the request to the peers:
+            let kind = query.kind;
             let candidates = ROOM
                 .stream_peers()
                 .map(|(peer_id, peer)| {
@@ -119,7 +122,12 @@ impl Hub for HubServer {
 
                         log::debug!("starting resolve for {}", peer_id);
 
-                        let response = match peer.client.resolve(ctx, resolution).await {
+                        let outcome = match kind {
+                            QueryKind::Object => peer.client.resolve_object(ctx, resolution).await,
+                            QueryKind::Item => peer.client.resolve_item(ctx, resolution).await,
+                        };
+
+                        let response = match outcome {
                             Ok(response) => response,
                             Err(err) => {
                                 log::warn!("error sending asking {} to resolve: {}", peer_id, err);
