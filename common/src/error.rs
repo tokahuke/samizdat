@@ -20,6 +20,8 @@ pub enum Error {
     QuicConnectionError(quinn::ConnectionError),
     #[fail(display = "All candidates failed")]
     AllCandidatesFailed,
+    #[fail(display = "invalid collection item")]
+    InvalidCollectionItem,
 }
 
 impl warp::reject::Reject for crate::Error {}

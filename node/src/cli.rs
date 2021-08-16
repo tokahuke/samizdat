@@ -18,6 +18,9 @@ pub struct Cli {
     /// A list of hubs to which to connect.
     #[structopt(env, long, default_value = "[::1]:4511")]
     pub hubs: Vec<AddrToResolve>,
+    /// The maximum number of hubs to be queried simultaneously per query.
+    #[structopt(env, long, default_value = "3")]
+    pub max_parallel_hubs: usize,
 }
 
 static mut CLI: Option<Cli> = None;

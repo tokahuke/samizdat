@@ -101,7 +101,9 @@ pub struct MessageRiddle {
 
 impl MessageRiddle {
     pub fn resolve(&self, content_hash: &Hash) -> Option<Message> {
-        let key = content_hash.rehash(&self.timestamp.into()).rehash(&self.rand);
+        let key = content_hash
+            .rehash(&self.timestamp.into())
+            .rehash(&self.rand);
         let mut serialized = self.masked.clone();
 
         StreamCipher::new(key).xor(&mut serialized);

@@ -1,7 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_224};
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display, Debug};
+use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -48,7 +48,7 @@ impl<'a> TryFrom<&'a [u8]> for Hash {
         if slice.len() != 28 {
             Err(crate::Error::BadHashLength(slice.len()))
         } else {
-            Ok(Hash(slice.try_into().expect("aleady checked")))
+            Ok(Hash(slice.try_into().expect("already checked")))
         }
     }
 }
@@ -136,7 +136,10 @@ impl From<Vec<Hash>> for MerkleTree {
                     None
                 }
             })
-            .collect::<Vec<_>>().into_iter().rev().collect(),
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect(),
         }
     }
 }
