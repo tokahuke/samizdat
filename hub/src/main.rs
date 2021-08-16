@@ -1,6 +1,5 @@
 mod cli;
 mod db;
-mod flatbuffers;
 mod replay_resistance;
 mod rpc;
 

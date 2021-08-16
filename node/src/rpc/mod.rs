@@ -290,6 +290,9 @@ impl HubConnection {
             .next()
             .await;
 
+        // TODO: minor improvement... could we tee the object stream directly to the user? By now,
+        // we are waiting for the whole object to arrive, which is fine for most files, but ca be
+        // a pain for the bigger ones...
         match new_connection {
             Some(mut new_connection) => Ok(Some(match kind {
                 QueryKind::Object => {

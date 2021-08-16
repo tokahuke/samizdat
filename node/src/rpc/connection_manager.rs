@@ -116,6 +116,9 @@ impl ConnectionManager {
         ))
     }
 
+    /// TODO: very basic NAT/firewall traversal stuff that works well in IPv6,
+    /// but not so much in IPv4. Is there a better solution? I am already using
+    /// the hub as a STUN and not many people have the means to keep a TURN.
     pub async fn punch_hole_to(
         &self,
         peer_addr: SocketAddr,
@@ -160,6 +163,7 @@ impl ConnectionManager {
                 log::info!("both connections failed");
                 log::info!("incoming error: {}", incoming_err);
                 log::info!("outgoing error: {}", outgoing_err);
+                // TODO: better error message here.
                 Err("failed miserably".to_owned().into())
             }
         }

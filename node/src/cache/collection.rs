@@ -1,6 +1,7 @@
 use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryInto;
+use std::fmt::{self, Display};
 
 use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
 
@@ -9,7 +10,7 @@ use crate::Table;
 
 use super::ObjectRef;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
     pub collection: CollectionRef,
     pub name: String,
@@ -19,9 +20,19 @@ pub struct CollectionItem {
 impl CollectionItem {
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
-        let key = self.collection.locator_for(&self.name).hash();
+        let key = Hash::build(self.name.as_bytes());
 
-        is_included && &key == self.inclusion_proof.claimed_key()
+        if !is_included {
+            log::error!("Inclusion proof falied for {:?}", self);
+            return false;
+        }
+
+        if &key != self.inclusion_proof.claimed_key() {
+            log::error!("Key is different from claimed key: {:?}", self);
+            return false;
+        }
+
+        true
     }
 
     /// Returns an object reference if item is valid. Else, returns
@@ -59,6 +70,17 @@ impl CollectionItem {
         }
 
         Ok(None)
+    }
+
+    pub fn insert(&self) -> Result<(), crate::Error> {
+        let key = self.collection.locator_for(&self.name).hash();
+        db().put_cf(
+            Table::CollectionItems.get(),
+            key,
+            bincode::serialize(self).expect("can serialize"),
+        )?;
+
+        Ok(())
     }
 }
 
@@ -122,7 +144,6 @@ impl CollectionRef {
     pub fn get(&self, name: &str) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
         let maybe_item = db().get_cf(Table::CollectionItems.get(), locator.hash())?;
-        dbg!(&maybe_item);
 
         if let Some(item) = maybe_item {
             Ok(Some(bincode::deserialize(&item)?))
@@ -132,9 +153,16 @@ impl CollectionRef {
     }
 }
 
+#[derive(Debug)]
 pub struct Locator<'a> {
     collection: CollectionRef,
     name: &'a str,
+}
+
+impl<'a> Display for Locator<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.collection.hash, self.name)
+    }
 }
 
 impl<'a> Locator<'a> {

@@ -46,7 +46,7 @@ impl ObjectRef {
 
     pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
         match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
-            Some(serialized) => Ok(bincode::deserialize(&serialized)?),
+            Some(serialized) => Ok(Some(bincode::deserialize(&serialized)?)),
             None => Ok(None),
         }
     }

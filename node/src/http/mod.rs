@@ -40,6 +40,7 @@ async fn resolve_object(
         log::info!("found local hash {}", object.hash);
         Some(stream)
     } else {
+        log::info!("hash {} not found locally. Querying hubs", object.hash);
         hubs().query(object.hash, QueryKind::Object).await;
         object.iter()?
     };
@@ -61,7 +62,7 @@ async fn resolve_object(
         let response = http::Response::builder()
             .header("Content-Type", "text/plain")
             .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(""));
+            .body(Body::from(format!("object {} not found", object.hash)));
 
         Ok(response)
     }
@@ -70,8 +71,25 @@ async fn resolve_object(
 async fn resolve_item(
     locator: Locator<'_>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    hubs().query(locator.hash(), QueryKind::Item).await;
-    todo!()
+    let maybe_item = if let Some(item) = locator.get()? {
+        log::info!("found item {} locally. Resolving object.", locator);
+        Some(item)
+    } else {
+        log::info!("item not found locally. Querying hubs.");
+        hubs().query(locator.hash(), QueryKind::Item).await;
+        locator.get()?
+    };
+
+    if let Some(item) = maybe_item {
+        resolve_object(item.object()?).await
+    } else {
+        let response = http::Response::builder()
+            .header("Content-Type", "text/plain")
+            .status(http::StatusCode::NOT_FOUND)
+            .body(Body::from(format!("item {} not found", locator)));
+
+        Ok(response)
+    }
 }
 
 pub fn get_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -134,10 +152,6 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
             let locator = collection.locator_for(name.as_str());
-            if let Some(item) = locator.get()? {
-                Ok(resolve_object(item.object()?).await?) as Result<_, warp::Rejection>
-            } else {
-                Ok(resolve_item(locator).await?)
-            }
+            Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
         })
 }

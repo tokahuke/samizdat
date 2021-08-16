@@ -1862,7 +1862,6 @@ dependencies = [
  "chrono",
  "failure",
  "failure_derive",
- "flatbuffers",
  "futures",
  "lazy_static",
  "log",

@@ -10,7 +10,6 @@ use std::io;
 use std::sync::Arc;
 
 use samizdat_common::Hash;
-use samizdat_common::PatriciaProof;
 
 use crate::cache::{CollectionItem, ObjectRef};
 use crate::cli;
@@ -110,9 +109,9 @@ impl NonceHeader {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ItemHeader {
-    inclusion_proof: PatriciaProof,
+    item: CollectionItem,
     object_header: ObjectHeader,
 }
 
@@ -122,13 +121,13 @@ impl ItemHeader {
     fn for_item(item: CollectionItem) -> Result<ItemHeader, crate::Error> {
         let object_header = ObjectHeader::for_object(&item.object()?)?;
         Ok(ItemHeader {
-            inclusion_proof: item.inclusion_proof,
+            item,
             object_header,
         })
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ObjectHeader {
     nonce: Hash,
     content_size: usize,
@@ -209,7 +208,7 @@ impl ObjectHeader {
         } else if object.hash != hash {
             Err(format!(
                 "bad content from peer: expected {}, got {}",
-                object.hash, hash
+                hash, object.hash,
             )
             .into())
         } else {
@@ -249,25 +248,57 @@ pub async fn recv_object(
     uni_streams: &mut IncomingUniStreams,
     hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
+    log::debug!("negotiating nonce");
     let transfer_cipher = NonceHeader::recv_negotiate(uni_streams, hash).await?;
+    log::debug!("receiving object header");
     let header = ObjectHeader::recv(uni_streams, &transfer_cipher).await?;
+    log::debug!("receiving data");
     header.recv_data(uni_streams, hash).await
 }
 
 pub async fn send_object(connection: &Connection, object: &ObjectRef) -> Result<(), crate::Error> {
-    let transfer_cipher = NonceHeader::send_negotiate(connection, object.hash).await?;
     let header = ObjectHeader::for_object(object)?;
+
+    log::debug!("negotiating nonce");
+    let transfer_cipher = NonceHeader::send_negotiate(connection, object.hash).await?;
+    log::debug!("sending object header");
     header.send(connection, &transfer_cipher).await?;
+    log::debug!("sending data");
     header.send_data(connection, object).await
 }
 
+/// TODO: make object transfer optional if the receiver perceives that it
+/// already has the object (one simple table lookup, no seqscan here). This is
+/// important as people update their collections often, but keep most of it
+/// intact.
 pub async fn recv_item(
     uni_streams: &mut IncomingUniStreams,
-    hash: Hash,
+    locator_hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
-    let transfer_cipher = NonceHeader::recv_negotiate(uni_streams, hash).await?;
+    log::debug!("negotiating nonce");
+    let transfer_cipher = NonceHeader::recv_negotiate(uni_streams, locator_hash).await?;
+    log::debug!("receiving item header");
     let header = ItemHeader::recv(uni_streams, &transfer_cipher).await?;
-    header.object_header.recv_data(uni_streams, hash).await
+
+    // No tricks!
+    let locator_hash_from_peer = header.item.locator().hash();
+    if locator_hash_from_peer != locator_hash {
+        return Err(crate::Error::Message(format!(
+            "bad item from peer: expexted {}, got {}",
+            locator_hash, locator_hash_from_peer,
+        )));
+    }
+
+    // This checks proof validity:
+    let object = header.item.object()?;
+
+    header.item.insert()?;
+
+    log::debug!("receiving data");
+    header
+        .object_header
+        .recv_data(uni_streams, object.hash)
+        .await
 }
 
 pub async fn send_item(connection: &Connection, item: CollectionItem) -> Result<(), crate::Error> {
@@ -275,7 +306,10 @@ pub async fn send_item(connection: &Connection, item: CollectionItem) -> Result<
     let hash = item.locator().hash();
     let header = ItemHeader::for_item(item)?;
 
+    log::debug!("negotiating nonce");
     let transfer_cipher = NonceHeader::send_negotiate(connection, hash).await?;
+    log::debug!("sending item header");
     header.send(connection, &transfer_cipher).await?;
+    log::debug!("sending data");
     header.object_header.send_data(connection, &object).await
 }
