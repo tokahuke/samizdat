@@ -32,3 +32,4 @@ notify = "5.0.0-pre.11"
 hyper = { version = "0.14.11", features = ["stream"] }
 aes-gcm-siv = "0.10.2"
 async-trait = "0.1.51"
+ed25519-dalek = "1.0.1"
