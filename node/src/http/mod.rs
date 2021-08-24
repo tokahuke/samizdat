@@ -5,13 +5,14 @@ pub use returnable::{Return, Returnable};
 use futures::stream;
 use http::Response;
 use hyper::Body;
+use std::time::Duration;
 use warp::path::Tail;
 use warp::Filter;
 
 use samizdat_common::rpc::QueryKind;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, Key};
 
-use crate::cache::{CollectionRef, Locator, ObjectRef};
+use crate::cache::{CollectionRef, Locator, ObjectRef, SeriesOwner, SeriesRef};
 use crate::hubs;
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
@@ -153,5 +154,68 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             let collection = CollectionRef::new(hash);
             let locator = collection.locator_for(name.as_str());
             Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
+        })
+}
+
+pub fn post_series_owner(
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners" / String)
+        .and(warp::post())
+        .map(|series_owner_name: String| {
+            let series_owner = SeriesOwner::create(&series_owner_name, Duration::from_secs(3_600))?;
+            Ok(series_owner.series().to_string())
+        })
+        .map(reply)
+}
+
+pub fn get_series_owner() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
+{
+    warp::path!("_seriesowners" / String)
+        .and(warp::get())
+        .map(|series_owner_name: String| {
+            let maybe_owner = SeriesOwner::get(&series_owner_name)?;
+            Ok(maybe_owner.map(|owner| owner.series().to_string()))
+        })
+        .map(reply)
+}
+
+pub fn post_series() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners" / String / "collection" / Hash)
+        .and(warp::post())
+        .map(|series_owner_name: String, collection| {
+            if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
+                let series = series_owner.advance(CollectionRef::new(collection))?;
+                Ok(Some(returnable::Json(series)))
+            } else {
+                Ok(None)
+            }
+        })
+        .map(reply)
+}
+
+pub fn get_item_by_series(
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_series" / Key / ..)
+        .and(warp::path::tail())
+        .and(warp::get())
+        .and_then(|series_key: Key, name: Tail| async move {
+            let series = SeriesRef::new(series_key.into_inner());
+
+            if let Some(collection) = series.get_latest_fresh()? {
+                // Have a fresh result locally. Will resolve this item.
+                let locator = collection.locator_for(name.as_str());
+                Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
+            } else if series.is_locally_owned()? {
+                // Does not have a fresh result, but is owned. So, a result doesn't exist.
+                Ok(http::Response::builder()
+                    .header("Content-Type", "text/plain")
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Body::from(format!("series {} is empty", series))))
+                    as Result<_, warp::Rejection>
+            } else {
+                // Does not have a fresh result, but is not owned locally. Query the network!
+
+                todo!()
+            }
         })
 }

@@ -106,3 +106,35 @@ pub async fn commit(base: &PathBuf) -> Result<(), crate::Error> {
 
     Ok(())
 }
+
+pub async fn series_new(series_name: String) -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://localhost:4510/_seriesowners/{}",
+            series_name
+        ))
+        .send()
+        .await?;
+
+    log::info!("Status: {}", response.status());
+    println!("Collection hash: {}", response.text().await?);
+
+    Ok(())
+}
+
+pub async fn series_show(series_name: String) -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "http://localhost:4510/_seriesowners/{}",
+            series_name
+        ))
+        .send()
+        .await?;
+
+    log::info!("Status: {}", response.status());
+    println!("Collection hash: {}", response.text().await?);
+
+    Ok(())
+}

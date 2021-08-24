@@ -280,6 +280,7 @@ dependencies = [
  "libc",
  "num-integer",
  "num-traits",
+ "serde",
  "time",
  "winapi",
 ]
@@ -427,6 +428,7 @@ version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4620d40f6d2601794401d6dd95a5cf69b6c157852539470eeda433a99b3c0efc"
 dependencies = [
+ "serde",
  "signature",
 ]
 
@@ -440,6 +442,7 @@ dependencies = [
  "ed25519",
  "rand 0.7.3",
  "serde",
+ "serde_bytes",
  "sha2",
  "zeroize",
 ]
@@ -1862,10 +1865,12 @@ dependencies = [
 name = "samizdat-common"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm-siv",
  "base64-url",
  "bincode",
  "bytes",
  "chrono",
+ "ed25519-dalek",
  "failure",
  "failure_derive",
  "flatbuffers",
@@ -1874,6 +1879,8 @@ dependencies = [
  "log",
  "log4rs",
  "quinn",
+ "rand 0.7.3",
+ "rand_chacha 0.2.2",
  "rcgen",
  "rocksdb",
  "rustls",
@@ -1923,6 +1930,7 @@ dependencies = [
  "base64-url",
  "bincode",
  "bytes",
+ "chrono",
  "ed25519-dalek",
  "failure",
  "failure_derive",
@@ -1939,6 +1947,7 @@ dependencies = [
  "samizdat-common",
  "serde",
  "serde_derive",
+ "serde_json",
  "sha3",
  "structopt",
  "tarpc",
@@ -2017,6 +2026,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
+ "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16ae07dd2f88a366f15bd0632ba725227018c69a1c8550a927324f8eb8368bb9"
+dependencies = [
  "serde",
 ]
 

@@ -11,9 +11,7 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
-use samizdat_common::rpc::{
-    Hub, NodeClient, Query, QueryKind, QueryResponse, Resolution, ResolutionStatus,
-};
+use samizdat_common::rpc::*;
 use samizdat_common::{BincodeOverQuic, Message};
 
 use crate::replay_resistance::ReplayResistance;
@@ -80,9 +78,9 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
-    async fn reverse_port(self, _: context::Context) -> u16 {
-        CLI.reverse_port
-    }
+    // async fn reverse_port(self, _: context::Context) -> u16 {
+    //     CLI.reverse_port
+    // }
 
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
@@ -157,6 +155,10 @@ impl Hub for HubServer {
             QueryResponse::Resolved { candidates }
         }))
         .await
+    }
+
+    async fn get_latest(self, ctx: context::Context, latest: LatestRequest) -> LatestResponse {
+        todo!()
     }
 }
 

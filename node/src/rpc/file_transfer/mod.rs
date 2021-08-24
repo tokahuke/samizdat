@@ -1,5 +1,3 @@
-mod cipher;
-
 use futures::prelude::*;
 use futures::stream;
 use futures::TryStreamExt;
@@ -9,12 +7,11 @@ use serde_derive::{Deserialize, Serialize};
 use std::io;
 use std::sync::Arc;
 
+use samizdat_common::cipher::TransferCipher;
 use samizdat_common::Hash;
 
 use crate::cache::{CollectionItem, ObjectRef};
 use crate::cli;
-
-use self::cipher::TransferCipher;
 
 const MAX_HEADER_LENGTH: usize = 4_096;
 const MAX_STREAM_SIZE: usize = crate::cache::CHUNK_SIZE * 2;

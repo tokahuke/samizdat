@@ -15,9 +15,7 @@ use tokio::sync::oneshot;
 use tokio::time::Duration;
 
 use samizdat_common::quic;
-use samizdat_common::rpc::{
-    HubClient, Node, Query, QueryKind, QueryResponse, Resolution, ResolutionResponse,
-};
+use samizdat_common::rpc::*;
 use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cache::{CollectionItem, ObjectRef};
@@ -126,6 +124,14 @@ impl Node for NodeServer {
         );
 
         return ResolutionResponse::FOUND;
+    }
+
+    async fn resolve_latest(
+        self,
+        _: context::Context,
+        latest: Arc<LatestRequest>,
+    ) -> Option<LatestResponse> {
+        todo!()
     }
 }
 

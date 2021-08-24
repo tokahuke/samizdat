@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::borrow::Cow;
 
 pub trait Returnable {
@@ -128,5 +129,24 @@ impl Returnable for Return {
 
     fn render(&self) -> Cow<[u8]> {
         Cow::Borrowed(&self.content)
+    }
+}
+
+pub struct Json<T>(pub T);
+
+impl<T: Serialize> Returnable for Json<T> {
+    fn content_type(&self) -> Cow<str> {
+        Cow::Borrowed(&"application/json")
+    }
+
+    fn status_code(&self) -> http::StatusCode {
+        http::StatusCode::OK
+    }
+
+    fn render(&self) -> Cow<[u8]> {
+        serde_json::to_string_pretty(&self.0)
+            .expect("can serialize")
+            .into_bytes()
+            .into()
     }
 }

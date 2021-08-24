@@ -16,6 +16,16 @@ pub enum Cli {
         content_type: Option<String>,
         file: PathBuf,
     },
+    Series {
+        #[structopt(subcommand)]
+        command: SeriesCommand,
+    },
+}
+
+#[derive(Debug, StructOpt)]
+pub enum SeriesCommand {
+    New { series_owner_name: String },
+    Show { series_owner_name: String },
 }
 
 static mut CLI: Option<Cli> = None;
@@ -49,6 +59,12 @@ impl Cli {
                 });
                 commands::upload(file, content_type).await
             }
+            Cli::Series {
+                command: SeriesCommand::New { series_owner_name },
+            } => commands::series_new(series_owner_name.clone()).await,
+            Cli::Series {
+                command: SeriesCommand::Show { series_owner_name },
+            } => commands::series_show(series_owner_name.clone()).await,
         }
     }
 }

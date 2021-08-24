@@ -32,12 +32,24 @@ pub enum QueryResponse {
     Resolved { candidates: Vec<SocketAddr> },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatestRequest {
+    key_riddle: ContentRiddle,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatestResponse {
+    series_riddle: MessageRiddle,
+}
+
 #[tarpc::service]
 pub trait Hub {
-    /// Returns the port for the node to connect as server.
-    async fn reverse_port() -> u16;
+    // /// Returns the port for the node to connect as server.
+    // async fn reverse_port() -> u16;
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
+    ///
+    async fn get_latest(latest: LatestRequest) -> LatestResponse;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,4 +83,5 @@ pub enum ResolutionStatus {
 pub trait Node {
     async fn resolve_object(resolution: Arc<Resolution>) -> ResolutionResponse;
     async fn resolve_item(resolution: Arc<Resolution>) -> ResolutionResponse;
+    async fn resolve_latest(latest: Arc<LatestRequest>) -> Option<LatestResponse>;
 }
