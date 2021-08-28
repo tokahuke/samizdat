@@ -220,22 +220,23 @@ pub fn get_item_by_series() -> impl Filter<Extract = impl warp::Reply, Error = w
             let series = SeriesRef::new(series_key);
 
             if let Some(latest) = series.get_latest_fresh()? {
-                // Have a fresh result locally. Will resolve this item.
+                log::info!("Have a fresh result locally. Will resolve this item.");
                 let locator = latest.collection().locator_for(name.as_str());
                 Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
             } else if series.is_locally_owned()? {
-                // Does not have a fresh result, but is owned. So, a result doesn't exist.
+                log::info!("Does not have a fresh result, but is owned. So, a result doesn't exist.");
                 Ok(http::Response::builder()
                     .header("Content-Type", "text/plain")
                     .status(http::StatusCode::NOT_FOUND)
                     .body(Body::from(format!("series {} is empty", series))))
                     as Result<_, warp::Rejection>
             } else if let Some(latest) = hubs().get_latest(&series).await {
-                // Does not have a fresh result, but is not owned locally. Query the network!
+                log::info!("Does not have a fresh result, but is not owned locally. Query the network!");
+                series.advance(&latest)?;
                 let locator = latest.collection().locator_for(name.as_str());
                 Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
             } else {
-                // Not found!
+                log::info!("Not found!");
                 Ok(http::Response::builder()
                     .header("Content-Type", "text/plain")
                     .status(http::StatusCode::NOT_FOUND)

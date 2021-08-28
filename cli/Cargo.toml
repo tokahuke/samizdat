@@ -21,3 +21,4 @@ table = "0.4.0"
 tabled = "0.2.2"
 tokio = { version = "1.10.0", features = ["macros", "rt-multi-thread"] }
 samizdat-common = { path = "../common" }
+chrono = "0.4.19"

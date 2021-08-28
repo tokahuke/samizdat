@@ -3,6 +3,7 @@ use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
+use chrono::SubsecRound;
 
 use samizdat_common::{ContentRiddle, Key, Signed};
 
@@ -74,7 +75,7 @@ impl SeriesOwner {
             signed: Signed::new(
                 SeriesItemContent {
                     collection,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: chrono::Utc::now().trunc_subsecs(0),
                     ttl: ttl.unwrap_or(self.default_ttl),
                 },
                 &self.keypair,
@@ -87,11 +88,11 @@ impl SeriesOwner {
     pub fn advance(&self, collection: CollectionRef, ttl: Option<Duration>) -> Result<SeriesItem, crate::Error> {
         let item = self.sign(collection, ttl);
 
-        db().put_cf(
+        dbg!(db().put_cf(
             Table::SeriesItems.get(),
-            item.key(),
-            bincode::serialize(&item).expect("can serialize"),
-        )?;
+            dbg!(item.key()),
+            dbg!(bincode::serialize(&item).expect("can serialize")),
+        )?);
 
         Ok(item)
     }
@@ -160,30 +161,20 @@ impl SeriesRef {
     pub fn get_latest_fresh(&self) -> Result<Option<SeriesItem>, crate::Error> {
         let is_locally_owned = self.is_locally_owned()?;
 
-        // TODO: use prefix trickery to avoid mini-SeqScan here.
-        let iter = db().prefix_iterator_cf(Table::SeriesItems.get(), self.public_key.as_bytes());
-        let mut max: Option<SeriesItem> = None;
-
-        for (_key, value) in iter {
+        if let Some(value) = dbg!(db().get_cf(Table::SeriesItems.get(), dbg!(self.key()))?) {
             let item: SeriesItem = bincode::deserialize(&value)?;
 
-            if !item.is_fresh() && !is_locally_owned {
-                continue;
-            }
-
-            if let Some(max) = max.as_mut() {
-                if max.signed.timestamp < item.signed.timestamp {
-                    *max = item;
-                }
+            if dbg!(dbg!(is_locally_owned) || dbg!(item.is_fresh())) {
+                Ok(Some(item))
             } else {
-                max = Some(item);
+                Ok(None)
             }
+        } else {
+            Ok(None)
         }
-
-        Ok(max)
     }
 
-    pub fn advance(&self, series_item: SeriesItem) -> Result<(), crate::Error> {
+    pub fn advance(&self, series_item: &SeriesItem) -> Result<(), crate::Error> {
         if !series_item.is_valid() {
             return Err(crate::Error::InvalidSeriesItem);
         }
@@ -233,13 +224,14 @@ impl SeriesItem {
     }
 
     #[inline(always)]
-    fn key(&self) -> Vec<u8> {
-        let timestamp = self.signed.timestamp.timestamp_millis();
-        [
-            self.public_key.as_bytes().as_ref(),
-            timestamp.to_be_bytes().as_ref(),
-        ]
-        .concat()
+    fn key(&self) -> &[u8] {
+        // let timestamp = self.signed.timestamp.timestamp_millis();
+        // [
+        //     self.public_key.as_bytes().as_ref(),
+        //     timestamp.to_be_bytes().as_ref(),
+        // ]
+        // .concat()
+        self.public_key.as_bytes()
     }
 
     pub fn erase_freshness(&mut self) {
@@ -252,9 +244,8 @@ impl SeriesItem {
     }
 
     pub fn is_fresh(&self) -> bool {
-        self.freshness
+        chrono::Utc::now() < self.freshness
             + chrono::Duration::from_std(self.signed.ttl).expect("can convert from std duration")
-            < chrono::Utc::now()
     }
 
     pub fn freshness(&self) -> chrono::DateTime<chrono::Utc> {
