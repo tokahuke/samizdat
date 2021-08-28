@@ -87,6 +87,7 @@ async fn main() -> Result<(), crate::Error> {
             .or(http::post_collection())
             .or(http::get_item())
             .or(http::get_series_owner())
+            .or(http::get_series_owners())
             .or(http::post_series_owner())
             .or(http::post_series())
             .or(http::get_item_by_series()))

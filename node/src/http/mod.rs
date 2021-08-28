@@ -8,6 +8,7 @@ use hyper::Body;
 use std::time::Duration;
 use warp::path::Tail;
 use warp::Filter;
+use serde_derive::{Deserialize};
 
 use samizdat_common::rpc::QueryKind;
 use samizdat_common::{Hash, Key};
@@ -179,12 +180,30 @@ pub fn get_series_owner() -> impl Filter<Extract = impl warp::Reply, Error = war
         .map(reply)
 }
 
+pub fn get_series_owners() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners")
+        .and(warp::get())
+        .map(|| {
+            let series = SeriesOwner::get_all()?;
+            Ok(returnable::Json(series))
+        })
+        .map(reply)
+}
+
 pub fn post_series() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("_seriesowners" / String / "collection" / Hash)
+    #[derive(Deserialize)]
+    struct Request {
+        #[serde(default)]
+        #[serde(with = "humantime_serde")]
+        ttl: Option<std::time::Duration>,
+    }
+
+    warp::path!("_seriesowners" / String / "collections" / Hash)
         .and(warp::post())
-        .map(|series_owner_name: String, collection| {
+        .and(warp::query())
+        .map(|series_owner_name: String, collection, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let series = series_owner.advance(CollectionRef::new(collection))?;
+                let series = series_owner.advance(CollectionRef::new(collection), request.ttl)?;
                 Ok(Some(returnable::Json(series)))
             } else {
                 Ok(None)
@@ -193,17 +212,16 @@ pub fn post_series() -> impl Filter<Extract = impl warp::Reply, Error = warp::Re
         .map(reply)
 }
 
-pub fn get_item_by_series(
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn get_item_by_series() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
         .and(warp::get())
         .and_then(|series_key: Key, name: Tail| async move {
-            let series = SeriesRef::new(series_key.into_inner());
+            let series = SeriesRef::new(series_key);
 
-            if let Some(collection) = series.get_latest_fresh()? {
+            if let Some(latest) = series.get_latest_fresh()? {
                 // Have a fresh result locally. Will resolve this item.
-                let locator = collection.locator_for(name.as_str());
+                let locator = latest.collection().locator_for(name.as_str());
                 Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
             } else if series.is_locally_owned()? {
                 // Does not have a fresh result, but is owned. So, a result doesn't exist.
@@ -212,10 +230,17 @@ pub fn get_item_by_series(
                     .status(http::StatusCode::NOT_FOUND)
                     .body(Body::from(format!("series {} is empty", series))))
                     as Result<_, warp::Rejection>
-            } else {
+            } else if let Some(latest) = hubs().get_latest(&series).await {
                 // Does not have a fresh result, but is not owned locally. Query the network!
-
-                todo!()
+                let locator = latest.collection().locator_for(name.as_str());
+                Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
+            } else {
+                // Not found!
+                Ok(http::Response::builder()
+                    .header("Content-Type", "text/plain")
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Body::from(format!("series {} not found", series))))
+                    as Result<_, warp::Rejection>
             }
         })
 }

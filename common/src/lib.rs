@@ -1,19 +1,20 @@
 pub mod cipher;
 pub mod logger;
-pub mod pki;
 pub mod quic;
 pub mod rpc;
 
 mod error;
 mod hash;
 mod patricia_map;
+mod pki;
 mod riddles;
 mod transport;
 
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
-pub use riddles::{ContentRiddle, Message, MessageRiddle};
+pub use pki::{Key, Signed};
+pub use riddles::{ContentRiddle, MessageRiddle};
 pub use transport::BincodeOverQuic;
 
 use rand::{CryptoRng, RngCore, SeedableRng};

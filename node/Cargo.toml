@@ -35,3 +35,4 @@ async-trait = "0.1.51"
 ed25519-dalek = { version = "1.0.1", features = ["serde"] }
 chrono = { version = "0.4.19", features = ["serde"] }
 serde_json = "1.0.66"
+humantime-serde = "1.0.1"

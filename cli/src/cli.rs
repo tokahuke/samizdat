@@ -8,7 +8,12 @@ pub enum Cli {
     /// Starts a new collection in this folder.
     Init,
     /// Creates a new version (collection) of the content in this folder.
-    Commit { dir: PathBuf },
+    Commit {
+        #[structopt(long)]
+        ttl: Option<String>,
+        dir: PathBuf,
+        series: Option<String>,
+    },
     /// Uploads a single file as an object.
     Upload {
         /// The content-type of this file. Will be guessed if unspecified.
@@ -26,6 +31,7 @@ pub enum Cli {
 pub enum SeriesCommand {
     New { series_owner_name: String },
     Show { series_owner_name: String },
+    Ls,
 }
 
 static mut CLI: Option<Cli> = None;
@@ -50,7 +56,7 @@ impl Cli {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
             Cli::Init => commands::init().await,
-            Cli::Commit { dir } => commands::commit(dir).await,
+            Cli::Commit { dir, series, ttl } => commands::commit(dir, series, ttl).await,
             Cli::Upload { file, content_type } => {
                 let content_type = content_type.clone().unwrap_or_else(|| {
                     mime_guess::from_path(&file)
@@ -65,6 +71,9 @@ impl Cli {
             Cli::Series {
                 command: SeriesCommand::Show { series_owner_name },
             } => commands::series_show(series_owner_name.clone()).await,
+            Cli::Series {
+                command: SeriesCommand::Ls,
+            } => commands::series_list().await,
         }
     }
 }

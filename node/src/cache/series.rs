@@ -1,10 +1,10 @@
-use ed25519_dalek::{Keypair, PublicKey};
+use ed25519_dalek::Keypair;
 use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
 
-use samizdat_common::pki::Signed;
+use samizdat_common::{ContentRiddle, Key, Signed};
 
 use crate::db;
 use crate::db::Table;
@@ -13,6 +13,7 @@ use super::CollectionRef;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
+    name: String,
     keypair: Keypair,
     default_ttl: Duration,
 }
@@ -20,6 +21,7 @@ pub struct SeriesOwner {
 impl SeriesOwner {
     pub fn create(name: &str, default_ttl: Duration) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
+            name: name.to_owned(),
             keypair: Keypair::generate(&mut samizdat_common::csprng()),
             default_ttl,
         };
@@ -53,29 +55,37 @@ impl SeriesOwner {
         }
     }
 
+    pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
+        db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start)
+            .map(|(_, value)| {
+                Ok(bincode::deserialize(&value)?)
+            })
+            .collect::<Result<Vec<_>, crate::Error>>()
+    }
+
     pub fn series(&self) -> SeriesRef {
         SeriesRef {
-            public_key: self.keypair.public,
+            public_key: Key::new(self.keypair.public),
         }
     }
 
-    fn sign(&self, collection: CollectionRef) -> SeriesItem {
+    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>) -> SeriesItem {
         SeriesItem {
             signed: Signed::new(
                 SeriesItemContent {
                     collection,
                     timestamp: chrono::Utc::now(),
-                    ttl: self.default_ttl,
+                    ttl: ttl.unwrap_or(self.default_ttl),
                 },
                 &self.keypair,
             ),
-            public_key: self.keypair.public,
+            public_key: Key::new(self.keypair.public),
             freshness: chrono::Utc::now(),
         }
     }
 
-    pub fn advance(&self, collection: CollectionRef) -> Result<SeriesItem, crate::Error> {
-        let item = self.sign(collection);
+    pub fn advance(&self, collection: CollectionRef, ttl: Option<Duration>) -> Result<SeriesItem, crate::Error> {
+        let item = self.sign(collection, ttl);
 
         db().put_cf(
             Table::SeriesItems.get(),
@@ -89,7 +99,7 @@ impl SeriesOwner {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesRef {
-    public_key: PublicKey,
+    pub public_key: Key,
 }
 
 impl Display for SeriesRef {
@@ -99,7 +109,7 @@ impl Display for SeriesRef {
 }
 
 impl SeriesRef {
-    pub fn new(public_key: PublicKey) -> SeriesRef {
+    pub fn new(public_key: Key) -> SeriesRef {
         SeriesRef { public_key }
     }
 
@@ -107,11 +117,37 @@ impl SeriesRef {
         self.public_key.as_bytes()
     }
 
+    pub fn find(riddle: &ContentRiddle) -> Option<SeriesRef> {
+        let it = db().iterator_cf(Table::Series.get(), IteratorMode::Start);
+
+        for (key, value) in it {
+            match Key::from_bytes(&key) {
+                Ok(key) => {
+                    if riddle.resolves(&key.hash()) {
+                        match bincode::deserialize(&value) {
+                            Ok(series) => return Some(series),
+                            Err(err) => {
+                                log::warn!("{}", err);
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::warn!("{}", err);
+                    continue;
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
         for (_, owner) in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
             let owner: SeriesOwner = bincode::deserialize(&owner)?;
-            if self.public_key == owner.keypair.public {
+            if self.public_key.as_ref() == &owner.keypair.public {
                 return Ok(true);
             }
         }
@@ -121,11 +157,11 @@ impl SeriesRef {
 
     /// Returns the latest fresh collection in the local database _or_ the latest collection if the
     /// series is locally owned.
-    pub fn get_latest_fresh(&self) -> Result<Option<CollectionRef>, crate::Error> {
+    pub fn get_latest_fresh(&self) -> Result<Option<SeriesItem>, crate::Error> {
         let is_locally_owned = self.is_locally_owned()?;
 
         // TODO: use prefix trickery to avoid mini-SeqScan here.
-        let iter = db().prefix_iterator_cf(Table::SeriesItems.get(), &self.public_key);
+        let iter = db().prefix_iterator_cf(Table::SeriesItems.get(), self.public_key.as_bytes());
         let mut max: Option<SeriesItem> = None;
 
         for (_key, value) in iter {
@@ -144,7 +180,7 @@ impl SeriesRef {
             }
         }
 
-        Ok(max.map(|max| max.collection()))
+        Ok(max)
     }
 
     pub fn advance(&self, series_item: SeriesItem) -> Result<(), crate::Error> {
@@ -178,7 +214,7 @@ struct SeriesItemContent {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesItem {
     signed: Signed<SeriesItemContent>,
-    public_key: PublicKey,
+    public_key: Key,
     /// Remember to clear this field when sending to the wire.
     freshness: chrono::DateTime<chrono::Utc>,
 }
@@ -189,10 +225,10 @@ impl SeriesItem {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.signed.verify(&self.public_key)
+        self.signed.verify(self.public_key.as_ref())
     }
 
-    pub fn public_key(&self) -> &PublicKey {
+    pub fn public_key(&self) -> &Key {
         &self.public_key
     }
 
@@ -220,6 +256,10 @@ impl SeriesItem {
             + chrono::Duration::from_std(self.signed.ttl).expect("can convert from std duration")
             < chrono::Utc::now()
     }
+
+    pub fn freshness(&self) -> chrono::DateTime<chrono::Utc> {
+        self.freshness
+    }
 }
 
 #[test]
@@ -239,7 +279,7 @@ fn validate_series_item() {
 
     let current_collection = CollectionRef::rand();
 
-    let series_item = owner.sign(current_collection);
+    let series_item = owner.sign(current_collection, None);
 
     assert!(series_item.is_valid())
 }
@@ -253,7 +293,7 @@ fn not_validate_series_item() {
 
     let current_collection = CollectionRef::rand();
 
-    let mut series_item = owner.sign(current_collection);
+    let mut series_item = owner.sign(current_collection, None);
     series_item.public_key = other_series.public_key;
 
     assert!(!series_item.is_valid())

@@ -5,7 +5,7 @@ use crate::cipher::{OpaqueEncrypted, TransferCipher};
 use crate::Hash;
 
 #[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
-pub struct Message<T> {
+struct Message<T> {
     pub payload: T,
     /// A short which is always zero, for validation purposes.
     validation: u16,
@@ -40,12 +40,14 @@ impl ContentRiddle {
         }
     }
 
-    pub fn riddle_for_message<T>(&self, message: &Message<T>) -> MessageRiddle
+    pub fn riddle_for<T>(&self, message: T) -> MessageRiddle
     where
         T: Serialize + for<'a> Deserialize<'a>,
     {
-        // TODO: ooops! leaks IP type. Problem?
-        let masked = TransferCipher::new(&self.hash, &self.rand).encrypt_opaque(message);
+        // TODO: ooops! leaks message length (i.e., IP type, etc...). Problem?
+        // Need padding!
+        let masked =
+            TransferCipher::new(&self.hash, &self.rand).encrypt_opaque(&Message::new(message));
 
         MessageRiddle {
             timestamp: self.timestamp,

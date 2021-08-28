@@ -2,7 +2,8 @@ use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::{ContentRiddle, MessageRiddle};
+use crate::cipher::OpaqueEncrypted;
+use crate::{ContentRiddle, Hash, MessageRiddle};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
@@ -34,12 +35,13 @@ pub enum QueryResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LatestRequest {
-    key_riddle: ContentRiddle,
+    pub key_riddle: ContentRiddle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LatestResponse {
-    series_riddle: MessageRiddle,
+    pub series: OpaqueEncrypted,
+    pub rand: Hash,
 }
 
 #[tarpc::service]
@@ -49,7 +51,7 @@ pub trait Hub {
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
     ///
-    async fn get_latest(latest: LatestRequest) -> LatestResponse;
+    async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]

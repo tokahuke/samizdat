@@ -14,11 +14,12 @@ use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
 use tokio::time::Duration;
 
+use samizdat_common::cipher::TransferCipher;
 use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::{ContentRiddle, Hash};
 
-use crate::cache::{CollectionItem, ObjectRef};
+use crate::cache::{CollectionItem, ObjectRef, SeriesRef, SeriesItem};
 use crate::cli;
 
 use connection_manager::{ConnectionManager, DropMode};
@@ -49,8 +50,8 @@ impl Node for NodeServer {
         let hash = object.hash;
 
         log::info!("found hash {}", object.hash);
-        let peer_addr = match resolution.message_riddle.resolve(&hash) {
-            Some(message) => message.socket_addr,
+        let peer_addr = match resolution.message_riddle.resolve::<SocketAddr>(&hash) {
+            Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
                 return ResolutionResponse::FOUND;
@@ -99,8 +100,8 @@ impl Node for NodeServer {
         let hash = item.locator().hash();
 
         log::info!("found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve(&hash) {
-            Some(message) => message.socket_addr,
+        let peer_addr = match resolution.message_riddle.resolve::<SocketAddr>(&hash) {
+            Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
                 return ResolutionResponse::FOUND;
@@ -131,7 +132,28 @@ impl Node for NodeServer {
         _: context::Context,
         latest: Arc<LatestRequest>,
     ) -> Option<LatestResponse> {
-        todo!()
+        if let Some(series) = SeriesRef::find(&latest.key_riddle) {
+            match series.get_latest_fresh() {
+                Ok(None) => None,
+                Ok(Some(mut latest)) => {
+                    let cipher_key = latest.public_key().hash();
+                    let rand = Hash::rand();
+                    let cipher = TransferCipher::new(&cipher_key, &rand);
+                    latest.erase_freshness();
+
+                    Some(LatestResponse {
+                        rand,
+                        series: cipher.encrypt_opaque(&latest),
+                    })
+                }
+                Err(err) => {
+                    log::warn!("{}", err);
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -312,6 +334,47 @@ impl HubConnection {
             None => Err(crate::Error::AllCandidatesFailed),
         }
     }
+
+    pub async fn get_latest(
+        &self,
+        series: &SeriesRef,
+    ) -> Result<Option<SeriesItem>, crate::Error> {
+        let key_riddle = ContentRiddle::new(&series.public_key.hash());
+        let inner = self.inner.get().await;
+
+        let response = inner.client.get_latest(
+            context::current(),
+            LatestRequest {
+            key_riddle,
+        }).await?;
+
+        let mut most_recent: Option<SeriesItem> = None;
+
+        for candidate in response {
+            let cipher = TransferCipher::new(&series.public_key.hash(), &candidate.rand);
+            let candidate_item: SeriesItem = candidate.series.decrypt_with(&cipher)?;
+            
+            if !candidate_item.is_valid() {
+                log::warn!("received invalid candidate item: {:?}", candidate_item);
+                continue;
+            }
+
+            if let Some(most_recent) = most_recent.as_mut() {
+                if candidate_item.freshness() > most_recent.freshness() {
+                    *most_recent = candidate_item;
+                }
+            } else {
+                most_recent = Some(candidate_item);
+            }
+        }
+
+        if let Some(mut most_recent) = most_recent {
+            most_recent.make_fresh();
+            Ok(Some(most_recent))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 pub struct Hubs {
@@ -342,6 +405,24 @@ impl Hubs {
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.query(content_hash, kind).await) })
+            .buffer_unordered(cli().max_parallel_hubs);
+
+        while let Some((hub_name, result)) = results.next().await {
+            match result {
+                Ok(Some(found)) => return Some(found),
+                Ok(None) => {}
+                Err(err) => {
+                    log::error!("Error while querying {}: {}", hub_name, err)
+                }
+            }
+        }
+
+        None
+    }
+
+    pub async fn get_latest(&self, series: &SeriesRef) -> Option<SeriesItem> {
+        let mut results = stream::iter(self.hubs.iter().cloned())
+            .map(|hub| async move { (hub.name, hub.get_latest(series).await) })
             .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {
