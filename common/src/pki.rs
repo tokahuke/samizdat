@@ -1,9 +1,9 @@
 use ed25519_dalek::{Keypair, PublicKey, Signature, Signer, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerialize};
+use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::str::FromStr;
-use std::fmt::{self, Display};
 
 use crate::Hash;
 

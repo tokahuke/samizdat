@@ -1,3 +1,5 @@
+//! Things that the API returns (most of the time; `resolvers` work differently).
+
 use serde::Serialize;
 use std::borrow::Cow;
 

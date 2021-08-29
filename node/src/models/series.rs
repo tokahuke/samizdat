@@ -1,9 +1,9 @@
+use chrono::SubsecRound;
 use ed25519_dalek::Keypair;
 use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
-use chrono::SubsecRound;
 
 use samizdat_common::{ContentRiddle, Key, Signed};
 
@@ -58,9 +58,7 @@ impl SeriesOwner {
 
     pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
         db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start)
-            .map(|(_, value)| {
-                Ok(bincode::deserialize(&value)?)
-            })
+            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
@@ -85,7 +83,11 @@ impl SeriesOwner {
         }
     }
 
-    pub fn advance(&self, collection: CollectionRef, ttl: Option<Duration>) -> Result<SeriesItem, crate::Error> {
+    pub fn advance(
+        &self,
+        collection: CollectionRef,
+        ttl: Option<Duration>,
+    ) -> Result<SeriesItem, crate::Error> {
         let item = self.sign(collection, ttl);
 
         dbg!(db().put_cf(
@@ -244,8 +246,10 @@ impl SeriesItem {
     }
 
     pub fn is_fresh(&self) -> bool {
-        chrono::Utc::now() < self.freshness
-            + chrono::Duration::from_std(self.signed.ttl).expect("can convert from std duration")
+        chrono::Utc::now()
+            < self.freshness
+                + chrono::Duration::from_std(self.signed.ttl)
+                    .expect("can convert from std duration")
     }
 
     pub fn freshness(&self) -> chrono::DateTime<chrono::Utc> {
