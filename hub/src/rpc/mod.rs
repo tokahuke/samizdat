@@ -11,10 +11,8 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
-use samizdat_common::rpc::{
-    Hub, NodeClient, Query, QueryKind, QueryResponse, Resolution, ResolutionStatus,
-};
-use samizdat_common::{BincodeOverQuic, Message};
+use samizdat_common::rpc::*;
+use samizdat_common::BincodeOverQuic;
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
@@ -24,10 +22,11 @@ use room::Room;
 const MAX_LENGTH: usize = 2_048;
 
 lazy_static! {
-    static ref ROOM: Room<Node> = Room::new();
+    static ref ROOM: Room = Room::new();
     static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
 }
 
+#[derive(Debug)]
 struct Node {
     client: NodeClient,
     addr: SocketAddr,
@@ -80,9 +79,9 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
-    async fn reverse_port(self, _: context::Context) -> u16 {
-        CLI.reverse_port
-    }
+    // async fn reverse_port(self, _: context::Context) -> u16 {
+    //     CLI.reverse_port
+    // }
 
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
@@ -100,9 +99,7 @@ impl Hub for HubServer {
             }
 
             // Now, prepare resolution request:
-            let message_riddle = query
-                .content_riddle
-                .riddle_for_message(&Message::new(server.0.addr));
+            let message_riddle = query.content_riddle.riddle_for(server.0.addr);
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 message_riddle,
@@ -112,14 +109,9 @@ impl Hub for HubServer {
             // And then send the request to the peers:
             let kind = query.kind;
             let candidates = ROOM
-                .stream_peers()
-                .map(|(peer_id, peer)| {
+                .with_peers(client_addr, move |peer_id, peer| {
                     let resolution = resolution.clone();
                     async move {
-                        if peer.addr == client_addr {
-                            return None;
-                        }
-
                         log::debug!("starting resolve for {}", peer_id);
 
                         let outcome = match kind {
@@ -130,26 +122,20 @@ impl Hub for HubServer {
                         let response = match outcome {
                             Ok(response) => response,
                             Err(err) => {
-                                log::warn!("error sending asking {} to resolve: {}", peer_id, err);
+                                log::warn!("error asking {} to resolve: {}", peer_id, err);
                                 return None;
                             }
                         };
 
                         log::debug!("resolve done for {}", peer_id);
-                        Some((peer.addr, response))
+
+                        if let ResolutionStatus::Found = response.status {
+                            Some(peer.addr)
+                        } else {
+                            None
+                        }
                     }
                 })
-                .buffer_unordered(CLI.max_resolutions_per_query)
-                .filter_map(|outcome| async move { outcome })
-                .filter_map(|(addr, response)| async move {
-                    if let ResolutionStatus::Found = response.status {
-                        Some(addr)
-                    } else {
-                        None
-                    }
-                })
-                .take(CLI.max_candidates)
-                .collect::<Vec<_>>()
                 .await;
 
             log::debug!("query done");
@@ -157,6 +143,33 @@ impl Hub for HubServer {
             QueryResponse::Resolved { candidates }
         }))
         .await
+    }
+
+    async fn get_latest(self, ctx: context::Context, latest: LatestRequest) -> Vec<LatestResponse> {
+        let client_addr = self.0.addr;
+
+        // Now broadcast the request:
+        let latest = Arc::new(latest);
+
+        let responses = ROOM
+            .with_peers(client_addr, |peer_id, peer| {
+                let latest = latest.clone();
+                async move {
+                    let outcome = peer.client.resolve_latest(ctx, latest).await;
+                    let response = match outcome {
+                        Ok(response) => response,
+                        Err(err) => {
+                            log::warn!("error asking {} for latest: {}", peer_id, err);
+                            return None;
+                        }
+                    };
+
+                    response
+                }
+            })
+            .await;
+
+        responses
     }
 }
 

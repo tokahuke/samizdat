@@ -22,7 +22,9 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::CollectionMetadata,
             Table::CollectionItems,
             Table::CollectionItemMetadata,
-            Table::Projects,
+            Table::Series,
+            Table::SeriesItems,
+            Table::SeriesOwners,
         ]
         .into_iter()
         .map(Table::name)
@@ -52,7 +54,9 @@ pub enum Table {
     CollectionItems,
     CollectionItemMetadata,
     /// The list of all projects.
-    Projects,
+    Series,
+    SeriesItems,
+    SeriesOwners,
 }
 
 impl Table {

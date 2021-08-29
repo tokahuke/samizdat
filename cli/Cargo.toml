@@ -6,6 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ed25519-dalek = { version = "1.0.1", features = ["serde"] }
 failure = "0.1.8"
 failure_derive = "0.1.8"
 futures = "0.3.16"
@@ -13,5 +14,11 @@ log = "0.4.14"
 log4rs = "1.0.0"
 mime_guess = "2.0.3"
 reqwest = { version = "0.11.4", features = ["rustls-tls", "json"] }
+serde = "1.0.129"
+serde_derive = "1.0.129"
 structopt = "0.3.22"
+table = "0.4.0"
+tabled = "0.2.2"
 tokio = { version = "1.10.0", features = ["macros", "rt-multi-thread"] }
+samizdat-common = { path = "../common" }
+chrono = "0.4.19"

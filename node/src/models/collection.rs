@@ -94,6 +94,11 @@ impl CollectionRef {
         CollectionRef { hash }
     }
 
+    #[cfg(test)]
+    pub(crate) fn rand() -> CollectionRef {
+        CollectionRef { hash: Hash::rand() }
+    }
+
     pub fn build<I, N>(objects: I) -> Result<CollectionRef, crate::Error>
     where
         I: AsRef<[(N, ObjectRef)]>,

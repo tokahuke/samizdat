@@ -280,6 +280,7 @@ dependencies = [
  "libc",
  "num-integer",
  "num-traits",
+ "serde",
  "time",
  "winapi",
 ]
@@ -427,6 +428,7 @@ version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4620d40f6d2601794401d6dd95a5cf69b6c157852539470eeda433a99b3c0efc"
 dependencies = [
+ "serde",
  "signature",
 ]
 
@@ -440,6 +442,7 @@ dependencies = [
  "ed25519",
  "rand 0.7.3",
  "serde",
+ "serde_bytes",
  "sha2",
  "zeroize",
 ]
@@ -795,6 +798,16 @@ name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
+name = "humantime-serde"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac34a56cfd4acddb469cc7fff187ed5ac36f498ba085caf8bbc725e3ff474058"
+dependencies = [
+ "humantime",
+ "serde",
+]
 
 [[package]]
 name = "hyper"
@@ -1317,6 +1330,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdf84f41639e037b484f93433aa3897863b561ed65c6e59c7073d7c561710f37"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "papergrid"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117aab6154bbd707e4cca766c7df1d3d247f3bf3052a76709583713c356d6baf"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -1847,6 +1869,8 @@ dependencies = [
 name = "samizdat"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "ed25519-dalek",
  "failure",
  "failure_derive",
  "futures",
@@ -1854,7 +1878,12 @@ dependencies = [
  "log4rs",
  "mime_guess",
  "reqwest",
+ "samizdat-common",
+ "serde",
+ "serde_derive",
  "structopt",
+ "table",
+ "tabled",
  "tokio",
 ]
 
@@ -1862,10 +1891,12 @@ dependencies = [
 name = "samizdat-common"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm-siv",
  "base64-url",
  "bincode",
  "bytes",
  "chrono",
+ "ed25519-dalek",
  "failure",
  "failure_derive",
  "flatbuffers",
@@ -1874,6 +1905,8 @@ dependencies = [
  "log",
  "log4rs",
  "quinn",
+ "rand 0.7.3",
+ "rand_chacha 0.2.2",
  "rcgen",
  "rocksdb",
  "rustls",
@@ -1923,12 +1956,14 @@ dependencies = [
  "base64-url",
  "bincode",
  "bytes",
+ "chrono",
  "ed25519-dalek",
  "failure",
  "failure_derive",
  "futures",
  "getrandom 0.2.3",
  "http",
+ "humantime-serde",
  "hyper",
  "lazy_static",
  "log",
@@ -1939,6 +1974,7 @@ dependencies = [
  "samizdat-common",
  "serde",
  "serde_derive",
+ "serde_json",
  "sha3",
  "structopt",
  "tarpc",
@@ -2003,9 +2039,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.127"
+version = "1.0.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f03b9878abf6d14e6779d3f24f07b2cfa90352cfec4acc5aab8f1ac7f146fae8"
+checksum = "d1f72836d2aa753853178eda473a3b9d8e4eefdaf20523b919677e6de489f8f1"
 dependencies = [
  "serde_derive",
 ]
@@ -2021,10 +2057,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.127"
+name = "serde_bytes"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a024926d3432516606328597e0f224a51355a493b49fdd67e9209187cbe55ecc"
+checksum = "16ae07dd2f88a366f15bd0632ba725227018c69a1c8550a927324f8eb8368bb9"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.129"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57ae87ad533d9a56427558b516d0adac283614e347abf85b0dc0cbbf0a249f3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2242,6 +2287,36 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "table"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf6f0801193a3fb518328d26e3341cc765fc722b05a36861091b70307bbb6601"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "tabled"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78e44c818a29312cb5f5b9b38aa72b37ad31b687dd32c5c50e737cc9f0385f20"
+dependencies = [
+ "papergrid",
+ "tabled_derive",
+]
+
+[[package]]
+name = "tabled_derive"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "295be2fd92b0c382818e4c5271594cd5232651ef3826c4e9963f204113eccec0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

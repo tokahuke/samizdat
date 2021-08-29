@@ -9,10 +9,10 @@ use crate::db::Table;
 /// 10min allows for some sloppy clocks out there.
 const TOLLERATED_AGE: i64 = 600;
 
-pub struct ReplayResistance;
+pub(crate) struct ReplayResistance;
 
 impl ReplayResistance {
-    pub fn new() -> ReplayResistance {
+    pub(crate) fn new() -> ReplayResistance {
         // Cleanup old nonces. Made deliberately infrequent
         tokio::spawn(async move {
             // Twice would suffice, but thrice is certainty.
@@ -41,7 +41,7 @@ impl ReplayResistance {
 
     /// Mutability ensures sequential checking of queries, which prevents TOCTOU
     /// when I check against the DB (kinda... must ensure *singleton*).
-    pub fn check(&mut self, query: &Query) -> Result<bool, crate::Error> {
+    pub(crate) fn check(&mut self, query: &Query) -> Result<bool, crate::Error> {
         // Is timestamp recent? (timestamp is guaranteed to be geerated by the
         // client because hashes!)
         let now = chrono::Utc::now().timestamp();

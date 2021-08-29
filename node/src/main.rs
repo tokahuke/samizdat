@@ -1,10 +1,10 @@
-mod cache;
 mod cli;
 mod db;
 mod http;
-//mod object;
+mod models;
 mod public_folder;
 mod rpc;
+mod slow_compiler_workaround;
 
 pub use samizdat_common::Error;
 
@@ -76,16 +76,10 @@ async fn main() -> Result<(), crate::Error> {
                 ::http::StatusCode::FORBIDDEN,
             ))
         })
-        .or(warp::get()
-            .and(warp::path::end())
-            .map(|| {
-                warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
-            })
-            .or(http::get_object())
-            .or(http::post_object())
-            .or(http::delete_object())
-            .or(http::post_collection())
-            .or(http::get_item()))
+        .or(warp::get().and(warp::path::end()).map(|| {
+            warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
+        }))
+        .or(http::api())
         .with(warp::log("api"));
 
     // Run server:

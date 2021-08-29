@@ -1,5 +1,6 @@
 mod connection_manager;
 mod file_transfer;
+mod node_server;
 mod reconnect;
 
 pub use reconnect::Reconnect;
@@ -14,120 +15,16 @@ use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
 use tokio::time::Duration;
 
+use samizdat_common::cipher::TransferCipher;
 use samizdat_common::quic;
-use samizdat_common::rpc::{
-    HubClient, Node, Query, QueryKind, QueryResponse, Resolution, ResolutionResponse,
-};
+use samizdat_common::rpc::*;
 use samizdat_common::{ContentRiddle, Hash};
 
-use crate::cache::{CollectionItem, ObjectRef};
 use crate::cli;
+use crate::models::{ObjectRef, SeriesItem, SeriesRef};
 
 use connection_manager::{ConnectionManager, DropMode};
-
-#[derive(Clone)]
-struct NodeServer {
-    connection_manager: Arc<ConnectionManager>,
-}
-
-#[tarpc::server]
-impl Node for NodeServer {
-    async fn resolve_object(
-        self,
-        _: context::Context,
-        resolution: Arc<Resolution>,
-    ) -> ResolutionResponse {
-        log::info!("got object {:?}", resolution);
-
-        let object = match ObjectRef::find(&resolution.content_riddle) {
-            Some(object) => object,
-            None => {
-                log::info!("hash not found for resolution");
-                return ResolutionResponse::NOT_FOUND;
-            }
-        };
-
-        // Code smell?
-        let hash = object.hash;
-
-        log::info!("found hash {}", object.hash);
-        let peer_addr = match resolution.message_riddle.resolve(&hash) {
-            Some(message) => message.socket_addr,
-            None => {
-                log::warn!("failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::FOUND;
-            }
-        };
-
-        log::info!("found peer at {}", peer_addr);
-
-        tokio::spawn(
-            async move {
-                let new_connection = self
-                    .connection_manager
-                    .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                    .await?;
-                file_transfer::send_object(&new_connection.connection, &object).await
-            }
-            .map(move |outcome| {
-                outcome
-                    .map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))
-            }),
-        );
-
-        return ResolutionResponse::FOUND;
-    }
-
-    async fn resolve_item(
-        self,
-        _: context::Context,
-        resolution: Arc<Resolution>,
-    ) -> ResolutionResponse {
-        log::info!("got item {:?}", resolution);
-
-        let item = match CollectionItem::find(&resolution.content_riddle) {
-            Ok(Some(item)) => item,
-            Ok(None) => {
-                log::info!("hash not found for resolution");
-                return ResolutionResponse::NOT_FOUND;
-            }
-            Err(e) => {
-                log::error!("error looking for hash: {}", e);
-                return ResolutionResponse::NOT_FOUND;
-            }
-        };
-
-        // Code smell?
-        let hash = item.locator().hash();
-
-        log::info!("found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve(&hash) {
-            Some(message) => message.socket_addr,
-            None => {
-                log::warn!("failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::FOUND;
-            }
-        };
-
-        log::info!("found peer at {}", peer_addr);
-
-        tokio::spawn(
-            async move {
-                let new_connection = self
-                    .connection_manager
-                    .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                    .await?;
-                file_transfer::send_item(&new_connection.connection, item).await
-            }
-            .map(move |outcome| {
-                outcome
-                    .map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))
-            }),
-        );
-
-        return ResolutionResponse::FOUND;
-    }
-}
+use node_server::NodeServer;
 
 pub struct HubConnectionInner {
     client: HubClient,
@@ -306,6 +203,43 @@ impl HubConnection {
             None => Err(crate::Error::AllCandidatesFailed),
         }
     }
+
+    pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<SeriesItem>, crate::Error> {
+        let key_riddle = ContentRiddle::new(&series.public_key.hash());
+        let inner = self.inner.get().await;
+
+        let response = inner
+            .client
+            .get_latest(context::current(), LatestRequest { key_riddle })
+            .await?;
+
+        let mut most_recent: Option<SeriesItem> = None;
+
+        for candidate in response {
+            let cipher = TransferCipher::new(&series.public_key.hash(), &candidate.rand);
+            let candidate_item: SeriesItem = candidate.series.decrypt_with(&cipher)?;
+
+            if !candidate_item.is_valid() {
+                log::warn!("received invalid candidate item: {:?}", candidate_item);
+                continue;
+            }
+
+            if let Some(most_recent) = most_recent.as_mut() {
+                if candidate_item.freshness() > most_recent.freshness() {
+                    *most_recent = candidate_item;
+                }
+            } else {
+                most_recent = Some(candidate_item);
+            }
+        }
+
+        if let Some(mut most_recent) = most_recent {
+            most_recent.make_fresh();
+            Ok(Some(most_recent))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 pub struct Hubs {
@@ -336,6 +270,24 @@ impl Hubs {
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.query(content_hash, kind).await) })
+            .buffer_unordered(cli().max_parallel_hubs);
+
+        while let Some((hub_name, result)) = results.next().await {
+            match result {
+                Ok(Some(found)) => return Some(found),
+                Ok(None) => {}
+                Err(err) => {
+                    log::error!("Error while querying {}: {}", hub_name, err)
+                }
+            }
+        }
+
+        None
+    }
+
+    pub async fn get_latest(&self, series: &SeriesRef) -> Option<SeriesItem> {
+        let mut results = stream::iter(self.hubs.iter().cloned())
+            .map(|hub| async move { (hub.name, hub.get_latest(series).await) })
             .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {

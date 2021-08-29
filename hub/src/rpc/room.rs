@@ -1,18 +1,23 @@
 use chashmap::CHashMap;
 use futures::channel::mpsc;
+use futures::prelude::*;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
+use crate::CLI;
+
+use super::Node;
+
 #[derive(Debug)]
-pub struct Room<T> {
+pub struct Room {
     next_id: AtomicUsize,
-    participants: Arc<CHashMap<SocketAddr, Arc<T>>>,
+    participants: Arc<CHashMap<SocketAddr, Arc<Node>>>,
 }
 
-impl<T: 'static + Send + Sync> Room<T> {
-    pub fn new() -> Room<T> {
+impl Room {
+    pub fn new() -> Room {
         let next_id = AtomicUsize::new(1_024); // just 'cause...
         let participants = Arc::default();
 
@@ -22,7 +27,7 @@ impl<T: 'static + Send + Sync> Room<T> {
         }
     }
 
-    pub fn insert(&self, addr: SocketAddr, participant: T) {
+    pub(super) fn insert(&self, addr: SocketAddr, participant: Node) {
         // Key is guaranteed not to exist. NEVER REPEAT IDs!
         self.participants.insert(addr, Arc::new(participant));
     }
@@ -32,7 +37,7 @@ impl<T: 'static + Send + Sync> Room<T> {
         self.participants.remove(&addr);
     }
 
-    pub fn stream_peers(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Arc<T>)> {
+    pub(super) fn stream_peers(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Arc<Node>)> {
         let (sender, receiver) = mpsc::unbounded();
         let cloned = self.participants.clone();
 
@@ -44,6 +49,34 @@ impl<T: 'static + Send + Sync> Room<T> {
         });
 
         receiver
+    }
+
+    pub(super) fn with_peers<'a, F, FFut, U>(
+        &'a self,
+        current: SocketAddr,
+        map: F,
+    ) -> impl 'a + Future<Output = Vec<U>>
+    where
+        F: 'a + Fn(SocketAddr, Arc<Node>) -> FFut,
+        FFut: 'a + Future<Output = Option<U>>,
+        U: 'a,
+    {
+        self.stream_peers()
+            .filter_map(move |(peer_id, peer)| {
+                let peer_addr = peer.addr;
+                let mapped = map(peer_id, peer);
+                async move {
+                    if peer_addr != current {
+                        mapped.await
+                    } else {
+                        None
+                    }
+                }
+            })
+            .map(|outcome| async move { outcome })
+            .buffer_unordered(CLI.max_resolutions_per_query)
+            .take(CLI.max_candidates)
+            .collect::<Vec<_>>()
     }
 }
 

@@ -1,7 +1,16 @@
 use futures::prelude::*;
 use futures::stream;
+use serde_derive::Deserialize;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{fs, io};
+use tabled::{Table, Tabled};
+
+use samizdat_common::{Hash, Key, Signed};
+
+fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
+    println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
+}
 
 pub async fn upload(path: &PathBuf, content_type: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
@@ -22,7 +31,11 @@ pub async fn init() -> Result<(), crate::Error> {
     todo!()
 }
 
-pub async fn commit(base: &PathBuf) -> Result<(), crate::Error> {
+pub async fn commit(
+    base: &PathBuf,
+    series: &Option<String>,
+    ttl: &Option<String>,
+) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -67,7 +80,7 @@ pub async fn commit(base: &PathBuf) -> Result<(), crate::Error> {
 
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
-            println!("Creating object for {:?}", path);
+            log::info!("Creating object for {:?}", path);
             let content_type = mime_guess::from_path(&path)
                 .first_or_octet_stream()
                 .to_string();
@@ -102,7 +115,135 @@ pub async fn commit(base: &PathBuf) -> Result<(), crate::Error> {
         .await?;
 
     log::info!("Status: {}", response.status());
+    let collection = response.text().await?;
+
+    if let Some(series) = series {
+        let query = ttl
+            .as_ref()
+            .map(|ttl| format!("ttl={}", ttl))
+            .unwrap_or_default();
+
+        let response = client
+            .post(format!(
+                "http://localhost:4510/_seriesowners/{}/collections/{}?{}",
+                series, collection, query
+            ))
+            .send()
+            .await?;
+
+        log::info!("Status: {}", response.status());
+
+        #[derive(Debug, Clone, Deserialize)]
+        pub struct CollectionRef {
+            pub hash: Hash,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct SeriesItemContent {
+            collection: CollectionRef,
+            timestamp: chrono::DateTime<chrono::Utc>,
+            ttl: Duration,
+        }
+
+        #[derive(Debug, Deserialize)]
+        pub struct SeriesItem {
+            signed: Signed<SeriesItemContent>,
+            public_key: Key,
+            freshness: chrono::DateTime<chrono::Utc>,
+        }
+
+        #[derive(Tabled)]
+        struct Row {
+            series: String,
+            // public_key: Key,
+            collection: Hash,
+            timestamp: chrono::DateTime<chrono::Utc>,
+            ttl: String,
+        }
+
+        let item = response.json::<SeriesItem>().await?;
+
+        show_table([Row {
+            series: series.to_owned(),
+            // public_key: item.public_key,
+            collection: item.signed.collection.hash,
+            timestamp: item.signed.timestamp,
+            ttl: format!("{:?}", item.signed.ttl),
+        }]);
+    } else {
+        println!("Collection hash: {}", collection);
+    }
+
+    Ok(())
+}
+
+pub async fn series_new(series_name: String) -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://localhost:4510/_seriesowners/{}",
+            series_name
+        ))
+        .send()
+        .await?;
+
+    log::info!("Status: {}", response.status());
     println!("Collection hash: {}", response.text().await?);
+
+    Ok(())
+}
+
+pub async fn series_show(series_name: String) -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "http://localhost:4510/_seriesowners/{}",
+            series_name
+        ))
+        .send()
+        .await?;
+
+    log::info!("Status: {}", response.status());
+    println!("Series public key: {}", response.text().await?);
+
+    Ok(())
+}
+
+pub async fn series_list() -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("http://localhost:4510/_seriesowners")
+        .send()
+        .await?;
+
+    log::info!("Status: {}", response.status());
+
+    #[derive(Debug, Deserialize)]
+    struct SeriesOwner {
+        name: String,
+        keypair: ed25519_dalek::Keypair,
+        default_ttl: std::time::Duration,
+    }
+
+    #[derive(Tabled)]
+    struct Row {
+        name: String,
+        public_key: Key,
+        default_ttl: String,
+    }
+
+    show_table(
+        response
+            .json::<Vec<SeriesOwner>>()
+            .await?
+            .into_iter()
+            .map(|series_owner| Row {
+                name: series_owner.name,
+                public_key: series_owner.keypair.public.into(),
+                default_ttl: format!("{:?}", series_owner.default_ttl),
+            })
+            .collect::<Vec<_>>(),
+    );
 
     Ok(())
 }

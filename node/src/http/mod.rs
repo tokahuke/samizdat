@@ -1,18 +1,20 @@
+mod resolvers;
 mod returnable;
 
 pub use returnable::{Return, Returnable};
 
 use futures::stream;
-use http::Response;
-use hyper::Body;
+use serde_derive::Deserialize;
+use std::time::Duration;
 use warp::path::Tail;
 use warp::Filter;
 
-use samizdat_common::rpc::QueryKind;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, Key};
 
-use crate::cache::{CollectionRef, Locator, ObjectRef};
-use crate::hubs;
+use crate::balanced_or_tree;
+use crate::models::{CollectionRef, ObjectRef, SeriesOwner, SeriesRef};
+
+use resolvers::{resolve_item, resolve_object, resolve_series};
 
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
@@ -33,74 +35,36 @@ where
     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
 }
 
-async fn resolve_object(
-    object: ObjectRef,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    let stream = if let Some(stream) = object.iter()? {
-        log::info!("found local hash {}", object.hash);
-        Some(stream)
-    } else {
-        log::info!("hash {} not found locally. Querying hubs", object.hash);
-        hubs().query(object.hash, QueryKind::Object).await;
-        object.iter()?
-    };
-
-    // Respond with found or not found.
-    if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
-        let response = http::Response::builder()
-            .header("Content-Type", metadata.content_type)
-            .header("Content-Size", metadata.content_size)
-            .status(http::StatusCode::OK)
-            // TODO: Bleh! Tidy-up this mess!
-            .body(Body::wrap_stream(stream::iter(
-                iter.into_iter()
-                    .map(|thing| thing.map_err(|err| err.to_string())),
-            )));
-
-        Ok(response)
-    } else {
-        let response = http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("object {} not found", object.hash)));
-
-        Ok(response)
-    }
+fn tuple<T>(t: T) -> (T,) {
+    (t,)
 }
 
-async fn resolve_item(
-    locator: Locator<'_>,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    let maybe_item = if let Some(item) = locator.get()? {
-        log::info!("found item {} locally. Resolving object.", locator);
-        Some(item)
-    } else {
-        log::info!("item not found locally. Querying hubs.");
-        hubs().query(locator.hash(), QueryKind::Item).await;
-        locator.get()?
-    };
-
-    if let Some(item) = maybe_item {
-        resolve_object(item.object()?).await
-    } else {
-        let response = http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("item {} not found", locator)));
-
-        Ok(response)
-    }
+pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    balanced_or_tree!(
+        get_object(),
+        post_object(),
+        delete_object(),
+        post_collection(),
+        get_item(),
+        get_series_owner(),
+        get_series_owners(),
+        post_series_owner(),
+        post_series(),
+        get_item_by_series()
+    )
 }
 
-pub fn get_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
         .and(warp::get())
         .and_then(|hash: Hash| async move {
             Ok(resolve_object(ObjectRef::new(hash)).await?) as Result<_, warp::Rejection>
         })
+        .map(tuple)
 }
 
-pub fn post_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("_objects")
         .and(warp::post())
         .and(warp::header("content-type"))
@@ -117,15 +81,16 @@ pub fn post_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Re
         .and_then(async_reply)
 }
 
-pub fn delete_object() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("_objects" / Hash)
         .and(warp::delete())
         .map(|hash| ObjectRef::new(hash).drop_if_exists())
         .map(reply)
 }
 
-pub fn post_collection() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
-{
+pub fn post_collection(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections")
         .and(warp::post())
         .and(warp::body::json())
@@ -145,7 +110,7 @@ pub fn post_collection() -> impl Filter<Extract = impl warp::Reply, Error = warp
         .map(reply)
 }
 
-pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections" / Hash / ..)
         .and(warp::path::tail())
         .and(warp::get())
@@ -154,4 +119,73 @@ pub fn get_item() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
             let locator = collection.locator_for(name.as_str());
             Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
         })
+        .map(tuple)
+}
+
+pub fn post_series_owner(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners" / String)
+        .and(warp::post())
+        .map(|series_owner_name: String| {
+            let series_owner = SeriesOwner::create(&series_owner_name, Duration::from_secs(3_600))?;
+            Ok(series_owner.series().to_string())
+        })
+        .map(reply)
+}
+
+pub fn get_series_owner(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners" / String)
+        .and(warp::get())
+        .map(|series_owner_name: String| {
+            let maybe_owner = SeriesOwner::get(&series_owner_name)?;
+            Ok(maybe_owner.map(|owner| owner.series().to_string()))
+        })
+        .map(reply)
+}
+
+pub fn get_series_owners(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_seriesowners")
+        .and(warp::get())
+        .map(|| {
+            let series = SeriesOwner::get_all()?;
+            Ok(returnable::Json(series))
+        })
+        .map(reply)
+}
+
+pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
+    #[derive(Deserialize)]
+    struct Request {
+        #[serde(default)]
+        #[serde(with = "humantime_serde")]
+        ttl: Option<std::time::Duration>,
+    }
+
+    warp::path!("_seriesowners" / String / "collections" / Hash)
+        .and(warp::post())
+        .and(warp::query())
+        .map(|series_owner_name: String, collection, request: Request| {
+            if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
+                let series = series_owner.advance(CollectionRef::new(collection), request.ttl)?;
+                Ok(Some(returnable::Json(series)))
+            } else {
+                Ok(None)
+            }
+        })
+        .map(reply)
+}
+
+pub fn get_item_by_series(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_series" / Key / ..)
+        .and(warp::path::tail())
+        .and(warp::get())
+        .and_then(|series_key: Key, name: Tail| async move {
+            let series = SeriesRef::new(series_key);
+            Ok(resolve_series(series, name.as_str()).await?) as Result<_, warp::Rejection>
+        })
+        .map(tuple)
 }

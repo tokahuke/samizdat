@@ -1,54 +1,20 @@
-use serde_derive::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
+use crate::cipher::{OpaqueEncrypted, TransferCipher};
 use crate::Hash;
 
-struct StreamCipher {
-    current_hash: Hash,
-    idx: usize,
-}
-
-impl Iterator for StreamCipher {
-    type Item = u8;
-    fn next(&mut self) -> Option<u8> {
-        let ret = if self.idx < 28 {
-            self.current_hash[self.idx]
-        } else {
-            self.current_hash = Hash::build(&self.current_hash);
-            self.idx = 0;
-            self.current_hash[0]
-        };
-
-        Some(ret)
-    }
-}
-
-impl StreamCipher {
-    fn new(hash: Hash) -> StreamCipher {
-        StreamCipher {
-            current_hash: hash,
-            idx: 0,
-        }
-    }
-
-    fn xor(&mut self, slice: &mut [u8]) {
-        for (confusing, byte) in self.zip(slice) {
-            *byte ^= confusing;
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub socket_addr: SocketAddr,
+#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+struct Message<T> {
+    pub payload: T,
     /// A short which is always zero, for validation purposes.
     validation: u16,
 }
 
-impl Message {
-    pub fn new(socket_addr: SocketAddr) -> Message {
+impl<T> Message<T> {
+    pub fn new(payload: T) -> Message<T> {
         Message {
-            socket_addr,
+            payload,
             validation: 0,
         }
     }
@@ -74,16 +40,19 @@ impl ContentRiddle {
         }
     }
 
-    pub fn riddle_for_message(&self, message: &Message) -> MessageRiddle {
-        // TODO: ooops! leaks IP type. Problem?
-        let mut serialized = bincode::serialize(&message).expect("can always serialize");
-
-        StreamCipher::new(self.hash).xor(&mut serialized);
+    pub fn riddle_for<T>(&self, message: T) -> MessageRiddle
+    where
+        T: Serialize + for<'a> Deserialize<'a>,
+    {
+        // TODO: ooops! leaks message length (i.e., IP type, etc...). Problem?
+        // Need padding!
+        let masked =
+            TransferCipher::new(&self.hash, &self.rand).encrypt_opaque(&Message::new(message));
 
         MessageRiddle {
             timestamp: self.timestamp,
             rand: self.rand,
-            masked: serialized,
+            masked,
         }
     }
 
@@ -92,31 +61,34 @@ impl ContentRiddle {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SerdeSerialize, SerdeDeserialize)]
 pub struct MessageRiddle {
     pub timestamp: i64,
     pub rand: Hash,
-    pub masked: Vec<u8>,
+    pub masked: OpaqueEncrypted,
 }
 
 impl MessageRiddle {
-    pub fn resolve(&self, content_hash: &Hash) -> Option<Message> {
+    pub fn resolve<T>(&self, content_hash: &Hash) -> Option<T>
+    where
+        T: for<'a> Deserialize<'a>,
+    {
         let key = content_hash
             .rehash(&self.timestamp.into())
             .rehash(&self.rand);
-        let mut serialized = self.masked.clone();
 
-        StreamCipher::new(key).xor(&mut serialized);
+        let unmasked = self
+            .masked
+            .clone()
+            .decrypt_with(&TransferCipher::new(&key, &self.rand));
 
-        bincode::deserialize(&serialized)
-            .ok()
-            .and_then(|message: Message| {
-                if message.validation == 0 {
-                    Some(message)
-                } else {
-                    None
-                }
-            })
+        unmasked.ok().and_then(|message: Message<T>| {
+            if message.validation == 0 {
+                Some(message.payload)
+            } else {
+                None
+            }
+        })
     }
 }
 

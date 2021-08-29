@@ -2,7 +2,8 @@ use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::{ContentRiddle, MessageRiddle};
+use crate::cipher::OpaqueEncrypted;
+use crate::{ContentRiddle, Hash, MessageRiddle};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
@@ -32,12 +33,25 @@ pub enum QueryResponse {
     Resolved { candidates: Vec<SocketAddr> },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatestRequest {
+    pub key_riddle: ContentRiddle,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatestResponse {
+    pub series: OpaqueEncrypted,
+    pub rand: Hash,
+}
+
 #[tarpc::service]
 pub trait Hub {
-    /// Returns the port for the node to connect as server.
-    async fn reverse_port() -> u16;
+    // /// Returns the port for the node to connect as server.
+    // async fn reverse_port() -> u16;
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
+    ///
+    async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,4 +85,5 @@ pub enum ResolutionStatus {
 pub trait Node {
     async fn resolve_object(resolution: Arc<Resolution>) -> ResolutionResponse;
     async fn resolve_item(resolution: Arc<Resolution>) -> ResolutionResponse;
+    async fn resolve_latest(latest: Arc<LatestRequest>) -> Option<LatestResponse>;
 }

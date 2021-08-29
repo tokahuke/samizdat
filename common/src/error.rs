@@ -22,6 +22,10 @@ pub enum Error {
     AllCandidatesFailed,
     #[fail(display = "invalid collection item")]
     InvalidCollectionItem,
+    #[fail(display = "invalid series item")]
+    InvalidSeriesItem,
+    #[fail(display = "different public keys")]
+    DifferentePublicKeys,
 }
 
 impl warp::reject::Reject for crate::Error {}
