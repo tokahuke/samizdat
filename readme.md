@@ -38,13 +38,13 @@ If you are interested in running this in your computer, you will need to build i
 ```
 This will spin up a server in `localhost:4510`, to where you can upload content using
 ```
-curl -X POST http://localhost:4510/_content \
+curl -X POST http://localhost:4510/_object \
      -H "Content-Type: <your content type>" \
      --data-binary <your file>
 ```
 Then, you can view it in your preferred browser in
 ```
-http://localhost:4510/_hash/<the hash you received from CURL>
+http://localhost:4510/_object/<the hash you received from CURL>
 ```
 
 This link **can be copied and shared** just as if it were a true URL, because it actually is! Somebody running Samizdat on their computer will be able to see your file by accessing that same link.

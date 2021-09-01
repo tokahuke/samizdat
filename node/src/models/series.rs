@@ -90,11 +90,11 @@ impl SeriesOwner {
     ) -> Result<SeriesItem, crate::Error> {
         let item = self.sign(collection, ttl);
 
-        dbg!(db().put_cf(
+        db().put_cf(
             Table::SeriesItems.get(),
-            dbg!(item.key()),
-            dbg!(bincode::serialize(&item).expect("can serialize")),
-        )?);
+            item.key(),
+            bincode::serialize(&item).expect("can serialize"),
+        )?;
 
         Ok(item)
     }
@@ -163,10 +163,10 @@ impl SeriesRef {
     pub fn get_latest_fresh(&self) -> Result<Option<SeriesItem>, crate::Error> {
         let is_locally_owned = self.is_locally_owned()?;
 
-        if let Some(value) = dbg!(db().get_cf(Table::SeriesItems.get(), dbg!(self.key()))?) {
+        if let Some(value) = db().get_cf(Table::SeriesItems.get(), self.key())? {
             let item: SeriesItem = bincode::deserialize(&value)?;
 
-            if dbg!(dbg!(is_locally_owned) || dbg!(item.is_fresh())) {
+            if is_locally_owned || item.is_fresh() {
                 Ok(Some(item))
             } else {
                 Ok(None)

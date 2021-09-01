@@ -25,6 +25,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Series,
             Table::SeriesItems,
             Table::SeriesOwners,
+            Table::RecentNonces,
         ]
         .into_iter()
         .map(Table::name)
@@ -57,6 +58,7 @@ pub enum Table {
     Series,
     SeriesItems,
     SeriesOwners,
+    RecentNonces,
 }
 
 impl Table {

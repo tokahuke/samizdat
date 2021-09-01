@@ -5,6 +5,7 @@ mod models;
 mod public_folder;
 mod rpc;
 mod slow_compiler_workaround;
+mod replay_resistance;
 
 pub use samizdat_common::Error;
 

@@ -39,8 +39,30 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
+fn maybe_redirect(path: &str) -> Option<String> {
+    let mut split = path.split('/');
+    let entity_type = split.next()?;
+    let entity_identifier = split.next()?;
+    
+    let mut found_tilde = false;
+    for item in &mut split {
+        if item == "~" {
+            found_tilde = true;
+            break;
+        }
+    }
+
+    if found_tilde {
+        let tail = split.collect::<Vec<_>>().join("/");
+        Some(format!("/{}/{}/{}", entity_type, entity_identifier, tail))
+    } else {
+        None
+    }
+}
+
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
+        tilde_redirect(),
         get_object(),
         post_object(),
         delete_object(),
@@ -52,6 +74,18 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
         post_series(),
         get_item_by_series()
     )
+}
+
+pub fn tilde_redirect() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path::tail()
+        .and_then(|path: warp::path::Tail| async move {
+            if let Some(location) = maybe_redirect(path.as_str()) {
+                let uri = location.parse::<http::uri::Uri>().expect("bad route on tilde redirect");
+                Ok(warp::redirect(uri))
+            } else {
+                Err(warp::reject::reject())
+            }
+        })
 }
 
 pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
