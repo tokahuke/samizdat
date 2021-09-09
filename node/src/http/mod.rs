@@ -39,7 +39,7 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
-fn maybe_redirect(path: &str) -> Option<String> {
+fn maybe_redirect_tilde(path: &str) -> Option<String> {
     let mut split = path.split('/');
     let entity_type = split.next()?;
     let entity_identifier = split.next()?;
@@ -60,9 +60,31 @@ fn maybe_redirect(path: &str) -> Option<String> {
     }
 }
 
+fn maybe_redirect_base(path: &str) -> Option<String> {
+    let mut split = path.split('/');
+    let entity_type = split.next()?;
+    let entity_identifier = split.next()?;
+    
+    if split.next().is_none() {
+        Some(format!("/{}/{}/", entity_type, entity_identifier))
+    } else {
+        None
+    }
+}
+
+fn maybe_redirect_empty(path: &str) -> Option<String> {
+    if path.contains("//") {
+        let split = path.split('/');
+        let without_initial_slash =  split.filter(|part| !part.is_empty()).collect::<Vec<_>>().join("/");
+        Some(format!("/{}", without_initial_slash))
+    } else {
+        None
+    }
+}
+
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
-        tilde_redirect(),
+        general_redirect(),
         get_object(),
         post_object(),
         delete_object(),
@@ -76,10 +98,15 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
     )
 }
 
-pub fn tilde_redirect() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn general_redirect() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path::tail()
         .and_then(|path: warp::path::Tail| async move {
-            if let Some(location) = maybe_redirect(path.as_str()) {
+            let maybe_redirect = maybe_redirect_tilde(path.as_str())
+                .or_else(|| maybe_redirect_base(path.as_str()))
+                .or_else(|| maybe_redirect_empty(path.as_str()));
+
+            if let Some(location) = maybe_redirect {
+                log::info!("ASDASD {}", location);
                 let uri = location.parse::<http::uri::Uri>().expect("bad route on tilde redirect");
                 Ok(warp::redirect(uri))
             } else {
