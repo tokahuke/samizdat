@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="UTF-8">
+	<head>
+    <title>{{ title }}</title>
+    <meta name="description" content="{{ meta_description }}">
+  </head>
+	<body>
+		<style>
+			body {
+				margin: 0;
+				padding: 0;
+
+        font-family: sans-serif;
+			}
+
+      mark {
+        background: #f7ba45;
+      }
+
+			iframe#main {
+				position: absolute;
+				width: 100vw;
+				height: 100vh;
+				border: 0;
+				overflow-x: hidden;
+			}
+
+      #overlay {
+        position: absolute;
+        z-index: 1;
+        width: 100vw;
+				height: 100vh;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: grid;
+      }
+
+      .hidden {
+        visibility: hidden;
+      }
+
+      .fade-out {
+        visibility: hidden;
+        opacity: 0;
+        transition: visibility 0s 0.3s, opacity 0.3s linear;
+      }
+
+      #modal {
+        align-self: center;
+        justify-self: center;
+        background-color: rgba(255, 255, 255, 1.0);
+        
+        border-radius: 12px;
+        padding: 24px 48px;
+
+        width: 480px;
+      }
+
+      #modal-footer {
+        margin-top: 24px;
+        width: 100%;
+        display: flex;
+        justify-content: right;
+      }
+
+      a.button {
+        padding: 8px 16px;    
+        border-radius: 4px;
+
+        font-size: 16px;
+        text-decoration: none;
+        font-weight: 500;
+      }
+
+      a.selected {
+        background-color: #1c86f2;
+        border: 0;
+        color: white;
+      }
+      a.selected:hover {
+        background-color: #4ca0f5;
+      }
+
+      a.unselected {
+        color: #1c86f2;
+      }
+      a.unselected:hover {
+        color: #4ca0f5;
+      }
+		</style>
+    
+    <div id="overlay" class="hidden">
+      <div id="modal">
+        <h3>Support the <mark>Samizdat</mark> System</h3>
+        <p>You are currently using a <em>proxy</em> to view pages served with Samizdat. Download
+          Samizdat for free the full experience.</p>
+        <p>Help us all to support the system!</p>
+        <div id="modal-footer">
+          <a id="maybe-later" class="button unselected" href="#" onclick="closeModal()">
+            Maybe later
+          </a>
+          <a id="get-the-app" class="button selected" href="#">Get the app</a>
+        </div>
+      </div>
+    </div>
+
+		<iframe id="main" srcdoc="{{ source }}">
+			Uh-oh! No iframes :(
+		</iframe>
+
+    <script>
+      function closeModal() {
+        document.getElementById("overlay").classList.add("fade-out");
+        return false;
+      }
+
+      const storageKey = "__samizdat_proxy_page_count";
+      let pageCount = parseInt(localStorage.getItem(storageKey));
+      if (!pageCount) {
+        localStorage.setItem(storageKey, 1);
+        pageCount = 1;
+      } else {
+        localStorage.setItem(storageKey, pageCount + 1);
+      }
+
+      if (pageCount % 3 == 0) {
+        document.getElementById("overlay").classList.remove("hidden");
+      }
+    </script>
+	</body>
+</html>
