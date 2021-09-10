@@ -41,11 +41,28 @@ jobs:
         rsync -avz \
           ./hub/samizdat-hub.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service
-      
+        rsync -avz \
+          ./target/release/samizdat-node \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
+        rsync -avz \
+          ./hub/samizdat-node.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service
+        rsync -avz \
+          ./target/release/samizdat-proxy \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
+        rsync -avz \
+          ./hub/samizdat-proxy.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service
+    
     - name: Restart hub
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
-          "systemctl disable --now samizdat-hub && systemctl enable --now samizdat-hub"
+          "systemctl disable --now samizdat-proxy &&
+           systemctl disable --now samizdat-node &&
+           systemctl disable --now samizdat-hub &&
+           systemctl enable --now samizdat-hub &&
+           systemctl enable --now samizdat-node &&
+           systemctl enable --now samizdat-proxy"
     
     - name: Done
       run: echo Done
