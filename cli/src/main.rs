@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod error;
 mod logger;
+mod util;
 
 pub use error::Error;
 

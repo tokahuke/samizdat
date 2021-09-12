@@ -24,12 +24,12 @@ impl Node for NodeServer {
         _: context::Context,
         resolution: Arc<Resolution>,
     ) -> ResolutionResponse {
-        log::info!("got object {:?}", resolution);
+        log::info!("Resolving {:?}", resolution);
 
         let object = match ObjectRef::find(&resolution.content_riddle) {
             Some(object) => object,
             None => {
-                log::info!("hash not found for resolution");
+                log::info!("Hash not found for resolution");
                 return ResolutionResponse::NOT_FOUND;
             }
         };
@@ -37,16 +37,16 @@ impl Node for NodeServer {
         // Code smell?
         let hash = object.hash;
 
-        log::info!("found hash {}", object.hash);
+        log::info!("Hound hash {}", object.hash);
         let peer_addr = match resolution.message_riddle.resolve::<SocketAddr>(&hash) {
             Some(socket_addr) => socket_addr,
             None => {
-                log::warn!("failed to resolve message riddle after resolving content riddle");
+                log::warn!("Failed to resolve message riddle after resolving content riddle");
                 return ResolutionResponse::FOUND;
             }
         };
 
-        log::info!("found peer at {}", peer_addr);
+        log::info!("Found peer at {}", peer_addr);
 
         tokio::spawn(
             async move {
@@ -58,7 +58,7 @@ impl Node for NodeServer {
             }
             .map(move |outcome| {
                 outcome
-                    .map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))
+                    .map_err(|err| log::error!("Failed to send {} to {}: {}", hash, peer_addr, err))
             }),
         );
 

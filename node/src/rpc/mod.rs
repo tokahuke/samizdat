@@ -275,7 +275,7 @@ impl Hubs {
         while let Some((hub_name, result)) = results.next().await {
             match result {
                 Ok(Some(found)) => return Some(found),
-                Ok(None) => {}
+                Ok(None) => {log::info!("got no result from {}", hub_name)}
                 Err(err) => {
                     log::error!("Error while querying {}: {}", hub_name, err)
                 }

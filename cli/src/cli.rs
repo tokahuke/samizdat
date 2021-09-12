@@ -25,13 +25,22 @@ pub enum Cli {
         #[structopt(subcommand)]
         command: SeriesCommand,
     },
+    Collection {
+        #[structopt(subcommand)]
+        command: CollectionCommand,
+    },
 }
 
 #[derive(Debug, StructOpt)]
 pub enum SeriesCommand {
     New { series_owner_name: String },
     Show { series_owner_name: String },
-    Ls,
+    Ls { series_owner_name: Option<String> },
+}
+
+#[derive(Debug, StructOpt)]
+pub enum CollectionCommand {
+    Ls { collection: String },
 }
 
 static mut CLI: Option<Cli> = None;
@@ -67,13 +76,16 @@ impl Cli {
             }
             Cli::Series {
                 command: SeriesCommand::New { series_owner_name },
-            } => commands::series_new(series_owner_name.clone()).await,
+            } => commands::series::new(series_owner_name.clone()).await,
             Cli::Series {
                 command: SeriesCommand::Show { series_owner_name },
-            } => commands::series_show(series_owner_name.clone()).await,
+            } => commands::series::show(series_owner_name.clone()).await,
             Cli::Series {
-                command: SeriesCommand::Ls,
-            } => commands::series_list().await,
+                command: SeriesCommand::Ls { series_owner_name },
+            } => commands::series::list(series_owner_name).await,
+            Cli::Collection {
+                command: CollectionCommand::Ls { collection },
+            } => commands::collection::ls(&collection).await,
         }
     }
 }

@@ -61,18 +61,18 @@ impl HubServer {
     where
         Fut: 'a + Future<Output = T>,
     {
-        // First, make sure we are not being trolled:
-        self.0.call_throttle.lock().await.tick().await;
-        let permit = self
-            .0
-            .call_semaphore
-            .acquire()
-            .await
-            .expect("semaphore never closed");
+        // // First, make sure we are not being trolled:
+        // self.0.call_throttle.lock().await.tick().await;
+        // let permit = self
+        //     .0
+        //     .call_semaphore
+        //     .acquire()
+        //     .await
+        //     .expect("semaphore never closed");
 
         let outcome = f(self).await;
 
-        drop(permit);
+        // drop(permit);
         outcome
     }
 }

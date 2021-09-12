@@ -1,3 +1,6 @@
+pub mod collection;
+pub mod series;
+
 use futures::prelude::*;
 use futures::stream;
 use serde_derive::Deserialize;
@@ -131,6 +134,13 @@ pub async fn commit(
             .send()
             .await?;
 
+        if response.status().is_client_error() {
+            return Err(crate::Error::Message(format!(
+                "series {} does not exist",
+                series
+            )));
+        }
+
         log::info!("Status: {}", response.status());
 
         #[derive(Debug, Clone, Deserialize)]
@@ -161,7 +171,11 @@ pub async fn commit(
             ttl: String,
         }
 
-        let item = response.json::<SeriesItem>().await?;
+        let text = response.text().await?;
+        let item: SeriesItem = serde_json::from_str(&text).map_err(|err| {
+            println!("bad json: {}", text);
+            err
+        })?;
 
         show_table([Row {
             series: series.to_owned(),
@@ -173,77 +187,6 @@ pub async fn commit(
     } else {
         println!("Collection hash: {}", collection);
     }
-
-    Ok(())
-}
-
-pub async fn series_new(series_name: String) -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!(
-            "http://localhost:4510/_seriesowners/{}",
-            series_name
-        ))
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    println!("Collection hash: {}", response.text().await?);
-
-    Ok(())
-}
-
-pub async fn series_show(series_name: String) -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!(
-            "http://localhost:4510/_seriesowners/{}",
-            series_name
-        ))
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    println!("Series public key: {}", response.text().await?);
-
-    Ok(())
-}
-
-pub async fn series_list() -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("http://localhost:4510/_seriesowners")
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-
-    #[derive(Debug, Deserialize)]
-    struct SeriesOwner {
-        name: String,
-        keypair: ed25519_dalek::Keypair,
-        default_ttl: std::time::Duration,
-    }
-
-    #[derive(Tabled)]
-    struct Row {
-        name: String,
-        public_key: Key,
-        default_ttl: String,
-    }
-
-    show_table(
-        response
-            .json::<Vec<SeriesOwner>>()
-            .await?
-            .into_iter()
-            .map(|series_owner| Row {
-                name: series_owner.name,
-                public_key: series_owner.keypair.public.into(),
-                default_ttl: format!("{:?}", series_owner.default_ttl),
-            })
-            .collect::<Vec<_>>(),
-    );
 
     Ok(())
 }
