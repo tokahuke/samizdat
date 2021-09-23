@@ -1,9 +1,8 @@
 use serde_derive::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::cipher::OpaqueEncrypted;
-use crate::{ContentRiddle, Hash, MessageRiddle};
+use crate::{ChannelAddr, ContentRiddle, Hash, MessageRiddle};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
@@ -25,12 +24,12 @@ pub struct Query {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum QueryResponse {
-    /// Server experienced internal error (please report bug!)
+    /// Hub experienced internal error (please report bug!)
     InternalError,
     /// Query was replayed. Therefore, it was rejected.
     Replayed,
     /// Query was run and returned with these candidates (may be empty).
-    Resolved { candidates: Vec<SocketAddr> },
+    Resolved { candidates: Vec<ChannelAddr> },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

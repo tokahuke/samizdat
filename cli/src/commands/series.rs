@@ -1,8 +1,7 @@
-
 use serde_derive::Deserialize;
-use tabled::{Tabled};
+use tabled::Tabled;
 
-use samizdat_common::{Key};
+use samizdat_common::Key;
 
 use super::show_table;
 

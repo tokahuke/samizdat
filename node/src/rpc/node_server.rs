@@ -1,20 +1,20 @@
 use futures::prelude::*;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
 
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::rpc::*;
+use samizdat_common::ChannelAddr;
 use samizdat_common::Hash;
 
 use crate::models::{CollectionItem, ObjectRef, SeriesRef};
 
-use super::connection_manager::{ConnectionManager, DropMode};
 use super::file_transfer;
+use super::transport::ChannelManager;
 
 #[derive(Clone)]
 pub struct NodeServer {
-    pub connection_manager: Arc<ConnectionManager>,
+    pub channel_manager: Arc<ChannelManager>,
 }
 
 #[tarpc::server]
@@ -38,7 +38,7 @@ impl Node for NodeServer {
         let hash = object.hash;
 
         log::info!("Hound hash {}", object.hash);
-        let peer_addr = match resolution.message_riddle.resolve::<SocketAddr>(&hash) {
+        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("Failed to resolve message riddle after resolving content riddle");
@@ -50,11 +50,8 @@ impl Node for NodeServer {
 
         tokio::spawn(
             async move {
-                let new_connection = self
-                    .connection_manager
-                    .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                    .await?;
-                file_transfer::send_object(&new_connection.connection, &object).await
+                let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;
+                file_transfer::send_object(&sender, &object).await
             }
             .map(move |outcome| {
                 outcome
@@ -88,7 +85,7 @@ impl Node for NodeServer {
         let hash = item.locator().hash();
 
         log::info!("found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve::<SocketAddr>(&hash) {
+        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
@@ -100,11 +97,8 @@ impl Node for NodeServer {
 
         tokio::spawn(
             async move {
-                let new_connection = self
-                    .connection_manager
-                    .punch_hole_to(peer_addr, DropMode::DropIncoming)
-                    .await?;
-                file_transfer::send_item(&new_connection.connection, item).await
+                let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;
+                file_transfer::send_item(&sender, item).await
             }
             .map(move |outcome| {
                 outcome

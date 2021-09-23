@@ -3,6 +3,7 @@ pub mod logger;
 pub mod quic;
 pub mod rpc;
 
+mod channel_address;
 mod error;
 mod hash;
 mod patricia_map;
@@ -10,6 +11,7 @@ mod pki;
 mod riddles;
 mod transport;
 
+pub use channel_address::ChannelAddr;
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};

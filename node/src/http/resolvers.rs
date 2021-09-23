@@ -56,8 +56,8 @@ pub async fn resolve_item(
         Some(item)
     } else {
         log::info!("item not found locally. Querying hubs.");
-        let obj = hubs().query(locator.hash(), QueryKind::Item).await;
-        
+        hubs().query(locator.hash(), QueryKind::Item).await;
+
         locator.get()?
     };
 

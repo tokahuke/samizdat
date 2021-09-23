@@ -1,7 +1,7 @@
 mod resolvers;
 mod returnable;
 
-pub use returnable::{Return, Returnable, Json};
+pub use returnable::{Json, Return, Returnable};
 
 use futures::stream;
 use serde_derive::Deserialize;
@@ -66,7 +66,6 @@ fn maybe_redirect_base(path: &str) -> Option<String> {
     let entity_identifier = split.next()?;
     let is_redirectable_entity = entity_type == "_collections" || entity_type == "_series";
 
-
     if split.next().is_none() && is_redirectable_entity {
         Some(format!("/{}/{}/", entity_type, entity_identifier))
     } else {
@@ -106,21 +105,23 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
 
 pub fn general_redirect(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::get().and(warp::path::tail()).and_then(|path: warp::path::Tail| async move {
-        let maybe_redirect = maybe_redirect_tilde(path.as_str())
-            .or_else(|| maybe_redirect_base(path.as_str()))
-            .or_else(|| maybe_redirect_empty(path.as_str()));
+    warp::get()
+        .and(warp::path::tail())
+        .and_then(|path: warp::path::Tail| async move {
+            let maybe_redirect = maybe_redirect_tilde(path.as_str())
+                .or_else(|| maybe_redirect_base(path.as_str()))
+                .or_else(|| maybe_redirect_empty(path.as_str()));
 
-        if let Some(location) = maybe_redirect {
-            log::info!("location {}", location);
-            let uri = location
-                .parse::<http::uri::Uri>()
-                .expect("bad route on tilde redirect");
-            Ok(warp::redirect(uri))
-        } else {
-            Err(warp::reject::reject())
-        }
-    })
+            if let Some(location) = maybe_redirect {
+                log::info!("location {}", location);
+                let uri = location
+                    .parse::<http::uri::Uri>()
+                    .expect("bad route on tilde redirect");
+                Ok(warp::redirect(uri))
+            } else {
+                Err(warp::reject::reject())
+            }
+        })
 }
 
 pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -191,7 +192,8 @@ pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .map(tuple)
 }
 
-pub fn get_collection_list() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn get_collection_list(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections" / Hash / "_list")
         .and(warp::get())
         .map(|hash: Hash| {
