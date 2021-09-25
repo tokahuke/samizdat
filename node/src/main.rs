@@ -3,9 +3,9 @@ mod db;
 mod http;
 mod models;
 mod public_folder;
+mod replay_resistance;
 mod rpc;
 mod slow_compiler_workaround;
-mod replay_resistance;
 
 pub use samizdat_common::Error;
 

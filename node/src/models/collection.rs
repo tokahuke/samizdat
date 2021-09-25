@@ -73,12 +73,24 @@ impl CollectionItem {
     }
 
     pub fn insert(&self) -> Result<(), crate::Error> {
-        let key = self.collection.locator_for(&self.name).hash();
-        db().put_cf(
+        let locator = self.collection.locator_for(&self.name);
+        let mut batch = rocksdb::WriteBatch::default();
+
+        batch.put_cf(
             Table::CollectionItems.get(),
-            key,
+            locator.hash(),
             bincode::serialize(self).expect("can serialize"),
-        )?;
+        );
+        batch.put_cf(
+            Table::CollectionItemLocators.get(),
+            locator.path(),
+            locator.hash(),
+        );
+        batch.put_cf(Table::Collections.get(), self.collection.hash, &[]);
+
+        db().write(batch)?;
+
+        log::info!("Inserted item {}: {:#?}", locator, self);
 
         Ok(())
     }
@@ -117,8 +129,8 @@ impl CollectionRef {
         let mut batch = rocksdb::WriteBatch::default();
 
         for (name, _object) in objects.as_ref() {
-            let key = collection.locator_for(name.as_ref()).hash();
-            let value = CollectionItem {
+            let locator = collection.locator_for(name.as_ref());
+            let item = CollectionItem {
                 collection: collection.clone(),
                 name: name.as_ref().to_owned(),
                 inclusion_proof: patricia_map
@@ -127,8 +139,13 @@ impl CollectionRef {
             };
             batch.put_cf(
                 Table::CollectionItems.get(),
-                key,
-                bincode::serialize(&value).expect("can serialize"),
+                locator.hash(),
+                bincode::serialize(&item).expect("can serialize"),
+            );
+            batch.put_cf(
+                Table::CollectionItemLocators.get(),
+                locator.path(),
+                locator.hash(),
             );
         }
 
@@ -156,6 +173,12 @@ impl CollectionRef {
             Ok(None)
         }
     }
+
+    pub fn list(&self) -> Vec<String> {
+        db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
+            .map(|(key, _)| String::from_utf8_lossy(&key[self.hash.as_ref().len()..]).into_owned())
+            .collect::<Vec<_>>()
+    }
 }
 
 #[derive(Debug)]
@@ -173,6 +196,10 @@ impl<'a> Display for Locator<'a> {
 impl<'a> Locator<'a> {
     pub fn hash(&self) -> Hash {
         self.collection.hash.rehash(&Hash::build(self.name))
+    }
+
+    pub fn path(&self) -> Vec<u8> {
+        [self.collection.hash.as_ref(), self.name.as_bytes()].concat()
     }
 
     pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {

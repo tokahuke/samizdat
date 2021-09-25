@@ -1,62 +1,12 @@
 use futures::future::join;
-use futures::StreamExt;
+use futures::prelude::*;
 use quinn::{Connecting, Endpoint, Incoming, NewConnection};
-use std::collections::BTreeMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
-use tokio::time::{sleep, Duration};
-
 use samizdat_common::{quic, BincodeOverQuic};
+use std::net::SocketAddr;
+
+use super::matcher::Matcher;
 
 const MAX_TRANSFER_SIZE: usize = 2_048;
-
-pub struct Matcher<T> {
-    expecting: Arc<Mutex<BTreeMap<SocketAddr, oneshot::Sender<T>>>>,
-    arrived: Arc<Mutex<BTreeMap<SocketAddr, T>>>,
-}
-
-impl<T> Default for Matcher<T> {
-    fn default() -> Matcher<T> {
-        Matcher {
-            expecting: Arc::new(Mutex::new(BTreeMap::new())),
-            arrived: Arc::new(Mutex::new(BTreeMap::new())),
-        }
-    }
-}
-
-impl<T: 'static + Send> Matcher<T> {
-    async fn expect(&self, addr: SocketAddr) -> Option<T> {
-        if let Some(item) = self.arrived.lock().await.remove(&addr) {
-            Some(item)
-        } else {
-            let (send, recv) = oneshot::channel();
-            self.expecting.lock().await.insert(addr, send);
-
-            let expecting = self.expecting.clone();
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(10_000)).await;
-                expecting.lock().await.remove(&addr);
-            });
-
-            recv.await.ok()
-        }
-    }
-
-    async fn arrive(&self, addr: SocketAddr, item: T) {
-        if let Some(send) = self.expecting.lock().await.remove(&addr) {
-            send.send(item).ok();
-        } else {
-            self.arrived.lock().await.insert(addr, item);
-
-            let arrived = self.arrived.clone();
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(10_000)).await;
-                arrived.lock().await.remove(&addr);
-            });
-        }
-    }
-}
 
 pub enum DropMode {
     DropIncoming,
@@ -65,12 +15,12 @@ pub enum DropMode {
 
 pub struct ConnectionManager {
     endpoint: Endpoint,
-    matcher: Arc<Matcher<Connecting>>,
+    matcher: Matcher<SocketAddr, Connecting>,
 }
 
 impl ConnectionManager {
     pub fn new(endpoint: Endpoint, mut incoming: Incoming) -> ConnectionManager {
-        let matcher: Arc<Matcher<Connecting>> = Arc::default();
+        let matcher: Matcher<SocketAddr, Connecting> = Matcher::default();
 
         let matcher_task = matcher.clone();
         tokio::spawn(async move {
@@ -119,11 +69,13 @@ impl ConnectionManager {
     /// TODO: very basic NAT/firewall traversal stuff that works well in IPv6,
     /// but not so much in IPv4. Is there a better solution? I am already using
     /// the hub as a STUN and not many people have the means to keep a TURN.
-    pub async fn punch_hole_to(
+    pub(super) async fn punch_hole_to(
         &self,
         peer_addr: SocketAddr,
         drop_mode: DropMode,
     ) -> Result<NewConnection, crate::Error> {
+        log::info!("punching hole to {}", peer_addr);
+
         let incoming = self
             .endpoint
             .connect(&peer_addr, "localhost")
@@ -131,6 +83,7 @@ impl ConnectionManager {
 
         let outgoing = async move {
             if let Some(connecting) = self.matcher.expect(peer_addr).await {
+                log::info!("found expected conection {}", peer_addr);
                 Ok(connecting.await?)
             } else {
                 Err(format!("peer not expected").into()) as Result<_, crate::Error>

@@ -21,7 +21,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Collections,
             Table::CollectionMetadata,
             Table::CollectionItems,
-            Table::CollectionItemMetadata,
+            Table::CollectionItemLocators,
             Table::Series,
             Table::SeriesItems,
             Table::SeriesOwners,
@@ -51,13 +51,18 @@ pub enum Table {
     Collections,
     /// The list of all collection metadata.
     CollectionMetadata,
-    /// The list of all collection items.
+    /// The list of all collection items, indexed by item hash.
     CollectionItems,
-    CollectionItemMetadata,
-    /// The list of all projects.
+    /// The lit of all collection item hashes, indexed by locator.
+    CollectionItemLocators,
+    /// The list of all series.
     Series,
+    /// The list of all most common association between collections and series.
     SeriesItems,
+    /// The list of series owners: pieces of information which allows the
+    /// publication of a new version of a series in the network.
     SeriesOwners,
+    /// A set of current recent nonces.
     RecentNonces,
 }
 

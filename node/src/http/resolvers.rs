@@ -12,6 +12,8 @@ use crate::models::{Locator, ObjectRef, SeriesRef};
 pub async fn resolve_object(
     object: ObjectRef,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    log::info!("Resolving {:?}", object);
+
     let stream = if let Some(stream) = object.iter()? {
         log::info!("found local hash {}", object.hash);
         Some(stream)
@@ -47,12 +49,15 @@ pub async fn resolve_object(
 pub async fn resolve_item(
     locator: Locator<'_>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    log::info!("Resolving item {}", locator);
+
     let maybe_item = if let Some(item) = locator.get()? {
         log::info!("found item {} locally. Resolving object.", locator);
         Some(item)
     } else {
         log::info!("item not found locally. Querying hubs.");
         hubs().query(locator.hash(), QueryKind::Item).await;
+
         locator.get()?
     };
 
@@ -72,6 +77,7 @@ pub async fn resolve_series(
     series: SeriesRef,
     name: &str,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    log::info!("Resolving series {}/{}", series, name);
     if let Some(latest) = series.get_latest_fresh()? {
         log::info!("Have a fresh result locally. Will resolve this item.");
         let locator = latest.collection().locator_for(name);

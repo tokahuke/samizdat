@@ -9,6 +9,8 @@ pub enum Error {
     Reqwest(reqwest::Error),
     #[fail(display = "io error: {}", _0)]
     Io(io::Error),
+    #[fail(display = "deserialize error: {}", _0)]
+    Deserialize(serde_json::Error),
 }
 
 impl From<reqwest::Error> for Error {
@@ -20,5 +22,11 @@ impl From<reqwest::Error> for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::Io(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::Deserialize(e)
     }
 }

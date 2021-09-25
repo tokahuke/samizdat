@@ -1,7 +1,7 @@
-mod connection_manager;
 mod file_transfer;
 mod node_server;
 mod reconnect;
+mod transport;
 
 pub use reconnect::Reconnect;
 
@@ -23,12 +23,13 @@ use samizdat_common::{ContentRiddle, Hash};
 use crate::cli;
 use crate::models::{ObjectRef, SeriesItem, SeriesRef};
 
-use connection_manager::{ConnectionManager, DropMode};
 use node_server::NodeServer;
+use transport::{ChannelManager, ConnectionManager};
 
 pub struct HubConnectionInner {
     client: HubClient,
-    connection_manager: Arc<ConnectionManager>,
+    // connection_manager: Arc<ConnectionManager>,
+    channel_manager: Arc<ChannelManager>,
 }
 
 impl HubConnectionInner {
@@ -66,7 +67,7 @@ impl HubConnectionInner {
             .await?;
         let server_task = server::BaseChannel::with_defaults(transport).execute(
             NodeServer {
-                connection_manager: connection_manager.clone(),
+                channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),
             }
             .serve(),
         );
@@ -85,7 +86,7 @@ impl HubConnectionInner {
         // Connect and create connection manager:
         let (endpoint, incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
         let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
-
+        let channel_manager = Arc::new(ChannelManager::new(connection_manager.clone()));
         let (client, client_reset_recv) =
             Self::connect_direct(direct_addr, connection_manager.clone()).await?;
         let server_reset_recv =
@@ -96,7 +97,8 @@ impl HubConnectionInner {
         Ok((
             HubConnectionInner {
                 client,
-                connection_manager,
+                // connection_manager,
+                channel_manager,
             },
             reset_trigger,
         ))
@@ -169,12 +171,12 @@ impl HubConnection {
         }
 
         let n_candidates = candidates.len();
-        let new_connection = stream::iter(candidates)
+        let channel = stream::iter(candidates)
             .map(|candidate| {
-                let connection_manager = inner.connection_manager.clone();
+                let channel_manager = inner.channel_manager.clone();
                 Box::pin(async move {
-                    connection_manager
-                        .punch_hole_to(candidate, DropMode::DropOutgoing)
+                    channel_manager
+                        .expect(candidate)
                         .await
                         .map_err(|err| {
                             log::warn!("hole punching with {} failed: {}", candidate, err)
@@ -190,18 +192,17 @@ impl HubConnection {
         // TODO: minor improvement... could we tee the object stream directly to the user? By now,
         // we are waiting for the whole object to arrive, which is fine for most files, but ca be
         // a pain for the bigger ones...
-        match new_connection {
-            Some(mut new_connection) => Ok(Some(match kind {
-                QueryKind::Object => {
-                    file_transfer::recv_object(&mut new_connection.uni_streams, content_hash)
-                        .await?
-                }
-                QueryKind::Item => {
-                    file_transfer::recv_item(&mut new_connection.uni_streams, content_hash).await?
-                }
+        let outcome = match channel {
+            Some((_sender, receiver)) => Ok(Some(match kind {
+                QueryKind::Object => file_transfer::recv_object(receiver, content_hash).await?,
+                QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await?,
             })),
             None => Err(crate::Error::AllCandidatesFailed),
-        }
+        };
+
+        log::info!("query done: {:?} {}", kind, content_hash);
+
+        outcome
     }
 
     pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<SeriesItem>, crate::Error> {
@@ -275,7 +276,9 @@ impl Hubs {
         while let Some((hub_name, result)) = results.next().await {
             match result {
                 Ok(Some(found)) => return Some(found),
-                Ok(None) => {}
+                Ok(None) => {
+                    log::info!("got no result from {}", hub_name)
+                }
                 Err(err) => {
                     log::error!("Error while querying {}: {}", hub_name, err)
                 }
