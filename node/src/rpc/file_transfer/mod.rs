@@ -163,6 +163,8 @@ impl ObjectHeader {
         )
         .await?;
 
+        log::info!("done building object");
+
         // Check if the peer is up to any extra sneaky tricks.
         if metadata.content_size != self.content_size {
             Err(format!(
@@ -177,6 +179,7 @@ impl ObjectHeader {
             )
             .into())
         } else {
+            log::info!("received valid object from peer");
             Ok(object)
         }
     }
@@ -190,7 +193,7 @@ impl ObjectHeader {
 
         for chunk in object.iter()?.expect("object exits") {
             let mut chunk = chunk?;
-            log::debug!("stream for data opened");
+            log::info!("stream for data opened");
             cipher.encrypt(&mut chunk);
             sender.send(&chunk).await?;
         }
@@ -209,23 +212,31 @@ pub async fn recv_object(
     mut receiver: ChannelReceiver,
     hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
-    log::debug!("negotiating nonce");
+    log::info!("negotiating nonce");
     let transfer_cipher = NonceHeader::recv_negotiate(&mut receiver, hash).await?;
-    log::debug!("receiving object header");
+    log::info!("receiving object header");
     let header = ObjectHeader::recv(&mut receiver, &transfer_cipher).await?;
-    log::debug!("receiving data");
-    header.recv_data(&mut receiver, hash).await
+    log::info!("receiving data");
+    let object = header.recv_data(&mut receiver, hash).await?;
+
+    log::info!("done receiving object");
+
+    Ok(object)
 }
 
 pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(), crate::Error> {
     let header = ObjectHeader::for_object(object)?;
 
-    log::debug!("negotiating nonce");
+    log::info!("negotiating nonce");
     let transfer_cipher = NonceHeader::send_negotiate(sender, object.hash).await?;
-    log::debug!("sending object header");
+    log::info!("sending object header");
     header.send(sender, &transfer_cipher).await?;
-    log::debug!("sending data");
-    header.send_data(sender, object).await
+    log::info!("sending data");
+    header.send_data(sender, object).await?;
+
+    log::info!("done sending object");
+
+    Ok(())
 }
 
 /// TODO: make object transfer optional if the receiver perceives that it
@@ -236,9 +247,9 @@ pub async fn recv_item(
     mut receiver: ChannelReceiver,
     locator_hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
-    log::debug!("negotiating nonce");
+    log::info!("negotiating nonce");
     let transfer_cipher = NonceHeader::recv_negotiate(&mut receiver, locator_hash).await?;
-    log::debug!("receiving item header");
+    log::info!("receiving item header");
     let header = ItemHeader::recv(&mut receiver, &transfer_cipher).await?;
 
     // No tricks!
@@ -255,11 +266,15 @@ pub async fn recv_item(
 
     header.item.insert()?;
 
-    log::debug!("receiving data");
+    log::info!("receiving data");
     header
         .object_header
         .recv_data(&mut receiver, object.hash)
-        .await
+        .await?;
+    
+    log::info!("done receiving item");
+
+    Ok(object)
 }
 
 pub async fn send_item(sender: &ChannelSender, item: CollectionItem) -> Result<(), crate::Error> {
@@ -267,10 +282,14 @@ pub async fn send_item(sender: &ChannelSender, item: CollectionItem) -> Result<(
     let hash = item.locator().hash();
     let header = ItemHeader::for_item(item)?;
 
-    log::debug!("negotiating nonce");
+    log::info!("negotiating nonce");
     let transfer_cipher = NonceHeader::send_negotiate(sender, hash).await?;
-    log::debug!("sending item header");
+    log::info!("sending item header");
     header.send(sender, &transfer_cipher).await?;
-    log::debug!("sending data");
-    header.object_header.send_data(sender, &object).await
+    log::info!("sending data");
+    header.object_header.send_data(sender, &object).await?;
+
+    log::info!("done sending object");
+
+    Ok(())
 }

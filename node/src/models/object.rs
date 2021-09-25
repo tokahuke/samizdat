@@ -74,22 +74,18 @@ impl ObjectRef {
     pub async fn build(
         content_type: String,
         expected_content_size: usize,
-        mut source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
+        source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
     ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
-        log::debug!("building new object");
-
         let mut content_size = 0;
         let mut buffer = Vec::with_capacity(CHUNK_SIZE);
         let mut hashes = Vec::new();
 
+        let mut limited_source = source.take(expected_content_size);
+
         loop {
-            while let Some(byte) = source.next().await {
+            while let Some(byte) = limited_source.next().await {
                 buffer.push(byte?);
                 content_size += 1;
-
-                if content_size == expected_content_size {
-                    break;
-                }
 
                 if buffer.len() == CHUNK_SIZE {
                     break;
@@ -103,7 +99,6 @@ impl ObjectRef {
                 &buffer,
             )?;
             hashes.push(chunk_hash);
-            log::debug!("created chunk {}", chunk_hash);
 
             if content_size == expected_content_size {
                 break;

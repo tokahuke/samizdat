@@ -5,12 +5,12 @@
 //!
 
 use serde_derive::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Debug};
 use std::net::SocketAddr;
 
 use crate::Hash;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct ChannelAddr {
     peer_addr: SocketAddr,
     channel_id: u32,
@@ -19,6 +19,12 @@ pub struct ChannelAddr {
 impl Display for ChannelAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{:x}", self.peer_addr, self.channel_id,)
+    }
+}
+
+impl Debug for ChannelAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
     }
 }
 

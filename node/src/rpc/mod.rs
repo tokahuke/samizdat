@@ -192,13 +192,17 @@ impl HubConnection {
         // TODO: minor improvement... could we tee the object stream directly to the user? By now,
         // we are waiting for the whole object to arrive, which is fine for most files, but ca be
         // a pain for the bigger ones...
-        match channel {
+        let outcome = match channel {
             Some((_sender, receiver)) => Ok(Some(match kind {
                 QueryKind::Object => file_transfer::recv_object(receiver, content_hash).await?,
                 QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await?,
             })),
             None => Err(crate::Error::AllCandidatesFailed),
-        }
+        };
+
+        log::info!("query done: {:?} {}", kind, content_hash);
+
+        outcome
     }
 
     pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<SeriesItem>, crate::Error> {

@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
 use samizdat_common::rpc::*;
-use samizdat_common::BincodeOverQuic;
+use samizdat_common::{BincodeOverQuic, ChannelAddr};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
@@ -88,6 +88,10 @@ impl Hub for HubServer {
         self.throttle(Box::new(|server| async move {
             log::debug!("got {:?}", query);
 
+            // Create a channel address from node address:
+            let channel = rand::random();
+            let channel_addr = ChannelAddr::new(server.0.addr, channel);
+
             // Se if you are not being replayed:
             match REPLAY_RESISTANCE.lock().await.check(&query) {
                 Ok(false) => return QueryResponse::Replayed,
@@ -99,7 +103,7 @@ impl Hub for HubServer {
             }
 
             // Now, prepare resolution request:
-            let message_riddle = query.content_riddle.riddle_for(server.0.addr);
+            let message_riddle = query.content_riddle.riddle_for(channel_addr);
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 message_riddle,
@@ -140,7 +144,12 @@ impl Hub for HubServer {
 
             log::debug!("query done");
 
-            QueryResponse::Resolved { candidates }
+            QueryResponse::Resolved {
+                candidates: candidates 
+                    .into_iter()
+                    .map(|candidate_addr| ChannelAddr::new(candidate_addr, channel))
+                    .collect(),
+            }
         }))
         .await
     }

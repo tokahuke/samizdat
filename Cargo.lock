@@ -2159,6 +2159,7 @@ dependencies = [
  "log",
  "log4rs",
  "quinn",
+ "rand 0.8.4",
  "rocksdb",
  "samizdat-common",
  "serde",

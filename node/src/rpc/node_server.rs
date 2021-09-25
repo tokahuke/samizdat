@@ -37,7 +37,7 @@ impl Node for NodeServer {
         // Code smell?
         let hash = object.hash;
 
-        log::info!("Hound hash {}", object.hash);
+        log::info!("Found hash {}", object.hash);
         let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
             Some(socket_addr) => socket_addr,
             None => {
@@ -50,6 +50,11 @@ impl Node for NodeServer {
 
         tokio::spawn(
             async move {
+                log::info!(
+                    "Starting task to transfer object {} to {}",
+                    object.hash,
+                    peer_addr
+                );
                 let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;
                 file_transfer::send_object(&sender, &object).await
             }
