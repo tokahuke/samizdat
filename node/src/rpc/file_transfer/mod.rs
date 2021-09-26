@@ -1,7 +1,9 @@
+use brotli::{CompressorReader, Decompressor};
 use futures::prelude::*;
 use futures::stream;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
+use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use samizdat_common::cipher::TransferCipher;
@@ -147,10 +149,11 @@ impl ObjectHeader {
             .recv_many(MAX_STREAM_SIZE)
             .map_ok(|mut buffer| {
                 cipher.decrypt(&mut buffer);
+                let reader = Decompressor::new(Cursor::new(buffer), 4096);
                 stream::iter(
-                    buffer
-                        .into_iter()
-                        .map(|byte| Ok(byte) as Result<_, crate::Error>),
+                    reader
+                        .bytes()
+                        .map(|byte| Ok(byte.expect("never error")) as Result<_, crate::Error>),
                 )
             })
             .try_flatten();
@@ -192,10 +195,14 @@ impl ObjectHeader {
         let cipher = TransferCipher::new(&object.hash, &self.nonce);
 
         for chunk in object.iter()?.expect("object exits") {
-            let mut chunk = chunk?;
+            let chunk = chunk?;
             log::info!("stream for data opened");
-            cipher.encrypt(&mut chunk);
-            sender.send(&chunk).await?;
+            let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                .bytes()
+                .collect::<Result<Vec<_>, _>>()
+                .expect("never error");
+            cipher.encrypt(&mut compressed);
+            sender.send(&compressed).await?;
         }
 
         log::info!(
@@ -271,7 +278,7 @@ pub async fn recv_item(
         .object_header
         .recv_data(&mut receiver, object.hash)
         .await?;
-    
+
     log::info!("done receiving item");
 
     Ok(object)

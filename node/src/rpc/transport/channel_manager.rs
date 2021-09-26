@@ -76,7 +76,7 @@ impl ChannelManager {
             .expect(channel_addr.channel_id())
             .await
             .ok_or_else(|| format!("channel {} was not initiated in time", channel_addr))?;
-        
+
         Ok((
             ChannelSender {
                 channel_id: channel_addr.channel_id(),
@@ -93,7 +93,7 @@ impl ChannelManager {
     ) -> Result<(ChannelSender, ChannelReceiver), crate::Error> {
         let multiplexed = self
             .connect_to(channel_addr.peer_addr(), DropMode::DropIncoming)
-            .await?; 
+            .await?;
         let receiver = multiplexed.initiate(channel_addr.channel_id()).await;
 
         Ok((
@@ -117,10 +117,7 @@ impl ChannelSender {
     }
 
     pub fn remote_address(&self) -> ChannelAddr {
-        ChannelAddr::new(
-            self.multiplexed.remote_address(),
-            self.channel_id,
-        )
+        ChannelAddr::new(self.multiplexed.remote_address(), self.channel_id)
     }
 }
 

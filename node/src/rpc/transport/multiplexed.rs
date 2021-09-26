@@ -3,9 +3,9 @@ use quinn::{Connection, ConnectionError, IncomingUniStreams, NewConnection, Recv
 use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, MutexGuard};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::matcher::Matcher;
 
@@ -66,7 +66,7 @@ async fn receiver_task(
             Err(ConnectionError::Reset) => {
                 log::info!("Connection reset");
                 break;
-            },
+            }
             Err(ConnectionError::TimedOut) => {
                 log::info!("Connection timed out");
                 break;
@@ -88,13 +88,10 @@ impl Multiplexed {
         let is_closed = Arc::new(AtomicBool::new(false));
         let set_closed = is_closed.clone();
 
-        tokio::spawn(receiver_task(
-            incoming,
-            senders.clone(),
-            matcher.clone(),
-        ).map(move |_| {
-            set_closed.store(true, Ordering::Relaxed)
-        }));
+        tokio::spawn(
+            receiver_task(incoming, senders.clone(), matcher.clone())
+                .map(move |_| set_closed.store(true, Ordering::Relaxed)),
+        );
 
         Multiplexed {
             connection: new_connection.connection,
