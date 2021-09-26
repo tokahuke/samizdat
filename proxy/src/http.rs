@@ -2,7 +2,7 @@ use askama::Template;
 use lazy_static::lazy_static;
 use mime::Mime;
 use scraper::{Html, Selector};
-use warp::path::FullPath;
+use warp::path::Tail;
 use warp::Filter;
 
 lazy_static! {
@@ -17,18 +17,25 @@ struct ProxyedPage<'a> {
     title: &'a str,
     meta_description: &'a str,
     source: &'a str,
+    entity: &'a str,
+    content_hash: &'a str,
 }
 
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    crate::balanced_or_tree!(proxy(),)
+    crate::balanced_or_tree!(static_files(), proxy())
+}
+
+pub fn static_files() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone { 
+    warp::path("_static").and(static_dir::static_dir!("static"))
 }
 
 pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path::full()
+    warp::path!(String / String /.. )
+        .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|path: FullPath| async move {
+        .and_then(|entity: String, content_hash: String, tail: Tail| async move {
             // Query node for the web page:
-            let translated = format!("http://localhost:4510{}", path.as_str());
+            let translated = format!("http://localhost:4510/{}/{}/{}", entity, content_hash, tail.as_str());
             let response = reqwest::get(translated).await.unwrap();
             let status = response.status();
             let content_type = response
@@ -47,7 +54,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     .select(&SELECT_TITLE)
                     .next()
                     .map(|title| title.text().collect::<String>())
-                    .unwrap_or_else(|| path.as_str().to_owned());
+                    .unwrap_or_else(|| format!("/{}/{}/{}", entity, content_hash, tail.as_str()));
                 let meta_description = html
                     .select(&SELECT_META_DESCRIPTION)
                     .next()
@@ -58,6 +65,8 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     title: &title,
                     meta_description: &meta_description,
                     source,
+                    entity: &entity,
+                    content_hash: &content_hash,
                 }
                 .render()
                 .expect("can always render proxied page")
