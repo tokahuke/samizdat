@@ -1,10 +1,10 @@
-use chashmap::CHashMap;
-use futures::channel::mpsc;
 use futures::prelude::*;
+use std::cmp;
+use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::CLI;
 
@@ -12,43 +12,81 @@ use super::Node;
 
 #[derive(Debug)]
 pub struct Room {
-    next_id: AtomicUsize,
-    participants: Arc<CHashMap<SocketAddr, Arc<Node>>>,
+    participants: Arc<RwLock<BTreeMap<SocketAddr, Arc<Node>>>>,
 }
 
 impl Room {
     pub fn new() -> Room {
-        let next_id = AtomicUsize::new(1_024); // just 'cause...
         let participants = Arc::default();
 
-        Room {
-            next_id,
-            participants,
-        }
+        Room { participants }
     }
 
-    pub(super) fn insert(&self, addr: SocketAddr, participant: Node) {
-        // Key is guaranteed not to exist. NEVER REPEAT IDs!
-        self.participants.insert(addr, Arc::new(participant));
+    pub(super) async fn insert(&self, addr: SocketAddr, participant: Node) {
+        self.participants
+            .write()
+            .await
+            .insert(addr, Arc::new(participant));
     }
 
-    pub fn remove(&self, addr: SocketAddr) {
+    pub async fn remove(&self, addr: SocketAddr) {
         log::info!("dropping client {}", addr);
-        self.participants.remove(&addr);
+        self.participants.write().await.remove(&addr);
     }
 
-    pub(super) fn stream_peers(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Arc<Node>)> {
-        let (sender, receiver) = mpsc::unbounded();
-        let cloned = self.participants.clone();
+    async fn stream_peers(
+        &self,
+        current: SocketAddr,
+    ) -> impl Stream<Item = (SocketAddr, Arc<Node>)> {
+        struct Entry<T> {
+            priority: i64,
+            content: T,
+        }
 
-        tokio::spawn(async move {
-            cloned.retain(|&id, peer| {
-                sender.unbounded_send((id, peer.clone())).ok();
-                true
+        impl<T> Entry<T> {
+            fn ord(&self, other: &Self) -> cmp::Ordering {
+                self.priority.cmp(&other.priority)
+            }
+        }
+
+        impl<T> PartialEq for Entry<T> {
+            fn eq(&self, other: &Self) -> bool {
+                self.ord(other).is_eq()
+            }
+        }
+
+        impl<T> Eq for Entry<T> {}
+
+        impl<T> PartialOrd for Entry<T> {
+            fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+                Some(self.ord(other))
+            }
+        }
+
+        impl<T> Ord for Entry<T> {
+            fn cmp(&self, other: &Self) -> cmp::Ordering {
+                self.ord(other)
+            }
+        }
+
+        let mut queue = BinaryHeap::new();
+
+        for (&peer_addr, peer) in self.participants.read().await.iter() {
+            let priority = if current.ip() != peer_addr.ip() {
+                (peer.statistics.rand_priority() * 1e6) as i64
+            } else {
+                0
+            };
+
+            queue.push(Entry {
+                priority,
+                content: (peer_addr, peer.clone()),
             });
-        });
+        }
 
-        receiver
+        futures::stream::iter(std::iter::from_fn(move || {
+            queue.pop().map(|entry| entry.content)
+        }))
     }
 
     pub(super) fn with_peers<'a, F, FFut, U>(
@@ -61,65 +99,13 @@ impl Room {
         FFut: 'a + Future<Output = Option<U>>,
         U: 'a,
     {
-        self.stream_peers()
-            .filter_map(move |(peer_id, peer)| {
-                let peer_addr = peer.addr;
-                let mapped = map(peer_id, peer);
-                async move {
-                    if peer_addr != current {
-                        mapped.await
-                    } else {
-                        None
-                    }
-                }
-            })
+        self.stream_peers(current)
+            .into_stream()
+            .flatten()
+            .filter_map(move |(peer_id, peer)| map(peer_id, peer))
             .map(|outcome| async move { outcome })
             .buffer_unordered(CLI.max_resolutions_per_query)
             .take(CLI.max_candidates)
             .collect::<Vec<_>>()
     }
 }
-
-// #[derive(Debug, Clone)]
-// struct ParticipantInner<T: 'static + Sync + Send> {
-//     pub id: usize,
-//     arc: Arc<T>,
-//     peers: Arc<CHashMap<usize, Arc<T>>>,
-// }
-
-// #[derive(Debug)]
-// pub struct Participant<T: 'static + Sync + Send>(Arc<ParticipantInner<T>>);
-
-// impl<T: 'static + Sync + Send> Clone for Participant<T> {
-//     fn clone(&self) -> Participant<T> {
-//         Participant(self.0.clone())
-//     }
-// }
-
-// impl<T: 'static + Sync + Send> Drop for ParticipantInner<T> {
-//     fn drop(&mut self) {
-//         // log::debug!("dropping participant");
-//         // let peers = self.peers.clone();
-//         // peers.remove(&self.id);
-//     }
-// }
-
-// impl<T: 'static + Sync + Send> Deref for Participant<T> {
-//     type Target = T;
-//     fn deref(&self) -> &T {
-//         self.0.arc.deref()
-//     }
-// }
-
-// impl<T: 'static + Sync + Send> Participant<T> {
-//     pub fn id(&self) -> usize {
-//         self.0.id
-//     }
-
-//     pub fn for_each_peer(&self, f: impl Fn(usize, &Arc<T>)) {
-//         self.0.peers.retain(|&id, participant| {
-//             f(id, participant);
-//             true
-//         })
-//     }
-// }
