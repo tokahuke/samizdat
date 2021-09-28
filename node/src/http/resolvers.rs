@@ -25,6 +25,7 @@ pub async fn resolve_object(
 
     // Respond with found or not found.
     if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
+        object.touch()?;
         let response = http::Response::builder()
             .header("Content-Type", metadata.content_type)
             .header("Content-Size", metadata.content_size)

@@ -21,6 +21,11 @@ pub struct Cli {
     /// The maximum number of hubs to be queried simultaneously per query.
     #[structopt(env, long, default_value = "3")]
     pub max_parallel_hubs: usize,
+    /// The maximum total size of all cached files and _disposable_ files. Note that the total
+    ///  size may still exceed this value, since some of the allocated space is used to store
+    /// data that is valuable to you.
+    #[structopt(env, long, default_value = "1000000000")]
+    pub max_storage: usize,
 }
 
 static mut CLI: Option<Cli> = None;

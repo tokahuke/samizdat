@@ -2,6 +2,7 @@ pub mod cipher;
 pub mod logger;
 pub mod quic;
 pub mod rpc;
+pub mod heap_entry;
 
 mod channel_address;
 mod error;

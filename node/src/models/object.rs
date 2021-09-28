@@ -10,11 +10,6 @@ use crate::db::Table;
 
 pub const CHUNK_SIZE: usize = 256_000;
 
-// #[derive(Debug, Serialize, Deserialize)]
-// pub struct ChunkMetadata {
-//     inclusion_proof: InclusionProof,
-// }
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectMetadata {
     pub content_type: String,
@@ -49,6 +44,21 @@ impl ObjectRef {
             Some(serialized) => Ok(Some(bincode::deserialize(&serialized)?)),
             None => Ok(None),
         }
+    }
+
+    /// TODO: current impl allows for TOCTOU.
+    pub fn touch(&self) -> Result<(), crate::Error> {
+        if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
+            let mut statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
+            statistics.touch();
+            db().put_cf(
+                Table::ObjectStatistics.get(),
+                self.hash,
+                bincode::serialize(&statistics).expect("can serialize"),
+            )?;
+        }
+
+        Ok(())
     }
 
     pub fn find(content_riddle: &ContentRiddle) -> Option<ObjectRef> {
@@ -118,6 +128,7 @@ impl ObjectRef {
             content_size,
             hashes: merkle_tree.hashes().to_vec(),
         };
+        let statistics = ObjectStatistics::new(content_size);
 
         log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
@@ -128,6 +139,12 @@ impl ObjectRef {
             &hash,
             bincode::serialize(&metadata).expect("can serialize"),
         );
+        batch.put_cf(
+            Table::ObjectStatistics.get(),
+            &hash,
+            bincode::serialize(&statistics).expect("can serialize"),
+        );
+
         db().write(batch)?;
 
         Ok((metadata, ObjectRef { hash }))
@@ -144,6 +161,7 @@ impl ObjectRef {
             batch.delete_cf(Table::ObjectChunks.get(), hash);
         }
 
+        batch.delete_cf(Table::ObjectStatistics.get(), &self.hash);
         batch.delete_cf(Table::ObjectMetadata.get(), &self.hash);
         batch.delete_cf(Table::Objects.get(), &self.hash);
 
@@ -171,5 +189,61 @@ impl ObjectRef {
         Ok(Some(ObjectStream {
             iter_chunks: Box::new(iter_chunks),
         }))
+    }
+}
+
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ObjectStatistics {
+    size: usize,
+    created_at: DateTime<Utc>,
+    last_touched_at: DateTime<Utc>,
+    touches: usize,
+}
+
+impl ObjectStatistics {
+    fn new(size: usize) -> ObjectStatistics {
+        ObjectStatistics {
+            size,
+            created_at: Utc::now(),
+            last_touched_at: Utc::now(),
+            touches: 1,
+        }
+    }
+
+    pub fn touch(&mut self) {
+        self.last_touched_at = Utc::now();
+        self.touches += 1;
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    /// This is a bit approximate modeling of the following process:
+    /// a. First, the access pattern is a Poisson process.
+    /// b. After each touch, "toss a coin" to choose if you are still going to touch the object
+    /// ever again.
+    /// TODO: needs more rigorous implementation. This makes some (gross?) mathematical
+    /// simplifications.
+    pub fn byte_usefulness(&self) -> f64 {
+        // Add one day as a prior.
+        let total_time = (self.last_touched_at - self.created_at).num_seconds() as f64 + 86400.;
+        let access_freq = self.touches as f64 / total_time;
+        let time_inactive = (Utc::now() - self.last_touched_at).num_seconds() as f64;
+
+        // Based on an uninformed beta distribution.
+        // TODO: uninformed -> bad idea! Learn from other objects
+        let prob_future_use = self.touches as f64 / (1. + self.touches as f64);
+
+        // Probability it is still going to be used (Bayes'):
+        let survival =
+            (1. + time_inactive / access_freq / self.touches as f64).powi(-(self.touches as i32));
+        let prob_use =
+            prob_future_use * survival / (prob_future_use * survival + (1. - prob_future_use));
+
+        // Add 8kB to symbolize "hidden overhead": metadata, statstics, items, etc...
+        prob_use * access_freq / (self.size + 8_192) as f64
     }
 }

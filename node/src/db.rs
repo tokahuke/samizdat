@@ -18,6 +18,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Objects,
             Table::ObjectMetadata,
             Table::ObjectChunks,
+            Table::ObjectStatistics,
             Table::Collections,
             Table::CollectionMetadata,
             Table::CollectionItems,
@@ -47,6 +48,8 @@ pub enum Table {
     ObjectMetadata,
     /// The table of all chunks, indexed by chunk hash.
     ObjectChunks,
+    /// Statistics on object usage.
+    ObjectStatistics,
     /// The list of all known collections.
     Collections,
     /// The list of all collection metadata.

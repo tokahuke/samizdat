@@ -232,6 +232,8 @@ pub async fn recv_object(
 }
 
 pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(), crate::Error> {
+    object.touch()?;
+
     let header = ObjectHeader::for_object(object)?;
 
     log::info!("negotiating nonce");

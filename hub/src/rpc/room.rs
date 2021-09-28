@@ -1,10 +1,11 @@
 use futures::prelude::*;
-use std::cmp;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+use samizdat_common::heap_entry::HeapEntry;
 
 use crate::CLI;
 
@@ -38,37 +39,7 @@ impl Room {
         &self,
         current: SocketAddr,
     ) -> impl Stream<Item = (SocketAddr, Arc<Node>)> {
-        struct Entry<T> {
-            priority: i64,
-            content: T,
-        }
-
-        impl<T> Entry<T> {
-            fn ord(&self, other: &Self) -> cmp::Ordering {
-                self.priority.cmp(&other.priority)
-            }
-        }
-
-        impl<T> PartialEq for Entry<T> {
-            fn eq(&self, other: &Self) -> bool {
-                self.ord(other).is_eq()
-            }
-        }
-
-        impl<T> Eq for Entry<T> {}
-
-        impl<T> PartialOrd for Entry<T> {
-            fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-                Some(self.ord(other))
-            }
-        }
-
-        impl<T> Ord for Entry<T> {
-            fn cmp(&self, other: &Self) -> cmp::Ordering {
-                self.ord(other)
-            }
-        }
-
+        
         let mut queue = BinaryHeap::new();
 
         for (&peer_addr, peer) in self.participants.read().await.iter() {
@@ -78,7 +49,7 @@ impl Room {
                 0
             };
 
-            queue.push(Entry {
+            queue.push(HeapEntry {
                 priority,
                 content: (peer_addr, peer.clone()),
             });

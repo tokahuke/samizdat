@@ -2,10 +2,10 @@ mod cli;
 mod db;
 mod http;
 mod models;
-mod public_folder;
 mod replay_resistance;
-mod rpc;
 mod slow_compiler_workaround;
+mod system;
+mod vacuum;
 
 pub use samizdat_common::Error;
 
@@ -21,7 +21,7 @@ use samizdat_common::logger;
 
 use cli::init_cli;
 use db::init_db;
-use rpc::Hubs;
+use system::Hubs;
 
 static mut HUBS: Option<Hubs> = None;
 
