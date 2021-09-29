@@ -1,5 +1,5 @@
 use futures::prelude::*;
-use rocksdb::IteratorMode;
+use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryInto;
 
@@ -29,7 +29,7 @@ impl IntoIterator for ObjectStream {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ObjectRef {
     pub hash: Hash,
 }
@@ -150,13 +150,14 @@ impl ObjectRef {
         Ok((metadata, ObjectRef { hash }))
     }
 
-    pub fn drop_if_exists(self) -> Result<(), crate::Error> {
+    pub fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+        log::info!("Removing object {:?}", self);
+
         let metadata: ObjectMetadata = match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
             Some(serialized) => bincode::deserialize(&serialized)?,
             None => return Ok(()),
         };
 
-        let mut batch = rocksdb::WriteBatch::default();
         for hash in &metadata.hashes {
             batch.delete_cf(Table::ObjectChunks.get(), hash);
         }
@@ -165,6 +166,12 @@ impl ObjectRef {
         batch.delete_cf(Table::ObjectMetadata.get(), &self.hash);
         batch.delete_cf(Table::Objects.get(), &self.hash);
 
+        Ok(())
+    }
+
+    pub fn drop_if_exists(&self) -> Result<(), crate::Error> {
+        let mut batch = WriteBatch::default();
+        self.drop_if_exists_with(&mut batch)?;
         db().write(batch)?;
 
         Ok(())

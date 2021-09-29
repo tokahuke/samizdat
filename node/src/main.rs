@@ -63,6 +63,9 @@ async fn main() -> Result<(), crate::Error> {
     init_db()?;
     init_hubs().await?;
 
+    // Start vacuum:
+    tokio::spawn(crate::vacuum::run_vacuum_daemon());
+
     // Describe server:
     let server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {

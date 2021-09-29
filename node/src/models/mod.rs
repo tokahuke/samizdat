@@ -3,7 +3,7 @@ mod object;
 mod series;
 
 pub use collection::{CollectionItem, CollectionRef, Locator};
-pub use object::{ObjectMetadata, ObjectRef, ObjectStream, CHUNK_SIZE, ObjectStatistics};
+pub use object::{ObjectMetadata, ObjectRef, ObjectStatistics, ObjectStream, CHUNK_SIZE};
 pub use series::{SeriesItem, SeriesOwner, SeriesRef};
 
 // pub enum DynEntity {

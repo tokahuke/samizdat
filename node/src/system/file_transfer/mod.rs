@@ -135,10 +135,10 @@ impl ObjectHeader {
         let cipher = Arc::new(TransferCipher::new(&hash, &self.nonce));
 
         // Refuse if content is too big:
-        if self.content_size > cli().max_content_size {
+        if self.content_size > cli().max_content_size * 1_000_000 {
             return Err(format!(
                 "content too big: max size is {}, advertised was {}",
-                cli().max_content_size,
+                cli().max_content_size * 1_000_000,
                 self.content_size
             )
             .into());

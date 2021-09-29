@@ -1,4 +1,4 @@
-use rocksdb::IteratorMode;
+use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt::{self, Display};
@@ -72,9 +72,8 @@ impl CollectionItem {
         Ok(None)
     }
 
-    pub fn insert(&self) -> Result<(), crate::Error> {
+    pub fn insert_with(&self, batch: &mut WriteBatch) {
         let locator = self.collection.locator_for(&self.name);
-        let mut batch = rocksdb::WriteBatch::default();
 
         batch.put_cf(
             Table::CollectionItems.get(),
@@ -88,9 +87,30 @@ impl CollectionItem {
         );
         batch.put_cf(Table::Collections.get(), self.collection.hash, &[]);
 
+        log::info!("Inserting item {}: {:#?}", locator, self);
+    }
+
+    pub fn insert(&self) -> Result<(), crate::Error> {
+        let mut batch = WriteBatch::default();
+        self.insert_with(&mut batch);
         db().write(batch)?;
 
-        log::info!("Inserted item {}: {:#?}", locator, self);
+        Ok(())
+    }
+
+    pub fn drop_if_exists_with(&self, batch: &mut WriteBatch) {
+        let locator = self.collection.locator_for(&self.name);
+
+        log::info!("Removing item {}: {:#?}", locator, self);
+
+        batch.delete_cf(Table::CollectionItemLocators.get(), locator.path());
+        batch.delete_cf(Table::CollectionItems.get(), locator.hash());
+    }
+
+    pub fn drop_if_exists(&self) -> Result<(), crate::Error> {
+        let mut batch = rocksdb::WriteBatch::default();
+        self.drop_if_exists_with(&mut batch);
+        db().write(batch)?;
 
         Ok(())
     }
