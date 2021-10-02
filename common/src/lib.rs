@@ -16,7 +16,7 @@ pub use channel_address::ChannelAddr;
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
-pub use pki::{Key, Signed};
+pub use pki::{Key, Signed, PrivateKey};
 pub use riddles::{ContentRiddle, MessageRiddle};
 pub use transport::BincodeOverQuic;
 

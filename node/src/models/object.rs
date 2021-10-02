@@ -126,6 +126,7 @@ impl ObjectRef {
     pub async fn build(
         content_type: String,
         expected_content_size: usize,
+        bookmark: bool,
         source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
     ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
         let mut content_size = 0;
@@ -186,6 +187,10 @@ impl ObjectRef {
             &hash,
             bincode::serialize(&statistics).expect("can serialize"),
         );
+
+        if bookmark {
+            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark_with(&mut batch);
+        }
 
         db().write(batch)?;
 

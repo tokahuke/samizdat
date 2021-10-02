@@ -152,14 +152,22 @@ pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
 /// Uploads a new object to the database.
 pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
+    #[derive(Deserialize)]
+    struct Query {
+        #[serde(default)]
+        bookmark: bool,
+    }
+
     warp::path!("_objects")
         .and(warp::post())
         .and(warp::header("content-type"))
+        .and(warp::query())
         .and(warp::body::bytes())
-        .map(|content_type: String, bytes: bytes::Bytes| async move {
+        .map(|content_type: String, query: Query, bytes: bytes::Bytes| async move {
             let (_, object) = ObjectRef::build(
                 content_type,
                 bytes.len(),
+                query.bookmark,
                 stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
             )
             .await?;
@@ -181,7 +189,7 @@ pub fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 /// by the vacuum daemon.
 pub fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
-    warp::path!("_object" / Hash / "bookmark")
+    warp::path!("_objects" / Hash / "bookmark")
         .and(warp::post())
         .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).mark())
         .map(reply)
@@ -194,7 +202,7 @@ pub fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 /// By now, this returns `200 OK` even if the object does not exist.
 pub fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
-    warp::path!("_object" / Hash / "bookmark")
+    warp::path!("_objects" / Hash / "bookmark")
         .and(warp::get())
         .map(|hash| {
             ObjectRef::new(hash)
@@ -208,7 +216,7 @@ pub fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 /// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
 pub fn delete_bookmark(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_object" / Hash / "bookmark")
+    warp::path!("_objects" / Hash / "bookmark")
         .and(warp::delete())
         .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
         .map(reply)
@@ -269,7 +277,7 @@ pub fn post_series_owner(
         .and(warp::post())
         .map(|series_owner_name: String| {
             let series_owner = SeriesOwner::create(&series_owner_name, Duration::from_secs(3_600))?;
-            Ok(series_owner.series().to_string())
+            Ok(Json(series_owner))
         })
         .map(reply)
 }

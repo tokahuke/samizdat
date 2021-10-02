@@ -30,6 +30,7 @@ pub async fn resolve_object(
         let response = http::Response::builder()
             .header("Content-Type", metadata.content_type)
             .header("Content-Size", metadata.content_size)
+            .header("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string())
             .status(http::StatusCode::OK)
             // TODO: Bleh! Tidy-up this mess!
             .body(Body::wrap_stream(stream::iter(

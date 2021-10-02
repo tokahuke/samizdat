@@ -97,7 +97,6 @@ impl CollectionItem {
             locator.path(),
             locator.hash(),
         );
-        // batch.put_cf(Table::Collections.get(), self.collection.hash, &[]);
 
         log::info!("Inserting item {}: {:#?}", locator, self);
     }

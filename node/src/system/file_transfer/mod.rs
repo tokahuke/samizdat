@@ -162,6 +162,7 @@ impl ObjectHeader {
         let (metadata, object) = ObjectRef::build(
             self.content_type,
             self.content_size,
+            false,
             Box::pin(content_stream),
         )
         .await?;
