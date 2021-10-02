@@ -1,6 +1,6 @@
 use chrono::SubsecRound;
 use ed25519_dalek::Keypair;
-use rocksdb::IteratorMode;
+use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
@@ -10,13 +10,22 @@ use samizdat_common::{ContentRiddle, Key, Signed};
 use crate::db;
 use crate::db::Table;
 
-use super::CollectionRef;
+use super::{BookmarkType, CollectionRef, Dropable};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
     name: String,
     keypair: Keypair,
     default_ttl: Duration,
+}
+
+impl Dropable for SeriesOwner {
+    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+        self.series().drop_if_exists_with(batch)?;
+        batch.delete_cf(Table::SeriesOwners.get(), self.name.as_bytes());
+
+        Ok(())
+    }
 }
 
 impl SeriesOwner {
@@ -28,7 +37,7 @@ impl SeriesOwner {
         };
         let series = owner.series();
 
-        let mut batch = rocksdb::WriteBatch::default();
+        let mut batch = WriteBatch::default();
 
         batch.put_cf(
             Table::SeriesOwners.get(),
@@ -88,13 +97,32 @@ impl SeriesOwner {
         collection: CollectionRef,
         ttl: Option<Duration>,
     ) -> Result<SeriesItem, crate::Error> {
+        let mut batch = WriteBatch::default();
+
+        // But first, unbookmark all your old assets...
+        if let Some(item) = db().get_cf(Table::SeriesItems.get(), self.keypair.public)? {
+            let item: SeriesItem = bincode::deserialize(&item)?;
+            for object in item.collection().list_objects() {
+                object?
+                    .bookmark(BookmarkType::Reference)
+                    .mark_with(&mut batch);
+            }
+        }
+
+        // ... and bookmark all your new ones
+        for object in collection.list_objects() {
+            object?.bookmark(BookmarkType::User).unmark_with(&mut batch);
+        }
+
         let item = self.sign(collection, ttl);
 
-        db().put_cf(
+        batch.put_cf(
             Table::SeriesItems.get(),
             item.key(),
             bincode::serialize(&item).expect("can serialize"),
-        )?;
+        );
+
+        db().write(batch)?;
 
         Ok(item)
     }
@@ -108,6 +136,15 @@ pub struct SeriesRef {
 impl Display for SeriesRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", base64_url::encode(self.key()),)
+    }
+}
+
+impl Dropable for SeriesRef {
+    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+        batch.delete_cf(Table::SeriesItems.get(), self.key());
+        batch.delete_cf(Table::Series.get(), self.key());
+
+        Ok(())
     }
 }
 

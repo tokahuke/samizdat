@@ -1,14 +1,27 @@
+//! Models for the entities living in the node database.
+
+mod bookmark;
 mod collection;
 mod object;
 mod series;
 
+pub use bookmark::{Bookmark, BookmarkType};
 pub use collection::{CollectionItem, CollectionRef, Locator};
 pub use object::{ObjectMetadata, ObjectRef, ObjectStatistics, ObjectStream, CHUNK_SIZE};
 pub use series::{SeriesItem, SeriesOwner, SeriesRef};
 
-// pub enum DynEntity {
-//     Object(ObjectRef),
-//     Collection(CollectionRef),
-//     SeriesOwner(SeriesOwner),
-//     Series(SeriesRef),
-// }
+use rocksdb::WriteBatch;
+
+use crate::db;
+
+pub trait Dropable {
+    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error>;
+
+    fn drop_if_exists(&self) -> Result<(), crate::Error> {
+        let mut batch = WriteBatch::default();
+        self.drop_if_exists_with(&mut batch)?;
+        db().write(batch)?;
+
+        Ok(())
+    }
+}

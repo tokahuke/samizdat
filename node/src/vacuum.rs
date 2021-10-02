@@ -1,5 +1,5 @@
-// TODO: by now, there is no reference counting. Some junk is just left in the db until it
-// reaches the maximum size. We can do better.
+//! A process to keep the size of the database under control and to purge junk 
+//! that is not used anymore.
 
 use decorum::NotNan;
 use rocksdb::{IteratorMode, WriteBatch};
@@ -14,7 +14,7 @@ use samizdat_common::Hash;
 
 use crate::cli::cli;
 use crate::db::{db, Table};
-use crate::models::{CollectionItem, ObjectRef, ObjectStatistics};
+use crate::models::{CollectionItem, Dropable, ObjectRef, ObjectStatistics};
 
 /// Status for a vacuum task.
 pub enum VacuumStatus {
@@ -65,9 +65,11 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
         }) = heap.pop()
         {
             let object = ObjectRef::new(Hash::new(key));
-            object.drop_if_exists_with(&mut batch)?;
-            dropped.insert(object.hash);
-            total_size -= size;
+            if !object.is_bookmarked()? {
+                object.drop_if_exists_with(&mut batch)?;
+                dropped.insert(*object.hash());
+                total_size -= size;
+            }
         } else {
             status = VacuumStatus::Insufficient;
             break;
@@ -78,7 +80,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     for (_, value) in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
         let item: CollectionItem = bincode::deserialize(&value)?;
         if dropped.contains(item.inclusion_proof.claimed_value()) {
-            item.drop_if_exists_with(&mut batch);
+            item.drop_if_exists_with(&mut batch)?;
         }
     }
 

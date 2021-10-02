@@ -1,3 +1,5 @@
+//! HTTP API for the Samizdat Node.
+
 mod resolvers;
 mod returnable;
 
@@ -12,10 +14,11 @@ use warp::Filter;
 use samizdat_common::{Hash, Key};
 
 use crate::balanced_or_tree;
-use crate::models::{CollectionRef, ObjectRef, SeriesOwner, SeriesRef};
+use crate::models::{BookmarkType, CollectionRef, Dropable, ObjectRef, SeriesOwner, SeriesRef};
 
 use resolvers::{resolve_item, resolve_object, resolve_series};
 
+/// Transforms a `Result<T, crate::Error>` into a Warp reply.
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
     T: Returnable,
@@ -27,6 +30,7 @@ where
     )
 }
 
+/// Transforms a `Result<T, crate::Error>` future into a Warp reply.
 async fn async_reply<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
 where
     F: std::future::Future<Output = Result<T, crate::Error>>,
@@ -35,10 +39,13 @@ where
     Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
 }
 
+/// Utility to create a tuple of one value _very explicitely_.
 fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
+/// Optionaly implements the "tilde redirect". Similarly to Unix platforms, the `~` 
+/// represents the "home folder" of a collection or a series.
 fn maybe_redirect_tilde(path: &str) -> Option<String> {
     let mut split = path.split('/');
     let entity_type = split.next()?;
@@ -60,6 +67,8 @@ fn maybe_redirect_tilde(path: &str) -> Option<String> {
     }
 }
 
+/// Optionally redirects a "home path" without trailing slash to the same path with
+/// trailing slash.
 fn maybe_redirect_base(path: &str) -> Option<String> {
     let mut split = path.split('/');
     let entity_type = split.next()?;
@@ -73,6 +82,7 @@ fn maybe_redirect_base(path: &str) -> Option<String> {
     }
 }
 
+/// Removes empty path segments from the URL.
 fn maybe_redirect_empty(path: &str) -> Option<String> {
     if path.contains("//") {
         let split = path.split('/');
@@ -86,12 +96,16 @@ fn maybe_redirect_empty(path: &str) -> Option<String> {
     }
 }
 
+/// The entrypoint of the Samizdat node HTTP API.
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
         general_redirect(),
         get_object(),
         post_object(),
         delete_object(),
+        post_bookmark(),
+        get_bookmark(),
+        delete_bookmark(),
         post_collection(),
         get_collection_list(),
         get_item(),
@@ -103,6 +117,7 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
     )
 }
 
+/// Does all the redirection dances and shenenigans.
 pub fn general_redirect(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::get()
@@ -124,6 +139,7 @@ pub fn general_redirect(
         })
 }
 
+/// Gets the contents of an object.
 pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
         .and(warp::get())
@@ -133,6 +149,7 @@ pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
         .map(tuple)
 }
 
+/// Uploads a new object to the database.
 pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     warp::path!("_objects")
@@ -146,11 +163,12 @@ pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
                 stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
             )
             .await?;
-            Ok(object.hash.to_string())
+            Ok(object.hash().to_string())
         })
         .and_then(async_reply)
 }
 
+/// Explicitely deletes an object from the database.
 pub fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     warp::path!("_objects" / Hash)
@@ -159,6 +177,44 @@ pub fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .map(reply)
 }
 
+/// Bookmarks an object. This will prevent the object from being automatically removed
+/// by the vacuum daemon.
+pub fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
+    warp::path!("_object" / Hash / "bookmark")
+        .and(warp::post())
+        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).mark())
+        .map(reply)
+}
+
+/// Returns whether an object is bookmarked or not. 
+/// 
+/// # Warning
+/// 
+/// By now, this returns `200 OK` even if the object does not exist.
+pub fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
+    warp::path!("_object" / Hash / "bookmark")
+        .and(warp::get())
+        .map(|hash| {
+            ObjectRef::new(hash)
+                .bookmark(BookmarkType::User)
+                .is_marked()
+                .map(Json)
+        })
+        .map(reply)
+}
+
+/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+pub fn delete_bookmark(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_object" / Hash / "bookmark")
+        .and(warp::delete())
+        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
+        .map(reply)
+}
+
+/// Uploads a new collection.
 pub fn post_collection(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections")
@@ -180,6 +236,7 @@ pub fn post_collection(
         .map(reply)
 }
 
+/// Gets the contents of a collection item.
 pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections" / Hash / ..)
         .and(warp::path::tail())
@@ -192,17 +249,20 @@ pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .map(tuple)
 }
 
+/// Lists all the items currently in the database. This is akin to a sitemap.
 pub fn get_collection_list(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_collections" / Hash / "_list")
         .and(warp::get())
         .map(|hash: Hash| {
             let collection = CollectionRef::new(hash);
-            Ok(Json(collection.list())) as Result<_, crate::Error>
+            Ok(Json(collection.list().collect::<Vec<_>>())) as Result<_, crate::Error>
         })
         .map(reply)
 }
 
+/// Creates a new series owner, i.e., a public-private keypair that allows one to push new
+/// colletions to a series.
 pub fn post_series_owner(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_seriesowners" / String)
@@ -214,6 +274,7 @@ pub fn post_series_owner(
         .map(reply)
 }
 
+/// Gets information associates with a series owner
 pub fn get_series_owner(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_seriesowners" / String)
@@ -225,6 +286,7 @@ pub fn get_series_owner(
         .map(reply)
 }
 
+/// Lists all series owners.
 pub fn get_series_owners(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_seriesowners")
@@ -236,6 +298,7 @@ pub fn get_series_owners(
         .map(reply)
 }
 
+/// Pushes a new colletion to the series owner, creating a new series item.
 pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     #[derive(Deserialize)]
@@ -259,6 +322,8 @@ pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
         .map(reply)
 }
 
+/// Gets the content of a collection item using the series public key. This will give the
+/// best-effort latest version for this item.
 pub fn get_item_by_series(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_series" / Key / ..)

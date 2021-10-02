@@ -1,8 +1,11 @@
+//! Command line interface for the Samizdat node.
+
 use std::net::SocketAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use structopt::StructOpt;
 
+/// The CLI parameters.
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Path to the locally stored program data.
@@ -28,8 +31,10 @@ pub struct Cli {
     pub max_storage: usize,
 }
 
+/// The handle to the CLI parameters.
 static mut CLI: Option<Cli> = None;
 
+/// Initializes the [`CLI`] with the values from the command line.
 pub fn init_cli() -> Result<(), crate::Error> {
     let cli = Cli::from_args();
 
@@ -42,13 +47,17 @@ pub fn init_cli() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Returns a handle to the CLI arguments. Only use this after initialization.
 pub fn cli<'a>() -> &'a Cli {
     unsafe { CLI.as_ref().expect("cli not initialized") }
 }
 
+/// A flexible representation of an address in the internet.
 #[derive(Debug)]
 pub enum AddrToResolve {
+    /// A raw `ip:port` address.
     SocketAddr(SocketAddr),
+    /// A `domain:port` (or `domain`, only) address.
     DomainAndPort(String, u16),
 }
 

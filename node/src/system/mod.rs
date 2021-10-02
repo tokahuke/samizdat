@@ -1,3 +1,6 @@
+//! Implmentation of the node behavior in the Samizdat network, both with hubs and with
+//! other nodes.
+
 mod file_transfer;
 mod node_server;
 mod reconnect;

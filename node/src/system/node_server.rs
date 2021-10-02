@@ -34,10 +34,9 @@ impl Node for NodeServer {
             }
         };
 
-        // Code smell?
-        let hash = object.hash;
+        let hash = *object.hash();
 
-        log::info!("Found hash {}", object.hash);
+        log::info!("Found hash {}", hash);
         let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
             Some(socket_addr) => socket_addr,
             None => {
@@ -52,7 +51,7 @@ impl Node for NodeServer {
             async move {
                 log::info!(
                     "Starting task to transfer object {} to {}",
-                    object.hash,
+                    hash,
                     peer_addr
                 );
                 let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;

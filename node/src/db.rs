@@ -1,7 +1,11 @@
-use crate::cli;
+//! Application-specific management of the RocksDB database.
 
 use semver::{Comparator, Op, Version, VersionReq};
+use serde_derive::{Deserialize, Serialize};
 
+use crate::cli;
+
+/// The handle to the RocksDB database.
 static mut DB: Option<rocksdb::DB> = None;
 
 /// Sets the version of the DB or panics if the version is incompatible.
@@ -43,10 +47,13 @@ fn configure_version() {
     }
 }
 
+
+/// Retrieives a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
 }
 
+/// Initializes the RocksDB for use by the Samizdat hub.
 pub fn init_db() -> Result<(), crate::Error> {
     // Database options:
     let mut db_opts = rocksdb::Options::default();
@@ -54,16 +61,16 @@ pub fn init_db() -> Result<(), crate::Error> {
     db_opts.create_if_missing(true);
 
     // Open with column families:
-    let db = rocksdb::DB::open_cf(
+    let mut db = rocksdb::DB::open_cf_descriptors(
         &db_opts,
         &cli().db_path,
-        &vec![
+        vec![
             Table::Global,
-            Table::Dependencies,
             Table::Objects,
             Table::ObjectMetadata,
             Table::ObjectChunks,
             Table::ObjectStatistics,
+            Table::Bookmarks,
             Table::Collections,
             Table::CollectionMetadata,
             Table::CollectionItems,
@@ -74,9 +81,11 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::RecentNonces,
         ]
         .into_iter()
-        .map(Table::name)
-        .collect::<Vec<_>>(),
+        .map(Table::descriptor),
     )?;
+
+    // Run possible migrations:
+    migrate(&mut db)?;
 
     // Set static:
     unsafe {
@@ -89,12 +98,12 @@ pub fn init_db() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// All column families in the RocksDB database.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum Table {
     /// Global, singleton information.
     Global,
-    /// Dependencies between entities in the database.
-    Dependencies,
     /// The list of all inscribed hashes.
     Objects,
     /// The map of all object (out-of-band) metadata, indexed by object hash.
@@ -103,10 +112,12 @@ pub enum Table {
     ObjectChunks,
     /// Statistics on object usage.
     ObjectStatistics,
+    /// List of dependencies on objects, which prevent automatic deletion.
+    Bookmarks,
     /// The list of all known collections.
-    Collections,
+    Collections, // DEPRECATED
     /// The list of all collection metadata.
-    CollectionMetadata,
+    CollectionMetadata, // DEPRECATED
     /// The list of all collection items, indexed by item hash.
     CollectionItems,
     /// The lit of all collection item hashes, indexed by locator.
@@ -122,14 +133,121 @@ pub enum Table {
     RecentNonces,
 }
 
+/// An aliase fot the merge function pointer.
+type MergeFunction = fn(&[u8], Option<&[u8]>, &mut rocksdb::MergeOperands) -> Option<Vec<u8>>;
+
 impl Table {
-    pub fn name(self) -> String {
+    /// Name of the corresponding column family.
+    fn name(self) -> String {
         format!("{:?}", self)
     }
 
+    /// Merge operator for the column family, if any.
+    fn merge_operator(self) -> Option<MergeFunction> {
+        match self {
+            Table::Bookmarks => Some(merge),
+            _ => None,
+        }
+    }
+
+    /// Descriptor for column family initialization.
+    fn descriptor(self) -> rocksdb::ColumnFamilyDescriptor {
+        let mut column_opts = rocksdb::Options::default();
+        let name = self.name();
+
+        if let Some(merge_fn) = self.merge_operator() {
+            column_opts.set_merge_operator_associative(&name, merge_fn)
+        }
+
+        rocksdb::ColumnFamilyDescriptor::new(self.name(), column_opts)
+    }
+
+    /// Gets the underlying column family after database initialization.
     pub fn get<'a>(self) -> &'a rocksdb::ColumnFamily {
         let db = db();
         db.cf_handle(&format!("{:?}", self))
             .expect("column family exists")
     }
+}
+
+/// Merges keys usig [`MergeOperation`] operands.
+fn merge(
+    _new_key: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &mut rocksdb::MergeOperands,
+) -> Option<Vec<u8>> {
+    let mut current = existing_val.map(Vec::from);
+
+    for operand in operands {
+        match bincode::deserialize::<MergeOperation>(operand) {
+            Err(err) => {
+                log::error!("merge got bad operation: {}", err);
+                return existing_val.map(Vec::from);
+            }
+            Ok(operation) => match operation.eval(current) {
+                Err(err) => {
+                    log::error!("merge operation {:?} failed with {}", operation, err);
+                    return existing_val.map(Vec::from);
+                }
+                Ok(next) => {
+                    current = next;
+                }
+            },
+        }
+    }
+
+    current
+}
+
+/// Possible merge operations
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MergeOperation {
+    /// Increments an `i16` key by 1.
+    Increment,
+    /// Decrements an `i16` key by 1.
+    Decrement,
+    /// Sets an `i16`, giving it the value `1` if it doesn't exist.
+    Set,
+    /// Clears the key.
+    Clear,
+}
+
+impl MergeOperation {
+    /// Does the merge operation dance for one operand.
+    fn eval(&self, current: Option<Vec<u8>>) -> Result<Option<Vec<u8>>, crate::Error> {
+        let outcome = match (self, current) {
+            (MergeOperation::Increment, None) => Some(1i16.to_be_bytes().to_vec()),
+            (MergeOperation::Increment, Some(current)) => {
+                let count = i16::from_be_bytes([current[0], current[1]]);
+                Some((count + 1).to_be_bytes().to_vec())
+            }
+            (MergeOperation::Decrement, None) => (None),
+            (MergeOperation::Decrement, Some(current)) => {
+                let count = i16::from_be_bytes([current[0], current[1]]);
+                if count > 1 {
+                    Some((count - 1).to_be_bytes().to_vec())
+                } else {
+                    None
+                }
+            }
+            (MergeOperation::Set, None) => Some(1i16.to_be_bytes().to_vec()),
+            (MergeOperation::Set, Some(x)) => Some(x),
+            (MergeOperation::Clear, None) => None,
+            (MergeOperation::Clear, Some(_)) => None,
+        };
+
+        Ok(outcome)
+    }
+}
+
+/// Runs database migration tasks.
+/// 
+/// # Note
+/// 
+/// By now, just reserved for future use.
+fn migrate(db: &mut rocksdb::DB) -> Result<(), crate::Error> {
+    //db.drop_cf(&Table::Dependencies.name())?;
+    let _ = db; // suppresses unused variable warning.
+
+    Ok(())
 }

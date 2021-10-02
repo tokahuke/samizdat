@@ -175,10 +175,10 @@ impl ObjectHeader {
                 metadata.content_size, self.content_size
             )
             .into())
-        } else if object.hash != hash {
+        } else if *object.hash() != hash {
             Err(format!(
                 "bad content from peer: expected {}, got {}",
-                hash, object.hash,
+                hash, object.hash(),
             )
             .into())
         } else {
@@ -192,7 +192,7 @@ impl ObjectHeader {
         sender: &ChannelSender,
         object: &ObjectRef,
     ) -> Result<(), crate::Error> {
-        let cipher = TransferCipher::new(&object.hash, &self.nonce);
+        let cipher = TransferCipher::new(object.hash(), &self.nonce);
 
         for chunk in object.iter()?.expect("object exits") {
             let chunk = chunk?;
@@ -207,7 +207,7 @@ impl ObjectHeader {
 
         log::info!(
             "finished sending {} to {}",
-            object.hash,
+            object.hash(),
             sender.remote_address()
         );
 
@@ -237,7 +237,7 @@ pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(
     let header = ObjectHeader::for_object(object)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceHeader::send_negotiate(sender, object.hash).await?;
+    let transfer_cipher = NonceHeader::send_negotiate(sender, *object.hash()).await?;
     log::info!("sending object header");
     header.send(sender, &transfer_cipher).await?;
     log::info!("sending data");
@@ -278,7 +278,7 @@ pub async fn recv_item(
     log::info!("receiving data");
     header
         .object_header
-        .recv_data(&mut receiver, object.hash)
+        .recv_data(&mut receiver, *object.hash())
         .await?;
 
     log::info!("done receiving item");
