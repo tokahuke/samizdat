@@ -1,7 +1,7 @@
 use serde_derive::Deserialize;
 use tabled::Tabled;
 
-use samizdat_common::Key;
+use samizdat_common::{Key, PrivateKey};
 
 use super::show_table;
 
@@ -63,6 +63,7 @@ pub async fn list(series_owner_name: &Option<String>) -> Result<(), crate::Error
         struct Row {
             name: String,
             public_key: Key,
+            private_key: PrivateKey,
             default_ttl: String,
         }
 
@@ -74,6 +75,7 @@ pub async fn list(series_owner_name: &Option<String>) -> Result<(), crate::Error
                 .map(|series_owner| Row {
                     name: series_owner.name,
                     public_key: series_owner.keypair.public.into(),
+                    private_key: series_owner.keypair.secret.into(),
                     default_ttl: format!("{:?}", series_owner.default_ttl),
                 })
                 .collect::<Vec<_>>(),

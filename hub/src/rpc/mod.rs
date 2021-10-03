@@ -3,9 +3,12 @@ mod room;
 use futures::prelude::*;
 use lazy_static::lazy_static;
 use quinn::Endpoint;
+use rand_distr::Distribution;
 use std::io;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
@@ -26,8 +29,28 @@ lazy_static! {
     static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
 }
 
+#[derive(Debug, Default)]
+struct Statistics {
+    requests: AtomicUsize,
+    successes: AtomicUsize,
+    errors: AtomicUsize,
+    total_latency: AtomicUsize,
+}
+
+impl Statistics {
+    fn rand_priority(&self) -> f64 {
+        let requests = self.requests.load(Ordering::Relaxed) as f64;
+        let successes = self.successes.load(Ordering::Relaxed) as f64;
+        let beta =
+            rand_distr::Beta::new(successes + 1., requests + 1.).expect("valid beta distribution");
+
+        beta.sample(&mut rand::thread_rng())
+    }
+}
+
 #[derive(Debug)]
 struct Node {
+    statistics: Statistics,
     client: NodeClient,
     addr: SocketAddr,
 }
@@ -79,16 +102,12 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
-    // async fn reverse_port(self, _: context::Context) -> u16 {
-    //     CLI.reverse_port
-    // }
-
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(Box::new(|server| async move {
             log::debug!("got {:?}", query);
 
-            // Create a channel address from node address:
+            // Create a channel address from peer address:
             let channel = rand::random();
             let channel_addr = ChannelAddr::new(server.0.addr, channel);
 
@@ -118,15 +137,23 @@ impl Hub for HubServer {
                     async move {
                         log::debug!("starting resolve for {}", peer_id);
 
+                        peer.statistics.requests.fetch_add(1, Ordering::Relaxed);
+
+                        let start = Instant::now();
                         let outcome = match kind {
                             QueryKind::Object => peer.client.resolve_object(ctx, resolution).await,
                             QueryKind::Item => peer.client.resolve_item(ctx, resolution).await,
                         };
+                        let elapsed = start.elapsed().as_millis() as usize;
+                        peer.statistics
+                            .total_latency
+                            .fetch_add(elapsed, Ordering::Relaxed);
 
                         let response = match outcome {
                             Ok(response) => response,
                             Err(err) => {
                                 log::warn!("error asking {} to resolve: {}", peer_id, err);
+                                peer.statistics.errors.fetch_add(1, Ordering::Relaxed);
                                 return None;
                             }
                         };
@@ -134,6 +161,7 @@ impl Hub for HubServer {
                         log::debug!("resolve done for {}", peer_id);
 
                         if let ResolutionStatus::Found = response.status {
+                            peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
                             Some(peer.addr)
                         } else {
                             None
@@ -145,7 +173,7 @@ impl Hub for HubServer {
             log::debug!("query done");
 
             QueryResponse::Resolved {
-                candidates: candidates 
+                candidates: candidates
                     .into_iter()
                     .map(|candidate_addr| ChannelAddr::new(candidate_addr, channel))
                     .collect(),
@@ -243,7 +271,7 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                 .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
                 .ok()
         })
-        .for_each(|new_connection| async move {
+        .for_each_concurrent(Some(CLI.max_connections), |new_connection| async move {
             // Get peer address:
             let client_addr = new_connection.connection.remote_address();
 
@@ -260,10 +288,12 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
                 NodeClient::new(tarpc::client::Config::default(), transport);
             let client = tarpc::client::NewClient {
                 client: uninstrumented_client.client,
-                dispatch: uninstrumented_client.dispatch.map(move |outcome| {
-                    ROOM.remove(client_addr);
-                    outcome
-                }),
+                dispatch: uninstrumented_client
+                    .dispatch
+                    .then(move |outcome| async move {
+                        ROOM.remove(client_addr).await;
+                        outcome
+                    }),
             }
             .spawn();
 
@@ -272,12 +302,13 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             ROOM.insert(
                 client_addr,
                 Node {
+                    statistics: Statistics::default(),
                     client,
                     addr: client_addr,
                 },
-            );
+            )
+            .await;
         })
-        // Max number of channels.
         .await;
 
     Ok(())

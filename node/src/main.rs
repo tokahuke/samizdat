@@ -2,15 +2,15 @@ mod cli;
 mod db;
 mod http;
 mod models;
-mod public_folder;
 mod replay_resistance;
-mod rpc;
 mod slow_compiler_workaround;
+mod system;
+mod vacuum;
 
 pub use samizdat_common::Error;
 
 pub use cli::cli;
-pub use db::{db, Table};
+pub use db::{db};
 
 use futures::prelude::*;
 use std::panic;
@@ -21,10 +21,12 @@ use samizdat_common::logger;
 
 use cli::init_cli;
 use db::init_db;
-use rpc::Hubs;
+use system::Hubs;
 
+/// The variable holding a list of all the connections to the hubs.
 static mut HUBS: Option<Hubs> = None;
 
+/// Initiates [`HUBS`] by connecting to all hubs defined in the command line.
 async fn init_hubs() -> Result<(), crate::Error> {
     let resolved = futures::stream::iter(&cli().hubs)
         .map(cli::AddrToResolve::resolve)
@@ -40,6 +42,7 @@ async fn init_hubs() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Retrieves a reference to the list of hubs. Needs to be called just after initialization.
 pub fn hubs<'a>() -> &'a Hubs {
     unsafe { HUBS.as_ref().expect("hubs not initialized") }
 }
@@ -53,6 +56,7 @@ fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
     }
 }
 
+/// The entrypoint of the Samizdat node.
 #[tokio::main]
 async fn main() -> Result<(), crate::Error> {
     // Init logger:
@@ -62,6 +66,9 @@ async fn main() -> Result<(), crate::Error> {
     init_cli()?;
     init_db()?;
     init_hubs().await?;
+
+    // Start vacuum:
+    tokio::spawn(crate::vacuum::run_vacuum_daemon());
 
     // Describe server:
     let server = warp::filters::addr::remote()

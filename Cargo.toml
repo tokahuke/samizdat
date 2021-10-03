@@ -3,4 +3,5 @@
 members = ["common", "node", "hub", "cli", "proxy"]
 
 [profile.release]
+
 lto = "thin"

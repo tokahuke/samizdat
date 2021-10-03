@@ -11,14 +11,15 @@ pub enum Cli {
     Commit {
         #[structopt(long)]
         ttl: Option<String>,
-        dir: PathBuf,
-        series: Option<String>,
+        dir: Option<PathBuf>,
     },
     /// Uploads a single file as an object.
     Upload {
         /// The content-type of this file. Will be guessed if unspecified.
         #[structopt(long)]
         content_type: Option<String>,
+        #[structopt(long)]
+        no_bookmark: bool,
         file: PathBuf,
     },
     Series {
@@ -65,14 +66,18 @@ impl Cli {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
             Cli::Init => commands::init().await,
-            Cli::Commit { dir, series, ttl } => commands::commit(dir, series, ttl).await,
-            Cli::Upload { file, content_type } => {
+            Cli::Commit { dir, ttl } => commands::commit(dir, ttl).await,
+            Cli::Upload {
+                file,
+                content_type,
+                no_bookmark,
+            } => {
                 let content_type = content_type.clone().unwrap_or_else(|| {
                     mime_guess::from_path(&file)
                         .first_or_octet_stream()
                         .to_string()
                 });
-                commands::upload(file, content_type).await
+                commands::upload(file, content_type, !no_bookmark).await
             }
             Cli::Series {
                 command: SeriesCommand::New { series_owner_name },

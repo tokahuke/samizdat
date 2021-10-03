@@ -9,25 +9,28 @@ use samizdat_common::rpc::QueryKind;
 use crate::hubs;
 use crate::models::{Locator, ObjectRef, SeriesRef};
 
+/// Tries to find an object, asking the Samizdat network if necessary.
 pub async fn resolve_object(
     object: ObjectRef,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {:?}", object);
 
     let stream = if let Some(stream) = object.iter()? {
-        log::info!("found local hash {}", object.hash);
+        log::info!("found local hash {}", object.hash());
         Some(stream)
     } else {
-        log::info!("hash {} not found locally. Querying hubs", object.hash);
-        hubs().query(object.hash, QueryKind::Object).await;
+        log::info!("hash {} not found locally. Querying hubs", object.hash());
+        hubs().query(*object.hash(), QueryKind::Object).await;
         object.iter()?
     };
 
     // Respond with found or not found.
     if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
+        object.touch()?;
         let response = http::Response::builder()
             .header("Content-Type", metadata.content_type)
             .header("Content-Size", metadata.content_size)
+            .header("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string())
             .status(http::StatusCode::OK)
             // TODO: Bleh! Tidy-up this mess!
             .body(Body::wrap_stream(stream::iter(
@@ -40,12 +43,14 @@ pub async fn resolve_object(
         let response = http::Response::builder()
             .header("Content-Type", "text/plain")
             .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("object {} not found", object.hash)));
+            .body(Body::from(format!("object {} not found", object.hash())));
 
         Ok(response)
     }
 }
 
+/// Tries to find an object as a collection item, asking the Samizdat network if
+/// necessary.
 pub async fn resolve_item(
     locator: Locator<'_>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
@@ -73,6 +78,8 @@ pub async fn resolve_item(
     }
 }
 
+/// Tries to find an object as an item the collection correspoinding to the latest
+/// version of a series, asking the Samizdat network if necessary.
 pub async fn resolve_series(
     series: SeriesRef,
     name: &str,
