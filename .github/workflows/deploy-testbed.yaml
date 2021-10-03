@@ -19,13 +19,13 @@ jobs:
         toolchain: stable
         profile: minimal
 
-#     - name: Running cache
-#       uses: Swatinem/rust-cache@v1
-#       with:
-#         cache-on-failure: true
+    - name: Running cache
+      uses: Swatinem/rust-cache@v1
+      with:
+        cache-on-failure: true
     
-#     - name: Running build
-#       run: cargo build --all --release
+    - name: Running build
+      run: cargo build --all --release
 
    # See https://zellwk.com/blog/github-actions-deploy/
     - name: Install SSH Key
@@ -42,28 +42,28 @@ jobs:
           echo 'test payload' > test.txt
           rsync -avz ./test.txt ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:test.txt
       
-#     - name: Upload with rsync
-#       run: |
-#         rsync -avz \
-#           ./target/release/samizdat-hub \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
-#         rsync -avz \
-#           ./hub/samizdat-hub.service \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
-#         rsync -avz \
-#           ./target/release/samizdat-node \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
-#         rsync -avz \
-#           ./node/samizdat-node.service \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
-#         rsync -avz \
-#           ./target/release/samizdat-proxy \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
-#         rsync -avz \
-#           ./proxy/samizdat-proxy.service \
-#           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service
+    - name: Upload with rsync
+      run: |
+        rsync -avz \
+          ./target/release/samizdat-hub \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
+        rsync -avz \
+          ./hub/samizdat-hub.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
+        rsync -avz \
+          ./target/release/samizdat-node \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
+        rsync -avz \
+          ./node/samizdat-node.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
+        rsync -avz \
+          ./target/release/samizdat-proxy \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
+        rsync -avz \
+          ./proxy/samizdat-proxy.service \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service
     
-    - name: Restart hub
+    - name: Restart services
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
           "systemctl disable --now samizdat-proxy &&
@@ -72,7 +72,7 @@ jobs:
            rm -rf /var/samizdat/node/db &&
            systemctl enable --now samizdat-hub &&
            systemctl enable --now samizdat-node &&
-           systemctl enable --now samizdat-proxy || echo skipping"
+           systemctl enable --now samizdat-proxy"
     
     - name: Done
       run: echo Done
