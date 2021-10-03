@@ -38,7 +38,7 @@ async fn main() -> Result<(), io::Error> {
             .arg("--domain")
             .arg(DOMAIN)
             .spawn().expect("failed to spawn certbot").wait().expect("failed to run certbot");
-        assert_eq!(status.code(), 0);
+        assert_eq!(status.code().expect("there always is a code (?)"), 0);
 
         // Start server:
         let server = warp::serve(server)
