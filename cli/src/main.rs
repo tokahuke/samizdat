@@ -2,8 +2,8 @@ mod cli;
 mod commands;
 mod error;
 mod logger;
-mod util;
 mod manifest;
+mod util;
 
 pub use error::Error;
 pub use manifest::Manifest;

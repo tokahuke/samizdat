@@ -1,3 +1,5 @@
+//! Utilities to maintain connectivity in an uncertain world.
+
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
@@ -10,6 +12,7 @@ use tokio::time::{sleep, Duration};
 //     Reconnecting,
 // }
 
+/// Exponential backoff. Just that.
 pub fn exponential_backoff(start: Duration, max: Duration) -> impl FnMut() -> Duration {
     let mut delay = start;
     move || {
@@ -21,11 +24,14 @@ pub fn exponential_backoff(start: Duration, max: Duration) -> impl FnMut() -> Du
 
 /// A structure that tries to re-establish a connection, come hell or high water.
 pub struct Reconnect<T> {
+    /// The current active connection.
     current: Arc<RwLock<T>>,
+    /// The task that monitors the connections and reconnects if necessary.
     _reconnect: JoinHandle<()>,
 }
 
 impl<T: 'static + Send + Sync> Reconnect<T> {
+    /// Inits the reconnector.
     pub async fn init<C, CFut, R, Bf, B, E>(
         mut connect: C,
         mut backoff_factory: Bf,
@@ -83,6 +89,7 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
     //     }
     // }
 
+    /// Gets the current active connection.
     pub async fn get<'a>(&'a self) -> RwLockReadGuard<'a, T> {
         self.current.read().await
     }

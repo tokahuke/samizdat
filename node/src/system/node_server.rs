@@ -1,3 +1,5 @@
+//! RPC implementation for the Node. This RPC is called by the hubs to trigger object resoution.
+
 use futures::prelude::*;
 use std::sync::Arc;
 use tarpc::context;

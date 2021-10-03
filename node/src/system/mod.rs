@@ -29,6 +29,7 @@ use crate::models::{ObjectRef, SeriesItem, SeriesRef};
 use node_server::NodeServer;
 use transport::{ChannelManager, ConnectionManager};
 
+/// A single connection instance, which will be recreates by [`Reconnect`] on connection loss.
 pub struct HubConnectionInner {
     client: HubClient,
     // connection_manager: Arc<ConnectionManager>,
@@ -36,6 +37,7 @@ pub struct HubConnectionInner {
 }
 
 impl HubConnectionInner {
+    /// Creates the RPC connection from the Node to the Hub.
     async fn connect_direct(
         direct_addr: SocketAddr,
         connection_manager: Arc<ConnectionManager>,
@@ -58,6 +60,7 @@ impl HubConnectionInner {
         Ok((client, client_reset_recv))
     }
 
+    /// Creates the RPC connection from the Hub to the Node.
     async fn connect_reverse(
         reverse_addr: SocketAddr,
         connection_manager: Arc<ConnectionManager>,
@@ -82,6 +85,8 @@ impl HubConnectionInner {
         Ok(server_reset_recv)
     }
 
+    /// Creates the two connections between hub and node: RPC from node to hub and RPC from 
+    /// hub to node.
     async fn connect(
         direct_addr: SocketAddr,
         reverse_addr: SocketAddr,
@@ -108,12 +113,14 @@ impl HubConnectionInner {
     }
 }
 
+/// A connection to a single node, already resilient to reconnects.
 pub struct HubConnection {
     name: &'static str,
     inner: Reconnect<HubConnectionInner>,
 }
 
 impl HubConnection {
+    /// Creates a connection to the hub.
     pub async fn connect(
         name: &'static str,
         direct_addr: SocketAddr,
@@ -134,6 +141,7 @@ impl HubConnection {
         })
     }
 
+    /// Makes a query to this hub.
     pub async fn query(
         &self,
         content_hash: Hash,
@@ -208,6 +216,7 @@ impl HubConnection {
         outcome
     }
 
+    /// Tries to resolve the latest item of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<SeriesItem>, crate::Error> {
         let key_riddle = ContentRiddle::new(&series.public_key.hash());
         let inner = self.inner.get().await;
@@ -246,11 +255,13 @@ impl HubConnection {
     }
 }
 
+/// Set of all hub connection from this node.
 pub struct Hubs {
     hubs: Vec<Arc<HubConnection>>,
 }
 
 impl Hubs {
+    /// Initiates the set of all hub connections.
     pub async fn init<I>(addrs: I) -> Result<Hubs, crate::Error>
     where
         I: IntoIterator<Item = (&'static str, SocketAddr)>,
@@ -271,6 +282,7 @@ impl Hubs {
         Ok(Hubs { hubs })
     }
 
+    /// Makes a query to all inscribed hubs.
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.query(content_hash, kind).await) })
@@ -291,6 +303,7 @@ impl Hubs {
         None
     }
 
+    /// Tries to resolve the latest item of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Option<SeriesItem> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.get_latest(series).await) })

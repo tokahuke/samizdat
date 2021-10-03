@@ -67,7 +67,11 @@ impl Cli {
         match self {
             Cli::Init => commands::init().await,
             Cli::Commit { dir, ttl } => commands::commit(dir, ttl).await,
-            Cli::Upload { file, content_type, no_bookmark } => {
+            Cli::Upload {
+                file,
+                content_type,
+                no_bookmark,
+            } => {
                 let content_type = content_type.clone().unwrap_or_else(|| {
                     mime_guess::from_path(&file)
                         .first_or_octet_stream()
