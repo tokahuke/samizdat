@@ -3,15 +3,19 @@
 use serde::Serialize;
 use std::borrow::Cow;
 
+/// A trait for things that can be sent back through HTTP.
 pub trait Returnable {
+    /// The content type of the thing.
     fn content_type(&self) -> Cow<str> {
         "text/plain".into()
     }
 
+    /// The status code of the thing.
     fn status_code(&self) -> http::StatusCode {
         http::StatusCode::OK
     }
 
+    /// The value of the thing.
     fn render(&self) -> Cow<[u8]>;
 }
 
@@ -114,6 +118,7 @@ impl Returnable for crate::Error {
     }
 }
 
+/// A dynamic [`Returnable`].
 pub struct Return {
     pub content_type: String,
     pub status_code: http::StatusCode,
@@ -134,6 +139,7 @@ impl Returnable for Return {
     }
 }
 
+/// A [`Returnable`] that returns JSON data.
 pub struct Json<T>(pub T);
 
 impl<T: Serialize> Returnable for Json<T> {

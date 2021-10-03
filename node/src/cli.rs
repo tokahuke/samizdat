@@ -1,8 +1,11 @@
+//! Command line interface for the Samizdat node.
+
 use std::net::SocketAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use structopt::StructOpt;
 
+/// The CLI parameters.
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Path to the locally stored program data.
@@ -12,8 +15,8 @@ pub struct Cli {
     ///  your browser.
     #[structopt(env, long, default_value = "4510")]
     pub port: u16,
-    /// The maximum size in bytes of the content that can be sent from a peer to this machine.
-    #[structopt(env, long, default_value = "1000000000")]
+    /// (MB) The maximum size in bytes of the content that can be sent from a peer to this machine.
+    #[structopt(env, long, default_value = "1000")]
     pub max_content_size: usize,
     /// A list of hubs to which to connect.
     #[structopt(env, long, default_value = "[::1]:4511")]
@@ -21,10 +24,17 @@ pub struct Cli {
     /// The maximum number of hubs to be queried simultaneously per query.
     #[structopt(env, long, default_value = "3")]
     pub max_parallel_hubs: usize,
+    /// (MB) The maximum total size of all cached files and _disposable_ files. Note that the total
+    /// size may still exceed this value, since some of the allocated space is used to store
+    /// data that is valuable to you.
+    #[structopt(env, long, default_value = "1000")]
+    pub max_storage: usize,
 }
 
+/// The handle to the CLI parameters.
 static mut CLI: Option<Cli> = None;
 
+/// Initializes the [`CLI`] with the values from the command line.
 pub fn init_cli() -> Result<(), crate::Error> {
     let cli = Cli::from_args();
 
@@ -37,13 +47,17 @@ pub fn init_cli() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Returns a handle to the CLI arguments. Only use this after initialization.
 pub fn cli<'a>() -> &'a Cli {
     unsafe { CLI.as_ref().expect("cli not initialized") }
 }
 
+/// A flexible representation of an address in the internet.
 #[derive(Debug)]
 pub enum AddrToResolve {
+    /// A raw `ip:port` address.
     SocketAddr(SocketAddr),
+    /// A `domain:port` (or `domain`, only) address.
     DomainAndPort(String, u16),
 }
 

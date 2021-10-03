@@ -1,20 +1,32 @@
-use rocksdb::IteratorMode;
+use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt::{self, Display};
 
 use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
 
-use crate::db;
-use crate::Table;
+use crate::db::{db, Table};
 
-use super::ObjectRef;
+use super::{Dropable, ObjectRef};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
     pub collection: CollectionRef,
     pub name: String,
     pub inclusion_proof: PatriciaProof,
+}
+
+impl Dropable for CollectionItem {
+    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+        let locator = self.collection.locator_for(&self.name);
+
+        log::info!("Removing item {}: {:#?}", locator, self);
+
+        batch.delete_cf(Table::CollectionItemLocators.get(), locator.path());
+        batch.delete_cf(Table::CollectionItems.get(), locator.hash());
+
+        Ok(())
+    }
 }
 
 impl CollectionItem {
@@ -72,9 +84,8 @@ impl CollectionItem {
         Ok(None)
     }
 
-    pub fn insert(&self) -> Result<(), crate::Error> {
+    pub fn insert_with(&self, batch: &mut WriteBatch) {
         let locator = self.collection.locator_for(&self.name);
-        let mut batch = rocksdb::WriteBatch::default();
 
         batch.put_cf(
             Table::CollectionItems.get(),
@@ -86,11 +97,14 @@ impl CollectionItem {
             locator.path(),
             locator.hash(),
         );
-        batch.put_cf(Table::Collections.get(), self.collection.hash, &[]);
 
+        log::info!("Inserting item {}: {:#?}", locator, self);
+    }
+
+    pub fn insert(&self) -> Result<(), crate::Error> {
+        let mut batch = WriteBatch::default();
+        self.insert_with(&mut batch);
         db().write(batch)?;
-
-        log::info!("Inserted item {}: {:#?}", locator, self);
 
         Ok(())
     }
@@ -99,6 +113,18 @@ impl CollectionItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionRef {
     pub hash: Hash,
+}
+
+impl Dropable for CollectionRef {
+    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+        for name in self.list() {
+            if let Some(item) = self.get(&name)? {
+                item.drop_if_exists_with(batch)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl CollectionRef {
@@ -120,16 +146,15 @@ impl CollectionRef {
         let patricia_map = objects
             .as_ref()
             .iter()
-            .map(|(name, object)| (Hash::build(name.as_ref().as_bytes()), object.hash))
+            .map(|(name, object)| (Hash::build(name.as_ref().as_bytes()), *object.hash()))
             .collect::<PatriciaMap>();
 
         let root = *patricia_map.root();
         let collection = CollectionRef { hash: root };
 
-        let mut batch = rocksdb::WriteBatch::default();
+        let mut batch = WriteBatch::default();
 
         for (name, _object) in objects.as_ref() {
-            let locator = collection.locator_for(name.as_ref());
             let item = CollectionItem {
                 collection: collection.clone(),
                 name: name.as_ref().to_owned(),
@@ -137,19 +162,11 @@ impl CollectionRef {
                     .proof_for(Hash::build(name.as_ref().as_bytes()))
                     .expect("name exists in map"),
             };
-            batch.put_cf(
-                Table::CollectionItems.get(),
-                locator.hash(),
-                bincode::serialize(&item).expect("can serialize"),
-            );
-            batch.put_cf(
-                Table::CollectionItemLocators.get(),
-                locator.path(),
-                locator.hash(),
-            );
+
+            item.insert_with(&mut batch);
         }
 
-        batch.put_cf(Table::Collections.get(), collection.hash, &[]);
+        // batch.put_cf(Table::Collections.get(), collection.hash, &[]);
 
         db().write(batch)?;
 
@@ -174,10 +191,23 @@ impl CollectionRef {
         }
     }
 
-    pub fn list(&self) -> Vec<String> {
+    pub fn list<'a>(&'a self) -> impl 'a + Iterator<Item = String> {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
-            .map(|(key, _)| String::from_utf8_lossy(&key[self.hash.as_ref().len()..]).into_owned())
-            .collect::<Vec<_>>()
+            .map(move |(key, _)| {
+                String::from_utf8_lossy(&key[self.hash.as_ref().len()..]).into_owned()
+            })
+    }
+
+    pub fn list_objects<'a>(
+        &'a self,
+    ) -> impl 'a + Iterator<Item = Result<ObjectRef, crate::Error>> {
+        self.list().filter_map(move |name| {
+            let locator = Locator {
+                collection: self.clone(),
+                name: &name,
+            };
+            locator.get_object().transpose()
+        })
     }
 }
 
@@ -206,11 +236,11 @@ impl<'a> Locator<'a> {
         self.collection.get(self.name)
     }
 
-    // pub fn with_proof(&self, inclusion_proof: PatriciaProof) -> CollectionItem {
-    //     CollectionItem {
-    //         collection: self.collection.clone(),
-    //         name: self.name.to_owned(),
-    //         inclusion_proof,
-    //     }
-    // }
+    pub fn get_object(&self) -> Result<Option<ObjectRef>, crate::Error> {
+        if let Some(item) = self.get()? {
+            Ok(Some(item.object()?))
+        } else {
+            Ok(None)
+        }
+    }
 }

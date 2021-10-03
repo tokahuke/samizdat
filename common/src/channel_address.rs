@@ -5,7 +5,7 @@
 //!
 
 use serde_derive::{Deserialize, Serialize};
-use std::fmt::{self, Display, Debug};
+use std::fmt::{self, Debug, Display};
 use std::net::SocketAddr;
 
 use crate::Hash;

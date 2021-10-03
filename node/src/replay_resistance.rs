@@ -1,3 +1,5 @@
+//! TODO: avoid replay attacks and also become a bit more resilient to message amplification.
+
 // use std::convert::TryInto;
 // use tokio::time::{interval, Duration};
 

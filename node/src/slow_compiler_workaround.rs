@@ -1,3 +1,5 @@
+//! Has anyone solved this problem yet!? This odule defines [`balanced_or_tree`].
+
 /// Takes a list of handler expressions and `or`s them together
 /// in a balanced tree. That is, instead of `a.or(b).or(c).or(d)`,
 /// it produces `(a.or(b)).or(c.or(d))`, thus nesting the types
@@ -53,6 +55,7 @@ macro_rules! balanced_or_tree {
     };
 }
 
+/// Does the boxing for the recursive part of [`balanced_or_tree`].
 #[macro_export]
 macro_rules! debug_boxed {
     ($x:expr) => {

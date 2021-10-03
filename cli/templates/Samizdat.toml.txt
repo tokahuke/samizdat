@@ -1,0 +1,13 @@
+# This is the Samizdat manifest file for this project.
+
+[series]
+
+name = "{{ name }}"
+public-key = "{{ public_key }}"
+# ttl = "{{ ttl }}"    # set a time-to-live different from the default
+
+
+[build]
+
+base = "./dist" # the input directory that Samizdat will read from
+# run = "npm run build" # a build command to be run before upload

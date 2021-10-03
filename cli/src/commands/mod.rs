@@ -1,24 +1,34 @@
 pub mod collection;
 pub mod series;
 
+use askama::Template;
 use futures::prelude::*;
 use futures::stream;
 use serde_derive::Deserialize;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::{fs, io};
+use std::{env, fs, io};
 use tabled::{Table, Tabled};
 
 use samizdat_common::{Hash, Key, Signed};
+
+use crate::Manifest;
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
 }
 
-pub async fn upload(path: &PathBuf, content_type: String) -> Result<(), crate::Error> {
+pub async fn upload(
+    path: &PathBuf,
+    content_type: String,
+    bookmark: bool,
+) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
-        .post("http://localhost:4510/_objects")
+        .post(format!(
+            "http://localhost:4510/_objects?bookmark={}",
+            bookmark
+        ))
         .header("Content-Type", content_type)
         .body(fs::read(path)?)
         .send()
@@ -31,14 +41,43 @@ pub async fn upload(path: &PathBuf, content_type: String) -> Result<(), crate::E
 }
 
 pub async fn init() -> Result<(), crate::Error> {
-    todo!()
+    let pwd = env::current_dir()?;
+    let name = pwd.iter().last().expect("not empty").to_string_lossy();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://localhost:4510/_seriesowners/{}", name))
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        #[derive(Deserialize)]
+        struct Payoad {
+            //name: String,
+            keypair: ed25519_dalek::Keypair,
+            default_ttl: Duration,
+        }
+
+        let text = response.text().await?;
+        println!("{}", text);
+        let payload: Payoad = serde_json::from_str(&text)?;
+
+        let rendered = crate::manifest::ManifestTemplate {
+            name: &name,
+            public_key: &Key::from(payload.keypair.public).to_string(),
+            ttl: &humantime::format_duration(payload.default_ttl).to_string(),
+        }
+        .render()
+        .expect("can render");
+
+        fs::write("./Samizdat.toml", rendered)?;
+    } else {
+        println!("Bad status: {}", response.status());
+    }
+
+    Ok(())
 }
 
-pub async fn commit(
-    base: &PathBuf,
-    series: &Option<String>,
-    ttl: &Option<String>,
-) -> Result<(), crate::Error> {
+pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -73,6 +112,10 @@ pub async fn commit(
         names
     }
 
+    let manifest = Manifest::find()?;
+    let base = base.as_ref().unwrap_or_else(|| &manifest.build.base);
+    manifest.run()?;
+
     let mut all_files = vec![];
     walk(base, &mut all_files)?;
 
@@ -98,7 +141,7 @@ pub async fn commit(
             } else {
                 return Err(crate::Error::Message(format!("")));
             };
-            let names = names_from_path(path, base);
+            let names = names_from_path(path, &base);
 
             Ok((names, hash))
         })
@@ -120,9 +163,10 @@ pub async fn commit(
     log::info!("Status: {}", response.status());
     let collection = response.text().await?;
 
-    if let Some(series) = series {
+    if let Some(series) = Some(manifest.series.name) {
         let query = ttl
             .as_ref()
+            .or(manifest.series.ttl.as_ref())
             .map(|ttl| format!("ttl={}", ttl))
             .unwrap_or_default();
 
@@ -158,8 +202,8 @@ pub async fn commit(
         #[derive(Debug, Deserialize)]
         pub struct SeriesItem {
             signed: Signed<SeriesItemContent>,
-            public_key: Key,
-            freshness: chrono::DateTime<chrono::Utc>,
+            //public_key: Key,
+            //freshness: chrono::DateTime<chrono::Utc>,
         }
 
         #[derive(Tabled)]

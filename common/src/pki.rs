@@ -43,6 +43,37 @@ impl<T> Deref for Signed<T> {
     }
 }
 
+#[derive(Debug, DeriveDeserialize, DeriveSerialize)]
+pub struct PrivateKey(ed25519_dalek::SecretKey);
+
+impl FromStr for PrivateKey {
+    type Err = crate::Error;
+    fn from_str(s: &str) -> Result<PrivateKey, crate::Error> {
+        // TODO: oops! need to process this error.
+        Ok(PrivateKey(ed25519_dalek::SecretKey::from_bytes(
+            &base64_url::decode(s)?,
+        )
+        .expect("bad key")))
+    }
+}
+
+impl Display for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", base64_url::encode(&self.0))
+    }
+}
+
+impl AsRef<ed25519_dalek::SecretKey> for PrivateKey {
+    fn as_ref(&self) -> &ed25519_dalek::SecretKey {
+        &self.0
+    }
+}
+
+impl From<ed25519_dalek::SecretKey> for PrivateKey {
+    fn from(key: ed25519_dalek::SecretKey) -> PrivateKey {
+        PrivateKey(key)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
 pub struct Key(ed25519_dalek::PublicKey);
 

@@ -1,4 +1,5 @@
 mod cli;
+mod html;
 mod http;
 mod logger;
 mod slow_compiler_workaround;

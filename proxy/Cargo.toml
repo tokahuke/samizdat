@@ -28,3 +28,5 @@ reqwest = { version = "0.11.4", default-features = false, features = ["rustls-tl
 hyper = "0.14.12"
 mime = "0.3.16"
 scraper = "0.12.0"
+include_dir = "0.6.2"
+static_dir = "0.2.0"

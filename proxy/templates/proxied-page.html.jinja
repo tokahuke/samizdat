@@ -2,8 +2,13 @@
 <html>
   <meta charset="UTF-8">
 	<head>
-    <title>{{ title }}</title>
+    {% match title -%}
+      {% when Some with (title) -%}
+        <title>{{ title }}</title>
+      {% when None -%}
+    {% endmatch -%}
     <meta name="description" content="{{ meta_description }}">
+    <link rel="icon" href="{{ favicon }}" />
   </head>
 	<body>
 		<style>
