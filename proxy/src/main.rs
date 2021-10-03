@@ -7,9 +7,10 @@ mod slow_compiler_workaround;
 use std::io;
 use warp::Filter;
 
-//use samizdat_common::logger;
-
 use cli::cli;
+
+const DOMAIN: &str = "proxy.hubfederation.com";
+const OWNER: &str = "pedrobittencourt3@gmail.com";
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
@@ -25,9 +26,33 @@ async fn main() -> Result<(), io::Error> {
         .with(warp::log("api"));
 
     // Run server:
-    let http_server = tokio::spawn(warp::serve(server).run(([0, 0, 0, 0], cli().port)));
+    if cli().https {
+        // Run certobot:
+        let status = std::process::Command::new("certbot")
+            .arg("certonly")
+            .arg("--standalone")
+            .arg("--non-interactive")
+            .arg("--email")
+            .arg(OWNER)
+            .arg("--agree-tos")
+            .arg("--domain")
+            .arg(DOMAIN)
+            .spawn().expect("failed to spawn certbot").wait().expect("failed to run certbot");
+        assert_eq!(status.code(), 0);
 
-    http_server.await?;
+        // Start server:
+        let server = warp::serve(server)
+            .tls()
+            .key_path(format!("/etc/letsencrypt/live/{}/privkey.pem", DOMAIN))
+            .cert_path(format!("/etc/letsencrypt/live/{}/fullchain.pem", DOMAIN))
+            .run(([0, 0, 0, 0], cli().port.unwrap_or(443)));
+        
+        tokio::spawn(server).await?
+    } else {
+        // Start server:
+        let server = warp::serve(server).run(([0, 0, 0, 0], cli().port.unwrap_or(8080)));
+        tokio::spawn(server).await?;
+    }
 
     Ok(())
 }

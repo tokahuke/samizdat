@@ -3,9 +3,12 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Cli {
-    /// The port on which to serve the proxy.
-    #[structopt(long, default_value = "8080")]
-    pub port: u16,
+    /// The port on which to serve the proxy. This only has effect when serving HTTP only.
+    #[structopt(long)]
+    pub port: Option<u16>,
+    /// Whether to serve with HTTPS. This is meant for production only.
+    #[structopt(long)]
+    pub https: bool,
 }
 
 static mut CLI: Option<Cli> = None;

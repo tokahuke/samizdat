@@ -36,7 +36,7 @@ pub fn proxy_page(raw: &[u8], entity: &str, content_hash: &str) -> bytes::Bytes 
         .next()
         .and_then(|favicon_link| favicon_link.value().attr("href"))
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("{}/{}/favicon.ico", entity, content_hash));
+        .unwrap_or_else(|| format!("/{}/{}/favicon.ico", entity, content_hash));
 
     ProxyedPage {
         title: title.as_deref(),
