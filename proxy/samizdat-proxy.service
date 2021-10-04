@@ -9,9 +9,7 @@ Restart=always
 RestartSec=1
 RuntimeMaxSec=1296000 # restart every 15 days to refresh TLS certificates
 User=root
-ExecStart=/usr/local/bin/samizdat-proxy --port 80
-# Soon...
-# ExecStart=/usr/local/bin/samizdat-proxy --https
+ExecStart=/usr/local/bin/samizdat-proxy --https
 
 [Install]
 WantedBy=multi-user.target
