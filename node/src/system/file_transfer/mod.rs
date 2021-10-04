@@ -131,9 +131,9 @@ impl Header for ObjectHeader {}
 
 impl ObjectHeader {
     /// Creates an object heade for a given object.
-    /// 
+    ///
     /// # Panics:
-    /// 
+    ///
     /// If object does not exist locally.
     fn for_object(object: &ObjectRef) -> Result<ObjectHeader, crate::Error> {
         let metadata = object.metadata()?.expect("object exists");
@@ -198,7 +198,8 @@ impl ObjectHeader {
         } else if *object.hash() != hash {
             Err(format!(
                 "bad content from peer: expected {}, got {}",
-                hash, object.hash(),
+                hash,
+                object.hash(),
             )
             .into())
         } else {
@@ -272,7 +273,7 @@ pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(
 }
 
 /// Receive a collection item from a channel.
-/// 
+///
 /// TODO: make object transfer optional if the receiver perceives that it
 /// already has the object (one simple table lookup, no seqscan here). This is
 /// important as people update their collections often, but keep most of it

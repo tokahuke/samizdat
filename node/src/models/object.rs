@@ -72,7 +72,7 @@ impl ObjectRef {
         &self.hash
     }
 
-    /// Returns the metadata on this object. This function returns `Ok(None)` if the object 
+    /// Returns the metadata on this object. This function returns `Ok(None)` if the object
     /// does not actually exist.
     pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
         match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
@@ -83,9 +83,9 @@ impl ObjectRef {
 
     /// Update statistics indicating that this object was used. This will signal to the
     /// vacuum daemon that this object is usefull and therefore a worse candidate for deletion.
-    /// 
+    ///
     /// This fucntion has no effect if the object does not exist.
-    /// 
+    ///
     /// TODO: current impl allows for TOCTOU.
     pub fn touch(&self) -> Result<(), crate::Error> {
         if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
@@ -198,7 +198,7 @@ impl ObjectRef {
     }
 
     /// Streams the contents of an object.
-    /// 
+    ///
     /// This function returns `Ok(None)` if the object does not actually exist.
     ///  
     /// TODO: lock for reading? Reading is not atomic. (snapshots?)
@@ -223,17 +223,17 @@ impl ObjectRef {
     }
 
     /// Returns a bookmark handle for the supplied bookmark type (see [`BookmarkType`]).
-    /// 
+    ///
     /// # Note
-    /// 
-    /// Make sure that the object exists before marking objects, since the bookmark will leak 
+    ///
+    /// Make sure that the object exists before marking objects, since the bookmark will leak
     /// space in the database if it doesn't.
     pub fn bookmark(&self, ty: BookmarkType) -> Bookmark {
         Bookmark::new(ty, self.clone())
     }
 
-    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`]. If the object 
-    /// does not exist in the database, this function returns `Ok(false)`. You need to further 
+    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`]. If the object
+    /// does not exist in the database, this function returns `Ok(false)`. You need to further
     /// check if the object actually exists.
     pub fn is_bookmarked(&self) -> Result<bool, crate::Error> {
         // TODO: where is iterator error?

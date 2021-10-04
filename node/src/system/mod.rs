@@ -85,7 +85,7 @@ impl HubConnectionInner {
         Ok(server_reset_recv)
     }
 
-    /// Creates the two connections between hub and node: RPC from node to hub and RPC from 
+    /// Creates the two connections between hub and node: RPC from node to hub and RPC from
     /// hub to node.
     async fn connect(
         direct_addr: SocketAddr,

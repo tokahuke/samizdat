@@ -40,8 +40,8 @@ impl Bookmark {
 
     pub fn mark_with(&self, batch: &mut WriteBatch) {
         let operation = match self.ty {
-            BookmarkType::Reference => MergeOperation::Increment,
-            BookmarkType::User => MergeOperation::Set,
+            BookmarkType::Reference => MergeOperation::Increment(1),
+            BookmarkType::User => MergeOperation::Set(1),
         };
 
         batch.merge_cf(
@@ -61,8 +61,8 @@ impl Bookmark {
 
     pub fn unmark_with(&self, batch: &mut WriteBatch) {
         let operation = match self.ty {
-            BookmarkType::Reference => MergeOperation::Decrement,
-            BookmarkType::User => MergeOperation::Clear,
+            BookmarkType::Reference => MergeOperation::Increment(-1),
+            BookmarkType::User => MergeOperation::Set(0),
         };
 
         batch.merge_cf(

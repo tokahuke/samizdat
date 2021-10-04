@@ -111,7 +111,9 @@ impl SeriesOwner {
 
         // ... and bookmark all your new ones
         for object in collection.list_objects() {
-            object?.bookmark(BookmarkType::Reference).mark_with(&mut batch);
+            object?
+                .bookmark(BookmarkType::Reference)
+                .mark_with(&mut batch);
         }
 
         let item = self.sign(collection, ttl);

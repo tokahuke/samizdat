@@ -44,7 +44,7 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
-/// Optionaly implements the "tilde redirect". Similarly to Unix platforms, the `~` 
+/// Optionaly implements the "tilde redirect". Similarly to Unix platforms, the `~`
 /// represents the "home folder" of a collection or a series.
 fn maybe_redirect_tilde(path: &str) -> Option<String> {
     let mut split = path.split('/');
@@ -163,16 +163,18 @@ pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
         .and(warp::header("content-type"))
         .and(warp::query())
         .and(warp::body::bytes())
-        .map(|content_type: String, query: Query, bytes: bytes::Bytes| async move {
-            let (_, object) = ObjectRef::build(
-                content_type,
-                bytes.len(),
-                query.bookmark,
-                stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
-            )
-            .await?;
-            Ok(object.hash().to_string())
-        })
+        .map(
+            |content_type: String, query: Query, bytes: bytes::Bytes| async move {
+                let (_, object) = ObjectRef::build(
+                    content_type,
+                    bytes.len(),
+                    query.bookmark,
+                    stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
+                )
+                .await?;
+                Ok(object.hash().to_string())
+            },
+        )
         .and_then(async_reply)
 }
 
@@ -195,10 +197,10 @@ pub fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .map(reply)
 }
 
-/// Returns whether an object is bookmarked or not. 
-/// 
+/// Returns whether an object is bookmarked or not.
+///
 /// # Warning
-/// 
+///
 /// By now, this returns `200 OK` even if the object does not exist.
 pub fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {

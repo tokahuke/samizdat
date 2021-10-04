@@ -7,7 +7,7 @@ lazy_static! {
     static ref SELECT_META_DESCRIPTION: Selector =
         Selector::parse("meta[name='description']").expect("valid selector");
     static ref SELECT_FAVICON: Selector =
-        Selector::parse("link[rel='icon']").expect("valid selector");
+        Selector::parse("link[rel~='icon']").expect("valid selector");
 }
 
 #[derive(Template)]

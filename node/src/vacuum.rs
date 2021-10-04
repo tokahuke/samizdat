@@ -1,4 +1,4 @@
-//! A process to keep the size of the database under control and to purge junk 
+//! A process to keep the size of the database under control and to purge junk
 //! that is not used anymore.
 
 use decorum::NotNan;

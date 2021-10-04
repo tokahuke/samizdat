@@ -47,7 +47,6 @@ fn configure_version() {
     }
 }
 
-
 /// Retrieives a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
@@ -143,9 +142,9 @@ impl Table {
     }
 
     /// Merge operator for the column family, if any.
-    fn merge_operator(self) -> Option<MergeFunction> {
+    fn merge_operator(self) -> Option<(MergeFunction, MergeFunction)> {
         match self {
-            Table::Bookmarks => Some(merge),
+            Table::Bookmarks => Some((MergeOperation::partial_merge, MergeOperation::full_merge)),
             _ => None,
         }
     }
@@ -155,8 +154,8 @@ impl Table {
         let mut column_opts = rocksdb::Options::default();
         let name = self.name();
 
-        if let Some(merge_fn) = self.merge_operator() {
-            column_opts.set_merge_operator_associative(&name, merge_fn)
+        if let Some((partial, full)) = self.merge_operator() {
+            column_opts.set_merge_operator(&name, partial, full)
         }
 
         rocksdb::ColumnFamilyDescriptor::new(self.name(), column_opts)
@@ -170,80 +169,114 @@ impl Table {
     }
 }
 
-/// Merges keys usig [`MergeOperation`] operands.
-fn merge(
-    _new_key: &[u8],
-    existing_val: Option<&[u8]>,
-    operands: &mut rocksdb::MergeOperands,
-) -> Option<Vec<u8>> {
-    let mut current = existing_val.map(Vec::from);
-
-    for operand in operands {
-        match bincode::deserialize::<MergeOperation>(operand) {
-            Err(err) => {
-                log::error!("merge got bad operation: {}", err);
-                return existing_val.map(Vec::from);
-            }
-            Ok(operation) => match operation.eval(current) {
-                Err(err) => {
-                    log::error!("merge operation {:?} failed with {}", operation, err);
-                    return existing_val.map(Vec::from);
-                }
-                Ok(next) => {
-                    current = next;
-                }
-            },
-        }
-    }
-
-    current
-}
-
 /// Possible merge operations
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MergeOperation {
-    /// Increments an `i16` key by 1.
-    Increment,
-    /// Decrements an `i16` key by 1.
-    Decrement,
-    /// Sets an `i16`, giving it the value `1` if it doesn't exist.
-    Set,
-    /// Clears the key.
-    Clear,
+    /// Increments an `i16` key by some number.
+    Increment(i16),
+    /// Sets an `i16`.
+    Set(i16),
 }
 
 impl MergeOperation {
+    /// Evalues the resulting operation from successive operations.
+    fn associative(&self, other: &Self) -> MergeOperation {
+        match (self, other) {
+            (MergeOperation::Increment(inc1), MergeOperation::Increment(inc2)) => {
+                MergeOperation::Increment(inc1 + inc2)
+            }
+            (MergeOperation::Set(val), MergeOperation::Increment(inc)) => {
+                MergeOperation::Set(val + inc)
+            }
+            (_, MergeOperation::Set(val)) => MergeOperation::Set(*val),
+        }
+    }
+
     /// Does the merge operation dance for one operand.
     fn eval(&self, current: Option<Vec<u8>>) -> Result<Option<Vec<u8>>, crate::Error> {
-        let outcome = match (self, current) {
-            (MergeOperation::Increment, None) => Some(1i16.to_be_bytes().to_vec()),
-            (MergeOperation::Increment, Some(current)) => {
+        let r#final = match (self, current) {
+            (MergeOperation::Increment(inc), None) => *inc,
+            (MergeOperation::Increment(inc), Some(current)) => {
                 let count = i16::from_be_bytes([current[0], current[1]]);
-                Some((count + 1).to_be_bytes().to_vec())
+                count + inc
             }
-            (MergeOperation::Decrement, None) => (None),
-            (MergeOperation::Decrement, Some(current)) => {
-                let count = i16::from_be_bytes([current[0], current[1]]);
-                if count > 1 {
-                    Some((count - 1).to_be_bytes().to_vec())
-                } else {
-                    None
-                }
-            }
-            (MergeOperation::Set, None) => Some(1i16.to_be_bytes().to_vec()),
-            (MergeOperation::Set, Some(x)) => Some(x),
-            (MergeOperation::Clear, None) => None,
-            (MergeOperation::Clear, Some(_)) => None,
+            (MergeOperation::Set(val), _) => *val,
         };
 
-        Ok(outcome)
+        if r#final != 0 {
+            Ok(Some(r#final.to_be_bytes().to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// The partial merge operator for rockesDB.
+    fn partial_merge(
+        new_key: &[u8],
+        _existing_val: Option<&[u8]>,
+        operands: &mut rocksdb::MergeOperands,
+    ) -> Option<Vec<u8>> {
+        // This is an identity op:
+        let mut current = MergeOperation::Increment(0);
+
+        for operand in operands {
+            match bincode::deserialize::<MergeOperation>(operand) {
+                Err(err) => {
+                    log::error!(
+                        "partial merge got bad operation for key {} with operand {} at {:?}: {}",
+                        base64_url::encode(new_key),
+                        base64_url::encode(operand),
+                        current,
+                        err
+                    );
+                    break;
+                }
+                Ok(operation) => current = current.associative(&operation),
+            }
+        }
+
+        Some(bincode::serialize(&current).expect("can serialize"))
+    }
+
+    /// The full merge operator for rocksDB
+    fn full_merge(
+        new_key: &[u8],
+        existing_val: Option<&[u8]>,
+        operands: &mut rocksdb::MergeOperands,
+    ) -> Option<Vec<u8>> {
+        let mut current = existing_val.map(Vec::from);
+
+        for operand in operands {
+            match bincode::deserialize::<MergeOperation>(operand) {
+                Err(err) => {
+                    log::error!(
+                        "full merge got bad operation for key {} with operand {}: {}",
+                        base64_url::encode(new_key),
+                        base64_url::encode(operand),
+                        err
+                    );
+                    return existing_val.map(Vec::from);
+                }
+                Ok(operation) => match operation.eval(current) {
+                    Err(err) => {
+                        log::error!("merge operation {:?} failed with {}", operation, err);
+                        return existing_val.map(Vec::from);
+                    }
+                    Ok(next) => {
+                        current = next;
+                    }
+                },
+            }
+        }
+
+        current
     }
 }
 
 /// Runs database migration tasks.
-/// 
+///
 /// # Note
-/// 
+///
 /// By now, just reserved for future use.
 fn migrate(db: &mut rocksdb::DB) -> Result<(), crate::Error> {
     //db.drop_cf(&Table::Dependencies.name())?;
