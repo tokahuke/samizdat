@@ -3,15 +3,56 @@
 use futures::stream;
 use http::Response;
 use hyper::Body;
+use std::convert::TryInto;
 
 use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
 use crate::models::{Locator, ObjectRef, SeriesRef};
 
+pub struct Resolved {
+    body: Body,
+    content_type: String,
+    content_size: usize,
+    ext_headers: Vec<(&'static str, String)>,
+}
+
+impl TryInto<Response<Body>> for Resolved {
+    type Error = http::Error;
+    fn try_into(self) -> Result<Response<Body>, http::Error> {
+        let mut builder = http::Response::builder()
+            .header("Content-Type", self.content_type)
+            .header("Content-Size", self.content_size);
+
+        for (header, value) in self.ext_headers {
+            builder = builder.header(header, value);
+        }
+
+        builder
+            .status(http::StatusCode::OK)
+            // TODO: Bleh! Tidy-up this mess!
+            .body(self.body)
+    }
+}
+
+pub struct NotResolved {
+    message: String,
+}
+
+impl TryInto<Response<Body>> for NotResolved {
+    type Error = http::Error;
+    fn try_into(self) -> Result<Response<Body>, http::Error> {
+        http::Response::builder()
+            .header("Content-Type", "text/plain")
+            .status(http::StatusCode::NOT_FOUND)
+            .body(Body::from(self.message))
+    }
+}
+
 /// Tries to find an object, asking the Samizdat network if necessary.
 pub async fn resolve_object(
     object: ObjectRef,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {:?}", object);
 
@@ -27,25 +68,29 @@ pub async fn resolve_object(
     // Respond with found or not found.
     if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
         object.touch()?;
-        let response = http::Response::builder()
-            .header("Content-Type", metadata.content_type)
-            .header("Content-Size", metadata.content_size)
-            .header("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string())
-            .status(http::StatusCode::OK)
-            // TODO: Bleh! Tidy-up this mess!
-            .body(Body::wrap_stream(stream::iter(
+        let resolved = Resolved {
+            content_type: metadata.content_type,
+            content_size: metadata.content_size,
+            ext_headers: ext_headers
+                .into_iter()
+                .chain(vec![(
+                    "X-Samizdat-Bookmark",
+                    object.is_bookmarked()?.to_string(),
+                )])
+                .collect(),
+            body: Body::wrap_stream(stream::iter(
                 iter.into_iter()
                     .map(|thing| thing.map_err(|err| err.to_string())),
-            )));
+            )),
+        };
 
-        Ok(response)
+        Ok(resolved.try_into())
     } else {
-        let response = http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("object {} not found", object.hash())));
+        let not_resolved = NotResolved {
+            message: format!("object {} not found", object.hash()),
+        };
 
-        Ok(response)
+        Ok(not_resolved.try_into())
     }
 }
 
@@ -67,14 +112,13 @@ pub async fn resolve_item(
     };
 
     if let Some(item) = maybe_item {
-        resolve_object(item.object()?).await
+        resolve_object(item.object()?, vec![]).await
     } else {
-        let response = http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("item {} not found", locator)));
+        let not_resolved = NotResolved {
+            message: format!("item {} not found", locator),
+        };
 
-        Ok(response)
+        Ok(not_resolved.try_into())
     }
 }
 
@@ -91,20 +135,27 @@ pub async fn resolve_series(
         Ok(resolve_item(locator).await?)
     } else if series.is_locally_owned()? {
         log::info!("Does not have a fresh result, but is owned. So, a result doesn't exist.");
-        Ok(http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("series {} is empty", series))))
+        let not_resolved = NotResolved { 
+            message: format!("series {} is empty", series),
+        };
+        Ok(not_resolved.try_into())
     } else if let Some(latest) = hubs().get_latest(&series).await {
         log::info!("Does not have a fresh result, but is not owned locally. Query the network!");
         series.advance(&latest)?;
         let locator = latest.collection().locator_for(name);
         Ok(resolve_item(locator).await?)
+    } else if let Some(mut latest) = series.get_latest()? {
+        log::info!("The not fresh result will have to do... Will resolve this item.");
+        // Refresh:
+        latest.make_fresh();
+        series.advance(&latest)?;
+        let locator = latest.collection().locator_for(name);
+        Ok(resolve_item(locator).await?)
     } else {
         log::info!("Not found!");
-        Ok(http::Response::builder()
-            .header("Content-Type", "text/plain")
-            .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(format!("series {} not found", series))))
+        let not_resolved = NotResolved {
+            message: format!("series {} not found", series),
+        };
+        Ok(not_resolved.try_into())
     }
 }

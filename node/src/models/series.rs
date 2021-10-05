@@ -215,6 +215,17 @@ impl SeriesRef {
         }
     }
 
+    /// Returns the latest collection in the local database, no matter the freshness or
+    /// local ownership.
+    pub fn get_latest(&self) -> Result<Option<SeriesItem>, crate::Error> {
+        if let Some(value) = db().get_cf(Table::SeriesItems.get(), self.key())? {
+            let item: SeriesItem = bincode::deserialize(&value)?;
+            Ok(Some(item))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn advance(&self, series_item: &SeriesItem) -> Result<(), crate::Error> {
         if !series_item.is_valid() {
             return Err(crate::Error::InvalidSeriesItem);

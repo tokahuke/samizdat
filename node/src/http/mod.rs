@@ -144,7 +144,7 @@ pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
     warp::path!("_objects" / Hash)
         .and(warp::get())
         .and_then(|hash: Hash| async move {
-            Ok(resolve_object(ObjectRef::new(hash)).await?) as Result<_, warp::Rejection>
+            Ok(resolve_object(ObjectRef::new(hash), vec![]).await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }
