@@ -3,46 +3,41 @@ use lazy_static::lazy_static;
 use scraper::{Html, Selector};
 
 lazy_static! {
-    static ref SELECT_TITLE: Selector = Selector::parse("title").expect("valid selector");
-    static ref SELECT_META_DESCRIPTION: Selector =
-        Selector::parse("meta[name='description']").expect("valid selector");
-    static ref SELECT_FAVICON: Selector =
-        Selector::parse("link[rel~='icon']").expect("valid selector");
+    static ref SELECT_HEAD: Selector = Selector::parse("head").expect("valid selector");
+    static ref SELECT_BODY: Selector = Selector::parse("body").expect("valid selector");
 }
+
+const SAMIZDAT_BLOG_PATH: &str = "/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install/";
 
 #[derive(Template)]
 #[template(path = "proxied-page.html.jinja")]
-struct ProxyedPage<'a> {
-    title: Option<&'a str>,
-    meta_description: &'a str,
-    favicon: &'a str,
-    source: &'a str,
+struct ProxyedPage {
+    head: String,
+    body: String,
+    rand: String,
+    download_link: &'static str,
 }
 
-pub fn proxy_page(raw: &[u8], entity: &str, content_hash: &str) -> bytes::Bytes {
+pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> bytes::Bytes {
     let source = &String::from_utf8_lossy(raw);
     let html = Html::parse_document(source);
-    let title = html
-        .select(&SELECT_TITLE)
+    let head = html
+        .select(&SELECT_HEAD)
         .next()
-        .map(|title| title.text().collect::<String>());
-    let meta_description = html
-        .select(&SELECT_META_DESCRIPTION)
-        .next()
-        .and_then(|meta_description| meta_description.value().attr("content"))
+        .map(|head| head.inner_html())
         .unwrap_or_default();
-    let favicon = html
-        .select(&SELECT_FAVICON)
+    let body = html
+        .select(&SELECT_BODY)
         .next()
-        .and_then(|favicon_link| favicon_link.value().attr("href"))
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("/{}/{}/favicon.ico", entity, content_hash));
+        .map(|body| body.inner_html())
+        .unwrap_or_default();
+    let rand = format!("samizdat_{:x}", rand::random::<u16>());
 
     ProxyedPage {
-        title: title.as_deref(),
-        favicon: &favicon,
-        meta_description: &meta_description,
-        source,
+        head,
+        body,
+        rand,
+        download_link: SAMIZDAT_BLOG_PATH,
     }
     .render()
     .expect("can always render proxied page")

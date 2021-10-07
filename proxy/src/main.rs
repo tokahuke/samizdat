@@ -37,7 +37,10 @@ async fn main() -> Result<(), io::Error> {
             .arg("--agree-tos")
             .arg("--domain")
             .arg(DOMAIN)
-            .spawn().expect("failed to spawn certbot").wait().expect("failed to run certbot");
+            .spawn()
+            .expect("failed to spawn certbot")
+            .wait()
+            .expect("failed to run certbot");
         assert_eq!(status.code().expect("there always is a code (?)"), 0);
 
         // Start server:
@@ -46,7 +49,7 @@ async fn main() -> Result<(), io::Error> {
             .key_path(format!("/etc/letsencrypt/live/{}/privkey.pem", DOMAIN))
             .cert_path(format!("/etc/letsencrypt/live/{}/fullchain.pem", DOMAIN))
             .run(([0, 0, 0, 0], cli().port.unwrap_or(443)));
-        
+
         tokio::spawn(server).await?
     } else {
         // Start server:

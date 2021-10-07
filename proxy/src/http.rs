@@ -14,6 +14,13 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .and(warp::get())
         .and_then(
             |entity: String, content_hash: String, tail: Tail| async move {
+                thread_local! {
+                    static CLIENT: reqwest::Client = reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .build()
+                        .unwrap();
+                }
+
                 // Query node for the web page:
                 let translated = format!(
                     "http://localhost:4510/{}/{}/{}",
@@ -21,29 +28,43 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     content_hash,
                     tail.as_str()
                 );
-                let response = reqwest::get(translated).await.unwrap();
-                let status = response.status();
-                let content_type = response
-                    .headers()
-                    .get("Content-Type")
-                    .cloned()
-                    .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
-                let body = response.bytes().await.unwrap();
+                let response = CLIENT
+                    .with(|client| client.get(translated).send())
+                    .await
+                    .unwrap();
 
-                // If web page, do your shenanigans:
-                let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
-                let proxied = if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
-                    proxy_page(body.as_ref(), &entity, &content_hash)
-                } else {
-                    body
+                let response = match response.status().as_u16() {
+                    status @ 300..=399 => {
+                        http::Response::builder()
+                            .status(status)
+                            .header("Location", response.headers().get("Location").unwrap())
+                            .body(hyper::body::Body::empty())
+                    }
+                    status => {
+                        let content_type = response
+                            .headers()
+                            .get("Content-Type")
+                            .cloned()
+                            .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
+                        let body = response.bytes().await.unwrap();
+        
+                        // If web page, do your shenanigans:
+                        let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
+                        let proxied = if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
+                            proxy_page(body.as_ref(), &entity, &content_hash)
+                        } else {
+                            body
+                        };
+        
+                        // Buid response:
+                        http::Response::builder()
+                            .status(status)
+                            .header("Content-Type", content_type)
+                            .body(hyper::body::Body::from(proxied))
+                    }
                 };
 
-                // Buid response:
-                let response = http::Response::builder()
-                    .status(status)
-                    .header("Content-Type", content_type)
-                    .body(hyper::body::Body::from(proxied));
-
+                // HACK! Type system won't comply.
                 if true {
                     Ok(response)
                 } else {

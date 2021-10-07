@@ -1,56 +1,42 @@
 <!DOCTYPE html>
 <html>
-  <meta charset="UTF-8">
 	<head>
-    {% match title -%}
-      {% when Some with (title) -%}
-        <title>{{ title }}</title>
-      {% when None -%}
-    {% endmatch -%}
-    <meta name="description" content="{{ meta_description }}">
-    <link rel="icon" href="{{ favicon }}" />
-  </head>
-	<body>
-		<style>
-			body {
-				margin: 0;
-				padding: 0;
+    <meta charset="UTF-8">
 
-        font-family: sans-serif;
-			}
+    {{ head|safe }}
 
-      mark {
+		<style id="{{ rand }}-style">
+      /* CSS style context isolation */
+      #{{ rand }}-proxy-overlay {
+        all: initial;
+      }
+
+      #{{ rand }}-proxy-overlay mark {
         background: #f7ba45;
       }
 
-			iframe#main {
-				position: absolute;
-				width: 100vw;
-				height: 100vh;
-				border: 0;
-				overflow-x: hidden;
-			}
-
-      #overlay {
-        position: absolute;
-        z-index: 1;
+      #{{ rand }}-proxy-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1024;
         width: 100vw;
 				height: 100vh;
         background-color: rgba(0, 0, 0, 0.5);
         display: grid;
       }
 
-      .hidden {
+      #{{ rand }}-proxy-overlay.{{ rand }}-hidden {
         visibility: hidden;
       }
 
-      .fade-out {
+      #{{ rand }}-proxy-overlay.{{ rand }}-fade-out {
         visibility: hidden;
         opacity: 0;
         transition: visibility 0s 0.3s, opacity 0.3s linear;
       }
 
-      #modal {
+      #{{ rand }}-modal {
         align-self: center;
         justify-self: center;
         background-color: rgba(255, 255, 255, 1.0);
@@ -61,76 +47,87 @@
         width: 480px;
       }
 
-      #modal-footer {
+      #{{ rand }}-modal-footer {
         margin-top: 24px;
         width: 100%;
         display: flex;
         justify-content: right;
       }
 
-      a.button {
+      a.{{ rand }}-button {
         padding: 8px 16px;    
         border-radius: 4px;
 
         font-size: 16px;
         text-decoration: none;
         font-weight: 500;
-      }
+       }
 
-      a.selected {
+      a.{{ rand }}-selected {
         background-color: #1c86f2;
         border: 0;
         color: white;
       }
-      a.selected:hover {
+
+      a.{{ rand }}-selected:hover {
         background-color: #4ca0f5;
       }
 
-      a.unselected {
+      a.{{ rand }}-unselected {
         color: #1c86f2;
       }
-      a.unselected:hover {
+
+      a.{{ rand }}-unselected:hover {
         color: #4ca0f5;
       }
 		</style>
-    
-    <div id="overlay" class="hidden">
-      <div id="modal">
+  </head>
+	<body>
+    {{ body|safe }}
+
+    <div id="{{ rand }}-proxy-overlay" class="{{ rand }}-hidden">
+      <div id="{{ rand }}-modal">
         <h3>Support the <mark>Samizdat</mark> System</h3>
         <p>You are currently using a <em>proxy</em> to view pages served with Samizdat. Download
           Samizdat for free the full experience.</p>
         <p>Help us all to support the system!</p>
-        <div id="modal-footer">
-          <a id="maybe-later" class="button unselected" href="#" onclick="closeModal()">
+        <div id="{{ rand }}-modal-footer">
+          <a
+            id="{{ rand }}-maybe-later"
+            class="{{ rand }}-button {{ rand }}-unselected"
+            href="#" onclick="{{ rand }}CloseModal()"
+          >
             Maybe later
           </a>
-          <a id="get-the-app" class="button selected" href="#">Get the app</a>
+          <a
+            id="{{ rand }}-get-the-app"
+            class="{{ rand }}-button {{ rand }}-selected"
+            href="{{ download_link }}"
+          >Get the app</a>
         </div>
       </div>
     </div>
 
-		<iframe id="main" srcdoc="{{ source }}">
-			Uh-oh! No iframes :(
-		</iframe>
-
     <script>
-      function closeModal() {
-        document.getElementById("overlay").classList.add("fade-out");
+      function {{ rand }}CloseModal() {
+        document.getElementById("{{ rand }}-proxy-overlay").classList.add("{{ rand }}-fade-out");
         return false;
       }
 
-      const storageKey = "__samizdat_proxy_page_count";
-      let pageCount = parseInt(localStorage.getItem(storageKey));
-      if (!pageCount) {
-        localStorage.setItem(storageKey, 1);
-        pageCount = 1;
-      } else {
-        localStorage.setItem(storageKey, pageCount + 1);
-      }
+      (() => {
+        const storageKey = "__samizdat_proxy_page_count";
+        let pageCount = parseInt(localStorage.getItem(storageKey));
+        if (!pageCount) {
+          localStorage.setItem(storageKey, 1);
+          pageCount = 1;
+        } else {
+          localStorage.setItem(storageKey, pageCount + 1);
+        }
 
-      if (pageCount % 3 == 0) {
-        document.getElementById("overlay").classList.remove("hidden");
-      }
+        if (pageCount % 3 == 0) {
+          document.getElementById("{{ rand }}-proxy-overlay").classList.remove("{{ rand }}-hidden");
+        }
+      })();
     </script>
 	</body>
 </html>
