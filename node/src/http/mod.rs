@@ -276,11 +276,38 @@ pub fn get_collection_list(
 /// colletions to a series.
 pub fn post_series_owner(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_seriesowners" / String)
+    #[derive(Deserialize)]
+    struct Keypair {
+        public_key: String,
+        private_key: String,
+    }
+
+    #[derive(Deserialize)]
+    struct Request {
+        series_owner_name: String,
+        keypair: Option<Keypair>,
+    }
+
+    warp::path!("_seriesowners")
         .and(warp::post())
-        .map(|series_owner_name: String| {
-            let series_owner = SeriesOwner::create(&series_owner_name, Duration::from_secs(3_600))?;
-            Ok(Json(series_owner))
+        .and(warp::body::json())
+        .map(|request: Request| {
+            let series_owner = if let Some(Keypair {
+                public_key,
+                private_key,
+            }) = request.keypair
+            {
+                SeriesOwner::import(
+                    &request.series_owner_name,
+                    public_key.parse()?,
+                    private_key.parse()?,
+                    Duration::from_secs(3_600),
+                )
+            } else {
+                SeriesOwner::create(&request.series_owner_name, Duration::from_secs(3_600))
+            };
+
+            Ok(Json(series_owner?))
         })
         .map(reply)
 }
@@ -314,17 +341,19 @@ pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 {
     #[derive(Deserialize)]
     struct Request {
+        collection: Hash,
         #[serde(default)]
         #[serde(with = "humantime_serde")]
         ttl: Option<std::time::Duration>,
     }
 
-    warp::path!("_seriesowners" / String / "collections" / Hash)
+    warp::path!("_seriesowners" / String / "collections")
         .and(warp::post())
         .and(warp::query())
-        .map(|series_owner_name: String, collection, request: Request| {
+        .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let series = series_owner.advance(CollectionRef::new(collection), request.ttl)?;
+                let series =
+                    series_owner.advance(CollectionRef::new(request.collection), request.ttl)?;
                 Ok(Some(returnable::Json(series)))
             } else {
                 Ok(None)

@@ -90,3 +90,26 @@ impl Build {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PrivateManifest {
+    pub private_key: String,
+}
+
+impl PrivateManifest {
+    pub fn find() -> Result<PrivateManifest, crate::Error> {
+        let filename_hierarchy = ["./.Samizdat.priv"];
+        let mut last_error = None;
+
+        for filename in filename_hierarchy {
+            match fs::read(filename) {
+                Ok(contents) => return Ok(toml::from_slice(&contents)?),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => last_error = Some(err),
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        Err(last_error.expect("filename hierarchy not empty").into())
+    }
+}

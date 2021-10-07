@@ -1,6 +1,7 @@
-# Samizdat: a web of content
+# Samizdat: your content, available.
 
 [![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
+![Version 0.1 Codename Vavilov](https://img.shields.io/badge/version-v0.1--vavilov-informational)
 
 ## Introduction
 
@@ -8,9 +9,13 @@ In these troubling times, some people might find it hard to publish content to t
 
 ### Warning
 
-This is only a proof of concept implementation. It might work in a small scenario, but breaking changes will be needed to be made for it to scale for the whole Web.
+This is still a proof of concept implementation. So three caveats are in place:
 
-And, as always, be aware that, since this is a nascent project, vulnerabilities might exist that nobody has any idea of yet. By now, tread carefully.
+1. Don't rely on the availability of the network or of your content; have alternatives in place.
+2. Expect frequent breaking changes.
+3. Expect vulnerabilities. Do not use the network for sensitive content yet.
+
+> How to make this warning disappear? Contribute! I am but one humble huma being.
 
 ## Project goals
 
@@ -35,24 +40,24 @@ The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The
 ### Linux
 
 If you are interested in running this in your computer, you will need to build it from source, by now. An install script is provided to compile, install and enable the systemd service. Just run
-```
+```bash
 ./install.sh
 ```
 This will spin up a server in `localhost:4510`, to where you can upload content using
-```
+```bash
 curl -X POST http://localhost:4510/_object \
      -H "Content-Type: <your content type>" \
      --data-binary <your file>
 ```
 Then, you can view it in your preferred browser in
 ```
-http://localhost:4510/_object/<the hash you received from CURL>
+http://localhost:4510/_objects/<the hash you received from CURL>
 ```
 
 This link **can be copied and shared** just as if it were a true URL, because it actually is! Somebody running Samizdat on their computer will be able to see your file by accessing that same link.
 
 To uninstall the node, a script is also provided:
-```
+```bash
 ./uninstall.sh
 ```
 
@@ -66,12 +71,11 @@ Some translation needed, but the compilation will work and produce a working bin
 
 ## Open issues
 
-* Sending large files. By now, an arbitrary 64MB limit imposed. Use chunks and Merkle Trees, like torrent.
+* Sending large files. By now, only one peer will send the whole files. On the bright side, Merkle Trees are already implemented; only parallelization is missing.
 * Scalability:
-    1. Hubs broadcast queries.
+    1. Hubs broadcast queries, in a slightly informed way, but we can do better.
     2. Clients are forced to do an `O(n)` search, instead of the typical `O(lg n)`. Blessing in disguise?
-* Identities: how to know it was Goldstein who really wrote The Book?
-* Incentives: how to make it profitable for people to run large nodes and hubs?
+* Identities: you want nice personal handles, don't you? 
 * Anti-censorship: it is hard for hubs to censor, but malicious nodes run by _them_ can exploit the system to
     1. Query if you have a copy of The Book.
     2. Serve you a copy of The Book and then send you to room 101.

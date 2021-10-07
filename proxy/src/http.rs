@@ -34,12 +34,10 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     .unwrap();
 
                 let response = match response.status().as_u16() {
-                    status @ 300..=399 => {
-                        http::Response::builder()
-                            .status(status)
-                            .header("Location", response.headers().get("Location").unwrap())
-                            .body(hyper::body::Body::empty())
-                    }
+                    status @ 300..=399 => http::Response::builder()
+                        .status(status)
+                        .header("Location", response.headers().get("Location").unwrap())
+                        .body(hyper::body::Body::empty()),
                     status => {
                         let content_type = response
                             .headers()
@@ -47,7 +45,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                             .cloned()
                             .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
                         let body = response.bytes().await.unwrap();
-        
+
                         // If web page, do your shenanigans:
                         let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
                         let proxied = if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
@@ -55,7 +53,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                         } else {
                             body
                         };
-        
+
                         // Buid response:
                         http::Response::builder()
                             .status(status)

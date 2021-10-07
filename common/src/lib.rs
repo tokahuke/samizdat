@@ -1,8 +1,8 @@
 pub mod cipher;
+pub mod heap_entry;
 pub mod logger;
 pub mod quic;
 pub mod rpc;
-pub mod heap_entry;
 
 mod channel_address;
 mod error;
@@ -16,7 +16,7 @@ pub use channel_address::ChannelAddr;
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
-pub use pki::{Key, Signed, PrivateKey};
+pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{ContentRiddle, MessageRiddle};
 pub use transport::BincodeOverQuic;
 

@@ -5,7 +5,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
 
-use samizdat_common::{ContentRiddle, Key, Signed};
+use samizdat_common::{ContentRiddle, Key, PrivateKey, Signed};
 
 use crate::db;
 use crate::db::Table;
@@ -29,26 +29,55 @@ impl Dropable for SeriesOwner {
 }
 
 impl SeriesOwner {
-    pub fn create(name: &str, default_ttl: Duration) -> Result<SeriesOwner, crate::Error> {
-        let owner = SeriesOwner {
-            name: name.to_owned(),
-            keypair: Keypair::generate(&mut samizdat_common::csprng()),
-            default_ttl,
-        };
-        let series = owner.series();
-
-        let mut batch = WriteBatch::default();
+    fn insert(&self, batch: &mut WriteBatch) {
+        let series = self.series();
 
         batch.put_cf(
             Table::SeriesOwners.get(),
-            name.as_bytes(),
-            bincode::serialize(&owner).expect("can serialize"),
+            self.name.as_bytes(),
+            bincode::serialize(&self).expect("can serialize"),
         );
         batch.put_cf(
             Table::Series.get(),
             series.key(),
             bincode::serialize(&series).expect("can serialize"),
         );
+    }
+
+    pub fn create(name: &str, default_ttl: Duration) -> Result<SeriesOwner, crate::Error> {
+        let owner = SeriesOwner {
+            name: name.to_owned(),
+            keypair: Keypair::generate(&mut samizdat_common::csprng()),
+            default_ttl,
+        };
+
+        let mut batch = WriteBatch::default();
+
+        owner.insert(&mut batch);
+
+        db().write(batch)?;
+
+        Ok(owner)
+    }
+
+    pub fn import(
+        name: &str,
+        public_key: Key,
+        private_key: PrivateKey,
+        default_ttl: Duration,
+    ) -> Result<SeriesOwner, crate::Error> {
+        let owner = SeriesOwner {
+            name: name.to_owned(),
+            keypair: Keypair {
+                public: public_key.into_inner(),
+                secret: private_key.into_inner(),
+            },
+            default_ttl,
+        };
+
+        let mut batch = WriteBatch::default();
+
+        owner.insert(&mut batch);
 
         db().write(batch)?;
 

@@ -35,6 +35,7 @@ pub enum Cli {
 #[derive(Debug, StructOpt)]
 pub enum SeriesCommand {
     New { series_owner_name: String },
+    Import {},
     Show { series_owner_name: String },
     Ls { series_owner_name: Option<String> },
 }
@@ -82,6 +83,9 @@ impl Cli {
             Cli::Series {
                 command: SeriesCommand::New { series_owner_name },
             } => commands::series::new(series_owner_name.clone()).await,
+            Cli::Series {
+                command: SeriesCommand::Import {},
+            } => commands::series::import().await,
             Cli::Series {
                 command: SeriesCommand::Show { series_owner_name },
             } => commands::series::show(series_owner_name.clone()).await,

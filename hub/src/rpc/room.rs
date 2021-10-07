@@ -39,7 +39,6 @@ impl Room {
         &self,
         current: SocketAddr,
     ) -> impl Stream<Item = (SocketAddr, Arc<Node>)> {
-        
         let mut queue = BinaryHeap::new();
 
         for (&peer_addr, peer) in self.participants.read().await.iter() {
