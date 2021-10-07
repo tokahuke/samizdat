@@ -1,7 +1,21 @@
 # Samizdat: your content, available.
 
-[![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
-![Version 0.1 Codename Vavilov](https://img.shields.io/badge/version-v0.1--vavilov-informational)
+[![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg?branch=stable)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
+
+## Website
+
+Samizdat is pulling itself by its bootstraps!
+https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/
+
+## Donate
+
+If you support this work, consider donating using crypto
+
+| Currency | Address                                      |
+|----------|----------------------------------------------|
+| `ETH`    | `0xba89B660eB6f5D894830C9273a5Dfb8dDc170cff` |
+| `BTC`    | `bc1qseae89zr4z2lkl82nvvr6c9sl97agshapzeag5` |
+
 
 ## Introduction
 
@@ -80,7 +94,6 @@ Some translation needed, but the compilation will work and produce a working bin
     1. Query if you have a copy of The Book.
     2. Serve you a copy of The Book and then send you to room 101.
 * UX: do you have a freakin' mobile app?
-
 
 ## Licensing
 
