@@ -2330,6 +2330,7 @@ dependencies = [
  "log",
  "log4rs",
  "mime",
+ "rand 0.8.4",
  "reqwest",
  "scraper",
  "serde",

@@ -1,5 +1,7 @@
 # Samizdat: a web of content
 
+[![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
+
 ## Introduction
 
 In these troubling times, some people might find it hard to publish content to the web. Samizdat is a P2P network for sharing and publishing content without the need of a server, most of which are run by _them_. Self-publish your content today with Samizdat!

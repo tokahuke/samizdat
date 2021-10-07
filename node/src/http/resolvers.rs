@@ -8,7 +8,7 @@ use std::convert::TryInto;
 use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
-use crate::models::{Locator, ObjectRef, SeriesRef};
+use crate::models::{ItemPath, Locator, ObjectRef, SeriesRef};
 
 pub struct Resolved {
     body: Body,
@@ -126,16 +126,16 @@ pub async fn resolve_item(
 /// version of a series, asking the Samizdat network if necessary.
 pub async fn resolve_series(
     series: SeriesRef,
-    name: &str,
+    name: ItemPath<'_>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving series {}/{}", series, name);
+    log::info!("Resolving series {}/{}", series, name.as_str());
     if let Some(latest) = series.get_latest_fresh()? {
         log::info!("Have a fresh result locally. Will resolve this item.");
         let locator = latest.collection().locator_for(name);
         Ok(resolve_item(locator).await?)
     } else if series.is_locally_owned()? {
         log::info!("Does not have a fresh result, but is owned. So, a result doesn't exist.");
-        let not_resolved = NotResolved { 
+        let not_resolved = NotResolved {
             message: format!("series {} is empty", series),
         };
         Ok(not_resolved.try_into())

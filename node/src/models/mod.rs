@@ -6,7 +6,7 @@ mod object;
 mod series;
 
 pub use bookmark::{Bookmark, BookmarkType};
-pub use collection::{CollectionItem, CollectionRef, Locator};
+pub use collection::{CollectionItem, CollectionRef, ItemPath, ItemPathBuf, Locator};
 pub use object::{ObjectMetadata, ObjectRef, ObjectStatistics, ObjectStream, CHUNK_SIZE};
 pub use series::{SeriesItem, SeriesOwner, SeriesRef};
 

@@ -1,7 +1,9 @@
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
 
@@ -9,16 +11,84 @@ use crate::db::{db, Table};
 
 use super::{Dropable, ObjectRef};
 
+/// The function transforming an arbitrary string into its canonical path form.
+fn normalize(name: &str) -> Cow<str> {
+    if name.ends_with('/') || name.starts_with('/') || name.contains("//") {
+        let restructured = name
+            .split('/')
+            .filter(|slice| !slice.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+        Cow::from(restructured)
+    } else {
+        Cow::from(name)
+    }
+}
+
+/// An owned item path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemPathBuf(Box<str>);
+
+impl<'a> From<&'a str> for ItemPathBuf {
+    fn from(name: &'a str) -> ItemPathBuf {
+        ItemPathBuf(normalize(name).into())
+    }
+}
+
+impl From<String> for ItemPathBuf {
+    fn from(name: String) -> ItemPathBuf {
+        ItemPathBuf(normalize(&name).into())
+    }
+}
+
+impl From<Box<str>> for ItemPathBuf {
+    fn from(name: Box<str>) -> ItemPathBuf {
+        ItemPathBuf(normalize(&name).into())
+    }
+}
+
+impl FromStr for ItemPathBuf {
+    type Err = crate::Error;
+    fn from_str(s: &str) -> Result<ItemPathBuf, crate::Error> {
+        Ok(s.into())
+    }
+}
+
+impl ItemPathBuf {
+    /// Transformes into a borrowed item path.
+    fn as_path<'a>(&'a self) -> ItemPath<'a> {
+        ItemPath(self.0.as_ref().into())
+    }
+}
+
+/// A borrowed item path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemPath<'a>(Cow<'a, str>);
+
+impl<'a> From<&'a str> for ItemPath<'a> {
+    fn from(name: &'a str) -> ItemPath<'a> {
+        ItemPath(normalize(name))
+    }
+}
+
+impl<'a> ItemPath<'a> {
+    /// Retrieves the string representation of this path, in its canonical form.
+    pub fn as_str<'b: 'a>(&'a self) -> &'a str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
     pub collection: CollectionRef,
-    pub name: String,
+    pub name: ItemPathBuf,
     pub inclusion_proof: PatriciaProof,
 }
 
 impl Dropable for CollectionItem {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        let locator = self.collection.locator_for(&self.name);
+        let path = self.name.as_path();
+        let locator = self.collection.locator_for(path);
 
         log::info!("Removing item {}: {:#?}", locator, self);
 
@@ -32,7 +102,7 @@ impl Dropable for CollectionItem {
 impl CollectionItem {
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
-        let key = Hash::build(self.name.as_bytes());
+        let key = Hash::build(self.name.0.as_bytes());
 
         if !is_included {
             log::error!("Inclusion proof falied for {:?}", self);
@@ -57,10 +127,10 @@ impl CollectionItem {
         }
     }
 
-    pub fn locator(&self) -> Locator {
+    pub fn locator<'a>(&'a self) -> Locator<'a> {
         Locator {
             collection: self.collection.clone(),
-            name: &self.name,
+            name: self.name.as_path(),
         }
     }
 
@@ -85,7 +155,7 @@ impl CollectionItem {
     }
 
     pub fn insert_with(&self, batch: &mut WriteBatch) {
-        let locator = self.collection.locator_for(&self.name);
+        let locator = self.collection.locator_for(self.name.as_path());
 
         batch.put_cf(
             Table::CollectionItems.get(),
@@ -118,7 +188,7 @@ pub struct CollectionRef {
 impl Dropable for CollectionRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         for name in self.list() {
-            if let Some(item) = self.get(&name)? {
+            if let Some(item) = self.get(name.as_path())? {
                 item.drop_if_exists_with(batch)?;
             }
         }
@@ -157,7 +227,7 @@ impl CollectionRef {
         for (name, _object) in objects.as_ref() {
             let item = CollectionItem {
                 collection: collection.clone(),
-                name: name.as_ref().to_owned(),
+                name: name.as_ref().into(),
                 inclusion_proof: patricia_map
                     .proof_for(Hash::build(name.as_ref().as_bytes()))
                     .expect("name exists in map"),
@@ -173,14 +243,14 @@ impl CollectionRef {
         Ok(collection)
     }
 
-    pub fn locator_for<'a>(&self, name: &'a str) -> Locator<'a> {
+    pub fn locator_for<'a>(&self, name: ItemPath<'a>) -> Locator<'a> {
         Locator {
             collection: self.clone(),
             name,
         }
     }
 
-    pub fn get(&self, name: &str) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn get(&self, name: ItemPath) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
         let maybe_item = db().get_cf(Table::CollectionItems.get(), locator.hash())?;
 
@@ -191,10 +261,10 @@ impl CollectionRef {
         }
     }
 
-    pub fn list<'a>(&'a self) -> impl 'a + Iterator<Item = String> {
+    pub fn list<'a>(&'a self) -> impl 'a + Iterator<Item = ItemPathBuf> {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
             .map(move |(key, _)| {
-                String::from_utf8_lossy(&key[self.hash.as_ref().len()..]).into_owned()
+                ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..]))
             })
     }
 
@@ -204,7 +274,7 @@ impl CollectionRef {
         self.list().filter_map(move |name| {
             let locator = Locator {
                 collection: self.clone(),
-                name: &name,
+                name: name.as_path(),
             };
             locator.get_object().transpose()
         })
@@ -214,26 +284,28 @@ impl CollectionRef {
 #[derive(Debug)]
 pub struct Locator<'a> {
     collection: CollectionRef,
-    name: &'a str,
+    name: ItemPath<'a>,
 }
 
 impl<'a> Display for Locator<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.collection.hash, self.name)
+        write!(f, "{}/{}", self.collection.hash, self.name.0)
     }
 }
 
 impl<'a> Locator<'a> {
     pub fn hash(&self) -> Hash {
-        self.collection.hash.rehash(&Hash::build(self.name))
+        self.collection
+            .hash
+            .rehash(&Hash::build(self.name.0.as_ref()))
     }
 
     pub fn path(&self) -> Vec<u8> {
-        [self.collection.hash.as_ref(), self.name.as_bytes()].concat()
+        [self.collection.hash.as_ref(), self.name.0.as_bytes()].concat()
     }
 
     pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
-        self.collection.get(self.name)
+        self.collection.get(self.name.clone())
     }
 
     pub fn get_object(&self) -> Result<Option<ObjectRef>, crate::Error> {

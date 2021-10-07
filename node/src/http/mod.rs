@@ -253,7 +253,8 @@ pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(warp::get())
         .and_then(|hash: Hash, name: Tail| async move {
             let collection = CollectionRef::new(hash);
-            let locator = collection.locator_for(name.as_str());
+            let path = name.as_str().into();
+            let locator = collection.locator_for(path);
             Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
@@ -341,7 +342,7 @@ pub fn get_item_by_series(
         .and(warp::get())
         .and_then(|series_key: Key, name: Tail| async move {
             let series = SeriesRef::new(series_key);
-            Ok(resolve_series(series, name.as_str()).await?) as Result<_, warp::Rejection>
+            Ok(resolve_series(series, name.as_str().into()).await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }
