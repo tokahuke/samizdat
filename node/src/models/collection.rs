@@ -59,6 +59,10 @@ impl ItemPathBuf {
     fn as_path<'a>(&'a self) -> ItemPath<'a> {
         ItemPath(self.0.as_ref().into())
     }
+
+    fn hash(&self) -> Hash {
+        Hash::build(self.0.as_bytes())
+    }
 }
 
 /// A borrowed item path.
@@ -70,6 +74,7 @@ impl<'a> From<&'a str> for ItemPath<'a> {
         ItemPath(normalize(name))
     }
 }
+
 
 impl<'a> ItemPath<'a> {
     /// Retrieves the string representation of this path, in its canonical form.
@@ -207,16 +212,15 @@ impl CollectionRef {
         CollectionRef { hash: Hash::rand() }
     }
 
-    pub fn build<I, N>(objects: I) -> Result<CollectionRef, crate::Error>
+    pub fn build<I>(objects: I) -> Result<CollectionRef, crate::Error>
     where
-        I: AsRef<[(N, ObjectRef)]>,
-        N: AsRef<str>,
+        I: AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
         // Note: this is the slow part of the process (by a long stretch)
         let patricia_map = objects
             .as_ref()
             .iter()
-            .map(|(name, object)| (Hash::build(name.as_ref().as_bytes()), *object.hash()))
+            .map(|(name, object)| (name.hash(), *object.hash()))
             .collect::<PatriciaMap>();
 
         let root = *patricia_map.root();
@@ -227,9 +231,9 @@ impl CollectionRef {
         for (name, _object) in objects.as_ref() {
             let item = CollectionItem {
                 collection: collection.clone(),
-                name: name.as_ref().into(),
+                name: name.clone(),
                 inclusion_proof: patricia_map
-                    .proof_for(Hash::build(name.as_ref().as_bytes()))
+                    .proof_for(name.hash())
                     .expect("name exists in map"),
             };
 

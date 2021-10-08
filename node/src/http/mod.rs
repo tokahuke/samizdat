@@ -14,7 +14,7 @@ use warp::Filter;
 use samizdat_common::{Hash, Key};
 
 use crate::balanced_or_tree;
-use crate::models::{BookmarkType, CollectionRef, Dropable, ObjectRef, SeriesOwner, SeriesRef};
+use crate::models::{BookmarkType, CollectionRef, Dropable, ObjectRef, SeriesOwner, SeriesRef, ItemPathBuf};
 
 use resolvers::{resolve_item, resolve_object, resolve_series};
 
@@ -234,7 +234,7 @@ pub fn post_collection(
             let collection = CollectionRef::build(
                 hashes
                     .into_iter()
-                    .map(|(name, hash)| Ok((name, ObjectRef::new(hash.parse()?))))
+                    .map(|(name, hash)| Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?))))
                     .collect::<Result<Vec<_>, crate::Error>>()?,
             )?;
             Ok(Return {
@@ -341,7 +341,7 @@ pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 {
     #[derive(Deserialize)]
     struct Request {
-        collection: Hash,
+        collection: String,
         #[serde(default)]
         #[serde(with = "humantime_serde")]
         ttl: Option<std::time::Duration>,
@@ -349,11 +349,11 @@ pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 
     warp::path!("_seriesowners" / String / "collections")
         .and(warp::post())
-        .and(warp::query())
+        .and(warp::body::json())
         .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
                 let series =
-                    series_owner.advance(CollectionRef::new(request.collection), request.ttl)?;
+                    series_owner.advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
                 Ok(Some(returnable::Json(series)))
             } else {
                 Ok(None)
