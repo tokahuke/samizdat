@@ -69,7 +69,6 @@ jobs:
           "systemctl disable --now samizdat-proxy &&
            systemctl disable --now samizdat-node &&
            systemctl disable --now samizdat-hub &&
-           rm -rf /var/samizdat/node/db &&
            systemctl enable --now samizdat-hub &&
            systemctl enable --now samizdat-node &&
            systemctl enable --now samizdat-proxy"
