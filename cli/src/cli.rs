@@ -22,10 +22,12 @@ pub enum Cli {
         no_bookmark: bool,
         file: PathBuf,
     },
+    /// Commands for managing series.
     Series {
         #[structopt(subcommand)]
         command: SeriesCommand,
     },
+    /// Commands for managing collections.
     Collection {
         #[structopt(subcommand)]
         command: CollectionCommand,
@@ -34,14 +36,21 @@ pub enum Cli {
 
 #[derive(Debug, StructOpt)]
 pub enum SeriesCommand {
+    /// Creates a new locally owned series.
     New { series_owner_name: String },
+    /// Removes an existing locally owned series.
+    Rm { series_owner_name: String },
+    /// Imports a series from a `Samizdat.toml` in the current directory.
     Import {},
+    /// Shows details on a particular locally owned series.
     Show { series_owner_name: String },
+    /// Lists all loally owned series.
     Ls { series_owner_name: Option<String> },
 }
 
 #[derive(Debug, StructOpt)]
 pub enum CollectionCommand {
+    /// Shows details on a particular collection.
     Ls { collection: String },
 }
 
@@ -83,6 +92,9 @@ impl Cli {
             Cli::Series {
                 command: SeriesCommand::New { series_owner_name },
             } => commands::series::new(series_owner_name.clone()).await,
+            Cli::Series {
+                command: SeriesCommand::Rm { series_owner_name },
+            } => commands::series::rm(series_owner_name.clone()).await,
             Cli::Series {
                 command: SeriesCommand::Import {},
             } => commands::series::import().await,

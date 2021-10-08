@@ -15,7 +15,7 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
 
     let client = reqwest::Client::new();
     let response = client
-        .post(dbg!(format!("http://localhost:4510/_seriesowners",)))
+        .post("http://localhost:4510/_seriesowners")
         .json(&Request {
             series_owner_name: &*series_name,
         })
@@ -25,6 +25,18 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
     log::info!("Status: {}", response.status());
     println!("Series key: {}", response.text().await?);
 
+    Ok(())
+}
+
+pub async fn rm(series_name: String) -> Result<(), crate::Error> {
+    let client = reqwest::Client::new();
+    let response = client
+        .delete(format!("http://localhost:4510/_seriesowners/{}", series_name))
+        .send()
+        .await?;
+
+    println!("Status: {}", response.status());
+    
     Ok(())
 }
 

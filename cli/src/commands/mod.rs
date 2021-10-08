@@ -4,13 +4,13 @@ pub mod series;
 use askama::Template;
 use futures::prelude::*;
 use futures::stream;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, fs, io};
 use tabled::{Table, Tabled};
 
-use samizdat_common::{Hash, Key, Signed};
+use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
 use crate::Manifest;
 
@@ -43,9 +43,16 @@ pub async fn upload(
 pub async fn init() -> Result<(), crate::Error> {
     let pwd = env::current_dir()?;
     let name = pwd.iter().last().expect("not empty").to_string_lossy();
+
+    #[derive(Serialize)]
+    struct Request<'a> {
+        series_owner_name: &'a str,
+    }
+
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("http://localhost:4510/_seriesowners/{}", name))
+        .post("http://localhost:4510/_seriesowners")
+        .json(&Request { series_owner_name: &name })
         .send()
         .await?;
 
@@ -58,7 +65,6 @@ pub async fn init() -> Result<(), crate::Error> {
         }
 
         let text = response.text().await?;
-        println!("{}", text);
         let payload: Payoad = serde_json::from_str(&text)?;
 
         let rendered = crate::manifest::ManifestTemplate {
@@ -69,7 +75,12 @@ pub async fn init() -> Result<(), crate::Error> {
         .render()
         .expect("can render");
 
+        let rendered_private = crate::manifest::PrivateManifestTemplate {
+            private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
+        }.render().expect("can render");
+
         fs::write("./Samizdat.toml", rendered)?;
+        fs::write("./.Samizdat.priv", rendered_private)?;
     } else {
         println!("Bad status: {}", response.status());
     }
@@ -164,28 +175,35 @@ pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), 
     let collection = response.text().await?;
 
     if let Some(series) = Some(manifest.series.name) {
-        let query = ttl
-            .as_ref()
-            .or(manifest.series.ttl.as_ref())
-            .map(|ttl| format!("ttl={}", ttl))
-            .unwrap_or_default();
+        #[derive(Serialize)]
+        struct Request<'a> {
+            collection: String,
+            ttl: &'a Option<String>,
+        }
 
         let response = client
             .post(format!(
-                "http://localhost:4510/_seriesowners/{}/collections/{}?{}",
-                series, collection, query
+                "http://localhost:4510/_seriesowners/{}/collections",
+                series,
             ))
+            .json(&Request {
+                collection,
+                ttl,
+            })
             .send()
             .await?;
 
         if response.status().is_client_error() {
+            let status = response.status();
+            let text = response.text().await?;
+            println!("Status: {}", status);
+            println!("Response: {}", text);
+
             return Err(crate::Error::Message(format!(
                 "series {} does not exist",
                 series
             )));
         }
-
-        log::info!("Status: {}", response.status());
 
         #[derive(Debug, Clone, Deserialize)]
         pub struct CollectionRef {

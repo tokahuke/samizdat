@@ -1,3 +1,5 @@
+//! TODO: this code was hastily written. Good place for a big refactry.
+
 mod cli;
 mod commands;
 mod error;

@@ -2,6 +2,8 @@
 
 [![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg?branch=stable)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
 
+![Version 0.1 Codename Vavilov](https://img.shields.io/badge/version-0.1-pre--vavilov-informational)
+
 ## Website
 
 Samizdat is pulling itself by its bootstraps!
@@ -49,39 +51,24 @@ We are not quite there yet...
 
 The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The nodes are the consumers and producers of content; all content transmission is handled by the nodes. The hubs are used for signaling and NAT traversal. One node can connect to many hubs simultaneously so that content can diffuse through different tribes with time.
 
-## Quick setup
+## Installation
 
-### Linux
+Go [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install).
 
-If you are interested in running this in your computer, you will need to build it from source, by now. An install script is provided to compile, install and enable the systemd service. Just run
-```bash
-./install.sh
+## Quick start
+
+In the instalation, the `samizdat` cli tool is included. You can run `samizdat init` to create a new Samizdat project in your current directory. This will create a manifest file `Samizdat.toml` and a private manifest `.Samizdat.priv`, which will be added to your `.gitignore`. This file contains private credentials that you have to backup elsewhere dearly.
+
+In your local hub, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit`. Samizdat will run a build scrpt that you supply in `Samizdat.toml`. Your content will be available in the URL:
+
 ```
-This will spin up a server in `localhost:4510`, to where you can upload content using
-```bash
-curl -X POST http://localhost:4510/_object \
-     -H "Content-Type: <your content type>" \
-     --data-binary <your file>
-```
-Then, you can view it in your preferred browser in
-```
-http://localhost:4510/_objects/<the hash you received from CURL>
+http://localhost:4510/_series/<series key>/path/to/stuff
 ```
 
-This link **can be copied and shared** just as if it were a true URL, because it actually is! Somebody running Samizdat on their computer will be able to see your file by accessing that same link.
+Despite the `localhost`, this is a public URL. You can share with your friends that have Samizdat installed that 
+they will be abe to access it.
 
-To uninstall the node, a script is also provided:
-```bash
-./uninstall.sh
-```
-
-### MacOS
-
-Should be similar to the above, no changes needed (although I have not tested).
-
-### Windows
-
-Some translation needed, but the compilation will work and produce a working binary. 
+This is just the tip of the iceberg, however! Check out more [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/docs).
 
 ## Open issues
 

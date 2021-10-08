@@ -91,6 +91,12 @@ impl Build {
     }
 }
 
+#[derive(askama::Template)]
+#[template(path = "Samizdat.priv.txt")]
+pub struct PrivateManifestTemplate<'a> {
+    pub private_key: &'a str,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PrivateManifest {
