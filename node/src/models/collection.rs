@@ -75,7 +75,6 @@ impl<'a> From<&'a str> for ItemPath<'a> {
     }
 }
 
-
 impl<'a> ItemPath<'a> {
     /// Retrieves the string representation of this path, in its canonical form.
     pub fn as_str<'b: 'a>(&'a self) -> &'a str {

@@ -1,22 +1,16 @@
 //! HTTP API for the Samizdat Node.
 
+mod collections;
+mod objects;
 mod resolvers;
 mod returnable;
+mod series;
 
 pub use returnable::{Json, Return, Returnable};
 
-use futures::stream;
-use serde_derive::Deserialize;
-use std::time::Duration;
-use warp::path::Tail;
 use warp::Filter;
 
-use samizdat_common::{Hash, Key};
-
 use crate::balanced_or_tree;
-use crate::models::{BookmarkType, CollectionRef, Dropable, ObjectRef, SeriesOwner, SeriesRef, ItemPathBuf};
-
-use resolvers::{resolve_item, resolve_object, resolve_series};
 
 /// Transforms a `Result<T, crate::Error>` into a Warp reply.
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
@@ -100,20 +94,9 @@ fn maybe_redirect_empty(path: &str) -> Option<String> {
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
         general_redirect(),
-        get_object(),
-        post_object(),
-        delete_object(),
-        post_bookmark(),
-        get_bookmark(),
-        delete_bookmark(),
-        post_collection(),
-        get_collection_list(),
-        get_item(),
-        get_series_owner(),
-        get_series_owners(),
-        post_series_owner(),
-        post_series(),
-        get_item_by_series()
+        objects::api(),
+        collections::api(),
+        series::api(),
     )
 }
 
@@ -137,241 +120,4 @@ pub fn general_redirect(
                 Err(warp::reject::reject())
             }
         })
-}
-
-/// Gets the contents of an object.
-pub fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash)
-        .and(warp::get())
-        .and_then(|hash: Hash| async move {
-            Ok(resolve_object(ObjectRef::new(hash), vec![]).await?) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
-}
-
-/// Uploads a new object to the database.
-pub fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    #[derive(Deserialize)]
-    struct Query {
-        #[serde(default)]
-        bookmark: bool,
-    }
-
-    warp::path!("_objects")
-        .and(warp::post())
-        .and(warp::header("content-type"))
-        .and(warp::query())
-        .and(warp::body::bytes())
-        .map(
-            |content_type: String, query: Query, bytes: bytes::Bytes| async move {
-                let (_, object) = ObjectRef::build(
-                    content_type,
-                    bytes.len(),
-                    query.bookmark,
-                    stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
-                )
-                .await?;
-                Ok(object.hash().to_string())
-            },
-        )
-        .and_then(async_reply)
-}
-
-/// Explicitely deletes an object from the database.
-pub fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_objects" / Hash)
-        .and(warp::delete())
-        .map(|hash| ObjectRef::new(hash).drop_if_exists())
-        .map(reply)
-}
-
-/// Bookmarks an object. This will prevent the object from being automatically removed
-/// by the vacuum daemon.
-pub fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(warp::post())
-        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).mark())
-        .map(reply)
-}
-
-/// Returns whether an object is bookmarked or not.
-///
-/// # Warning
-///
-/// By now, this returns `200 OK` even if the object does not exist.
-pub fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(warp::get())
-        .map(|hash| {
-            ObjectRef::new(hash)
-                .bookmark(BookmarkType::User)
-                .is_marked()
-                .map(Json)
-        })
-        .map(reply)
-}
-
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-pub fn delete_bookmark(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(warp::delete())
-        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
-        .map(reply)
-}
-
-/// Uploads a new collection.
-pub fn post_collection(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_collections")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|hashes: Vec<(String, String)>| {
-            let collection = CollectionRef::build(
-                hashes
-                    .into_iter()
-                    .map(|(name, hash)| Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?))))
-                    .collect::<Result<Vec<_>, crate::Error>>()?,
-            )?;
-            Ok(Return {
-                content_type: "text/plain".to_owned(),
-                status_code: http::StatusCode::OK,
-                content: collection.hash.to_string().as_bytes().to_vec(),
-            })
-        })
-        .map(reply)
-}
-
-/// Gets the contents of a collection item.
-pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_collections" / Hash / ..)
-        .and(warp::path::tail())
-        .and(warp::get())
-        .and_then(|hash: Hash, name: Tail| async move {
-            let collection = CollectionRef::new(hash);
-            let path = name.as_str().into();
-            let locator = collection.locator_for(path);
-            Ok(resolve_item(locator).await?) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
-}
-
-/// Lists all the items currently in the database. This is akin to a sitemap.
-pub fn get_collection_list(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_collections" / Hash / "_list")
-        .and(warp::get())
-        .map(|hash: Hash| {
-            let collection = CollectionRef::new(hash);
-            Ok(Json(collection.list().collect::<Vec<_>>())) as Result<_, crate::Error>
-        })
-        .map(reply)
-}
-
-/// Creates a new series owner, i.e., a public-private keypair that allows one to push new
-/// colletions to a series.
-pub fn post_series_owner(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[derive(Deserialize)]
-    struct Keypair {
-        public_key: String,
-        private_key: String,
-    }
-
-    #[derive(Deserialize)]
-    struct Request {
-        series_owner_name: String,
-        keypair: Option<Keypair>,
-    }
-
-    warp::path!("_seriesowners")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|request: Request| {
-            let series_owner = if let Some(Keypair {
-                public_key,
-                private_key,
-            }) = request.keypair
-            {
-                SeriesOwner::import(
-                    &request.series_owner_name,
-                    public_key.parse()?,
-                    private_key.parse()?,
-                    Duration::from_secs(3_600),
-                )
-            } else {
-                SeriesOwner::create(&request.series_owner_name, Duration::from_secs(3_600))
-            };
-
-            Ok(Json(series_owner?))
-        })
-        .map(reply)
-}
-
-/// Gets information associates with a series owner
-pub fn get_series_owner(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_seriesowners" / String)
-        .and(warp::get())
-        .map(|series_owner_name: String| {
-            let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            Ok(maybe_owner.map(|owner| owner.series().to_string()))
-        })
-        .map(reply)
-}
-
-/// Lists all series owners.
-pub fn get_series_owners(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_seriesowners")
-        .and(warp::get())
-        .map(|| {
-            let series = SeriesOwner::get_all()?;
-            Ok(returnable::Json(series))
-        })
-        .map(reply)
-}
-
-/// Pushes a new colletion to the series owner, creating a new series item.
-pub fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    #[derive(Deserialize)]
-    struct Request {
-        collection: String,
-        #[serde(default)]
-        #[serde(with = "humantime_serde")]
-        ttl: Option<std::time::Duration>,
-    }
-
-    warp::path!("_seriesowners" / String / "collections")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|series_owner_name: String, request: Request| {
-            if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let series =
-                    series_owner.advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
-                Ok(Some(returnable::Json(series)))
-            } else {
-                Ok(None)
-            }
-        })
-        .map(reply)
-}
-
-/// Gets the content of a collection item using the series public key. This will give the
-/// best-effort latest version for this item.
-pub fn get_item_by_series(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_series" / Key / ..)
-        .and(warp::path::tail())
-        .and(warp::get())
-        .and_then(|series_key: Key, name: Tail| async move {
-            let series = SeriesRef::new(series_key);
-            Ok(resolve_series(series, name.as_str().into()).await?) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
 }
