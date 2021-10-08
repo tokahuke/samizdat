@@ -1,8 +1,7 @@
 # Samizdat: your content, available.
 
 [![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml/badge.svg?branch=stable)](https://github.com/tokahuke/samizdat/actions/workflows/deploy-testbed.yaml)
-
-![Version 0.1 Codename Vavilov](https://img.shields.io/badge/version-0.1-pre--vavilov-informational)
+![Version 0.1 Codename Vavilov](https://img.shields.io/badge/version-0.1--vavilov-informational)
 
 ## Website
 
