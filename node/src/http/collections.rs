@@ -1,3 +1,4 @@
+use serde_derive::Deserialize;
 use warp::path::Tail;
 use warp::Filter;
 
@@ -17,12 +18,21 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
 /// Uploads a new collection.
 pub fn post_collection(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Deserialize)]
+    struct Request {
+        #[serde(default)]
+        is_draft: bool,
+        hashes: Vec<(String, String)>,
+    }
+
     warp::path!("_collections")
         .and(warp::post())
         .and(warp::body::json())
-        .map(|hashes: Vec<(String, String)>| {
+        .map(|request: Request| {
             let collection = CollectionRef::build(
-                hashes
+                request.is_draft,
+                request
+                    .hashes
                     .into_iter()
                     .map(|(name, hash)| {
                         Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))

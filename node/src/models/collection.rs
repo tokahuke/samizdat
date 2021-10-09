@@ -87,6 +87,8 @@ pub struct CollectionItem {
     pub collection: CollectionRef,
     pub name: ItemPathBuf,
     pub inclusion_proof: PatriciaProof,
+    #[serde(default)]
+    pub is_draft: bool,
 }
 
 impl Dropable for CollectionItem {
@@ -211,7 +213,7 @@ impl CollectionRef {
         CollectionRef { hash: Hash::rand() }
     }
 
-    pub fn build<I>(objects: I) -> Result<CollectionRef, crate::Error>
+    pub fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
     where
         I: AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
@@ -234,6 +236,7 @@ impl CollectionRef {
                 inclusion_proof: patricia_map
                     .proof_for(name.hash())
                     .expect("name exists in map"),
+                is_draft,
             };
 
             item.insert_with(&mut batch);

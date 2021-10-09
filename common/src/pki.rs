@@ -81,7 +81,6 @@ impl PrivateKey {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct Key(ed25519_dalek::PublicKey);

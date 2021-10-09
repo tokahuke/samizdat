@@ -38,6 +38,8 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
     struct Query {
         #[serde(default)]
         bookmark: bool,
+        #[serde(default)]
+        is_draft: bool,
     }
 
     warp::path!("_objects")
@@ -51,6 +53,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
                     content_type,
                     bytes.len(),
                     query.bookmark,
+                    query.is_draft,
                     stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
                 )
                 .await?;

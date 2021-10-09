@@ -182,6 +182,7 @@ impl ObjectHeader {
             self.content_type,
             self.content_size,
             false,
+            false,
             Box::pin(content_stream),
         )
         .await?;

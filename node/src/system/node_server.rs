@@ -29,7 +29,11 @@ impl Node for NodeServer {
         log::info!("Resolving {:?}", resolution);
 
         let object = match ObjectRef::find(&resolution.content_riddle) {
-            Some(object) => object,
+            Some(object) if !object.is_draft().unwrap_or(true) => object,
+            Some(_) => {
+                log::info!("Hash found but object is draft");
+                return ResolutionResponse::NOT_FOUND;
+            }
             None => {
                 log::info!("Hash not found for resolution");
                 return ResolutionResponse::NOT_FOUND;
@@ -72,7 +76,11 @@ impl Node for NodeServer {
         log::info!("got item {:?}", resolution);
 
         let item = match CollectionItem::find(&resolution.content_riddle) {
-            Ok(Some(item)) => item,
+            Ok(Some(item)) if !item.is_draft => item,
+            Ok(Some(_)) => {
+                log::info!("hash found, but item is draft");
+                return ResolutionResponse::NOT_FOUND;
+            }
             Ok(None) => {
                 log::info!("hash not found for resolution");
                 return ResolutionResponse::NOT_FOUND;
@@ -119,6 +127,7 @@ impl Node for NodeServer {
         if let Some(series) = SeriesRef::find(&latest.key_riddle) {
             match series.get_latest_fresh() {
                 Ok(None) => None,
+                Ok(Some(latest)) if latest.is_draft() => None,
                 Ok(Some(mut latest)) => {
                     let cipher_key = latest.public_key().hash();
                     let rand = Hash::rand();

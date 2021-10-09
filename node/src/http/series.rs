@@ -6,7 +6,7 @@ use warp::Filter;
 use samizdat_common::Key;
 
 use crate::balanced_or_tree;
-use crate::models::{CollectionRef, SeriesOwner, SeriesRef, Dropable};
+use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
 
 use super::resolvers::resolve_series;
 use super::{reply, returnable, tuple};
@@ -37,6 +37,8 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
     struct Request {
         series_owner_name: String,
         keypair: Option<Keypair>,
+        #[serde(default)]
+        is_draft: bool,
     }
 
     warp::path!("_seriesowners")
@@ -53,9 +55,14 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                     public_key.parse()?,
                     private_key.parse()?,
                     Duration::from_secs(3_600),
+                    request.is_draft,
                 )
             } else {
-                SeriesOwner::create(&request.series_owner_name, Duration::from_secs(3_600))
+                SeriesOwner::create(
+                    &request.series_owner_name,
+                    Duration::from_secs(3_600),
+                    request.is_draft,
+                )
             };
 
             Ok(returnable::Json(series_owner?))
@@ -64,8 +71,8 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 }
 
 /// Removes a series owner
-fn delete_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn delete_series_owner(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_seriesowners" / String)
         .and(warp::delete())
         .map(|series_owner_name: String| {

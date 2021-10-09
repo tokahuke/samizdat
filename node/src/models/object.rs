@@ -16,6 +16,8 @@ pub struct ObjectMetadata {
     pub content_type: String,
     pub content_size: usize,
     pub hashes: Vec<Hash>,
+    #[serde(default)]
+    pub is_draft: bool,
 }
 
 pub struct ObjectStream {
@@ -127,6 +129,7 @@ impl ObjectRef {
         content_type: String,
         expected_content_size: usize,
         bookmark: bool,
+        is_draft: bool,
         source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
     ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
         let mut content_size = 0;
@@ -169,6 +172,7 @@ impl ObjectRef {
         let metadata = ObjectMetadata {
             content_type,
             content_size,
+            is_draft,
             hashes: merkle_tree.hashes().to_vec(),
         };
         let statistics = ObjectStatistics::new(content_size);
@@ -241,6 +245,13 @@ impl ObjectRef {
             .prefix_iterator_cf(Table::Bookmarks.get(), self.hash)
             .next()
             .is_some())
+    }
+
+    /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the
+    /// database, this function returns `Ok(true)`. You may need to frther check if the object
+    ///  actually exists.
+    pub fn is_draft(&self) -> Result<bool, crate::Error> {
+        Ok(self.metadata()?.map(|m| m.is_draft).unwrap_or(true))
     }
 }
 

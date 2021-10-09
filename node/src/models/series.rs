@@ -17,6 +17,8 @@ pub struct SeriesOwner {
     name: String,
     keypair: Keypair,
     default_ttl: Duration,
+    #[serde(default)]
+    is_draft: bool,
 }
 
 impl Dropable for SeriesOwner {
@@ -44,11 +46,16 @@ impl SeriesOwner {
         );
     }
 
-    pub fn create(name: &str, default_ttl: Duration) -> Result<SeriesOwner, crate::Error> {
+    pub fn create(
+        name: &str,
+        default_ttl: Duration,
+        is_draft: bool,
+    ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
             name: name.to_owned(),
             keypair: Keypair::generate(&mut samizdat_common::csprng()),
             default_ttl,
+            is_draft,
         };
 
         let mut batch = WriteBatch::default();
@@ -65,6 +72,7 @@ impl SeriesOwner {
         public_key: Key,
         private_key: PrivateKey,
         default_ttl: Duration,
+        is_draft: bool,
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
             name: name.to_owned(),
@@ -73,6 +81,7 @@ impl SeriesOwner {
                 secret: private_key.into_inner(),
             },
             default_ttl,
+            is_draft,
         };
 
         let mut batch = WriteBatch::default();
@@ -118,6 +127,7 @@ impl SeriesOwner {
             ),
             public_key: Key::new(self.keypair.public),
             freshness: chrono::Utc::now(),
+            is_draft: self.is_draft,
         }
     }
 
@@ -289,11 +299,17 @@ pub struct SeriesItem {
     public_key: Key,
     /// Remember to clear this field when sending to the wire.
     freshness: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    is_draft: bool,
 }
 
 impl SeriesItem {
     pub fn collection(&self) -> CollectionRef {
         self.signed.collection.clone()
+    }
+
+    pub fn is_draft(&self) -> bool {
+        self.is_draft
     }
 
     pub fn is_valid(&self) -> bool {
@@ -340,7 +356,7 @@ impl SeriesItem {
 fn generate_series_ownership() {
     println!(
         "{}",
-        SeriesOwner::create("a series", Duration::from_secs(3600))
+        SeriesOwner::create("a series", Duration::from_secs(3600), true)
             .unwrap()
             .series()
     );
@@ -348,7 +364,7 @@ fn generate_series_ownership() {
 
 #[test]
 fn validate_series_item() {
-    let owner = SeriesOwner::create("a series", Duration::from_secs(3600)).unwrap();
+    let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
     let _series = owner.series();
 
     let current_collection = CollectionRef::rand();
@@ -360,9 +376,10 @@ fn validate_series_item() {
 
 #[test]
 fn not_validate_series_item() {
-    let owner = SeriesOwner::create("a series", Duration::from_secs(3600)).unwrap();
+    let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
 
-    let other_owner = SeriesOwner::create("another series", Duration::from_secs(3600)).unwrap();
+    let other_owner =
+        SeriesOwner::create("another series", Duration::from_secs(3600), true).unwrap();
     let other_series = other_owner.series();
 
     let current_collection = CollectionRef::rand();
