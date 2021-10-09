@@ -11,7 +11,12 @@ pub enum Cli {
     Commit {
         #[structopt(long)]
         ttl: Option<String>,
-        dir: Option<PathBuf>,
+    },
+    /// Watches the current directory for changes, rebilding and commiting at
+    /// every change.
+    Watch {
+        #[structopt(long)]
+        ttl: Option<String>,
     },
     /// Uploads a single file as an object.
     Upload {
@@ -76,7 +81,8 @@ impl Cli {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
             Cli::Init => commands::init().await,
-            Cli::Commit { dir, ttl } => commands::commit(dir, ttl).await,
+            Cli::Commit { ttl } => commands::commit(ttl).await,
+            Cli::Watch { ttl } => commands::watch(ttl).await,
             Cli::Upload {
                 file,
                 content_type,

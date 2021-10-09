@@ -4,11 +4,14 @@ pub mod series;
 use askama::Template;
 use futures::prelude::*;
 use futures::stream;
+use notify::{RecursiveMode, Watcher};
 use serde_derive::{Deserialize, Serialize};
+use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, fs, io};
 use tabled::{Table, Tabled};
+use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
@@ -52,7 +55,9 @@ pub async fn init() -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .post("http://localhost:4510/_seriesowners")
-        .json(&Request { series_owner_name: &name })
+        .json(&Request {
+            series_owner_name: &name,
+        })
         .send()
         .await?;
 
@@ -77,7 +82,9 @@ pub async fn init() -> Result<(), crate::Error> {
 
         let rendered_private = crate::manifest::PrivateManifestTemplate {
             private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
-        }.render().expect("can render");
+        }
+        .render()
+        .expect("can render");
 
         fs::write("./Samizdat.toml", rendered)?;
         fs::write("./.Samizdat.priv", rendered_private)?;
@@ -88,7 +95,7 @@ pub async fn init() -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), crate::Error> {
+pub async fn commit(ttl: &Option<String>) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -124,7 +131,7 @@ pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), 
     }
 
     let manifest = Manifest::find()?;
-    let base = base.as_ref().unwrap_or_else(|| &manifest.build.base);
+    let base = &manifest.build.base;
     manifest.run()?;
 
     let mut all_files = vec![];
@@ -186,10 +193,7 @@ pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), 
                 "http://localhost:4510/_seriesowners/{}/collections",
                 series,
             ))
-            .json(&Request {
-                collection,
-                ttl,
-            })
+            .json(&Request { collection, ttl })
             .send()
             .await?;
 
@@ -248,6 +252,66 @@ pub async fn commit(base: &Option<PathBuf>, ttl: &Option<String>) -> Result<(), 
         }]);
     } else {
         println!("Collection hash: {}", collection);
+    }
+
+    Ok(())
+}
+
+pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
+    /// Minimum time you ave to wait to trigger rebuild.
+    const MIN_WAIT: Duration = Duration::from_secs(1);
+
+    // Ignore the output folder.
+    let manifest = Manifest::find()?;
+    let base = if manifest.build.base.is_absolute() {
+        manifest.build.base.clone()
+    } else {
+        std::env::current_dir()
+            .expect("current dir exists")
+            .join(&manifest.build.base)
+    };
+
+    // Spawn file watcher.
+    let (send, mut recv) = mpsc::unbounded_channel();
+    let mut watcher = notify::recommended_watcher(move |event| {
+        log::info!("Starting to listen for events");
+        match event {
+            Ok(event) => {
+                send.send(event).ok();
+            }
+            Err(err) => {
+                log::error!("Notify error: {}", err);
+            }
+        }
+    })?;
+
+    log::info!("Installing watcher");
+
+    watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
+
+    log::info!("Starting rebuild loop");
+
+    // Run the commit for the first time.
+    if let Err(err) = commit(ttl).await {
+        println!("Error while rebuilding: {}", err);
+    }
+
+    // Last time the commit was triggered.
+    let mut last_exec = Instant::now();
+
+    // The commit loop.
+    while let Some(event) = recv.recv().await {
+        let now = Instant::now();
+        let watched_files_changed = event.paths.iter().any(|path| !path.starts_with(&base));
+
+        if watched_files_changed && now > last_exec + MIN_WAIT {
+            log::info!("Rebuild triggered");
+            if let Err(err) = commit(ttl).await {
+                println!("Error while rebuilding: {}", err);
+            }
+
+            last_exec = Instant::now();
+        }
     }
 
     Ok(())

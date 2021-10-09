@@ -2200,6 +2200,7 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
+ "notify",
  "reqwest",
  "samizdat-common",
  "serde",

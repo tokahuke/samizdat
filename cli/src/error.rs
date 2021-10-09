@@ -13,6 +13,8 @@ pub enum Error {
     DeserializeJson(serde_json::Error),
     #[fail(display = "deserialize error: {}", _0)]
     DeserializeToml(toml::de::Error),
+    #[fail(display = "notify error: {}", _0)]
+    NotifyError(notify::Error),
 }
 
 impl From<reqwest::Error> for Error {
@@ -36,5 +38,11 @@ impl From<serde_json::Error> for Error {
 impl From<toml::de::Error> for Error {
     fn from(e: toml::de::Error) -> Error {
         Error::DeserializeToml(e)
+    }
+}
+
+impl From<notify::Error> for Error {
+    fn from(e: notify::Error) -> Error {
+        Error::NotifyError(e)
     }
 }

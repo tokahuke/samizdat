@@ -31,12 +31,15 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
 pub async fn rm(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
-        .delete(format!("http://localhost:4510/_seriesowners/{}", series_name))
+        .delete(format!(
+            "http://localhost:4510/_seriesowners/{}",
+            series_name
+        ))
         .send()
         .await?;
 
     println!("Status: {}", response.status());
-    
+
     Ok(())
 }
 

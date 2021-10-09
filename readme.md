@@ -30,7 +30,7 @@ This is still a proof of concept implementation. So three caveats are in place:
 2. Expect frequent breaking changes.
 3. Expect vulnerabilities. Do not use the network for sensitive content yet.
 
-> How to make this warning disappear? Contribute! I am but one humble huma being.
+> How to make this warning disappear? Contribute! I am but one humble human being.
 
 ## Project goals
 
@@ -93,4 +93,5 @@ the Free Software Foundation, either version 3 of the License, or
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details. The text of this license can be found in the [license](./license) file in this repository.
+GNU General Public License for more details. The text of this license
+can be found in the [license](./license) file in this repository.
