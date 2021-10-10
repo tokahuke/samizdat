@@ -25,12 +25,13 @@ pub async fn upload(
     path: &PathBuf,
     content_type: String,
     bookmark: bool,
+    is_draft: bool,
 ) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
-            "http://localhost:4510/_objects?bookmark={}",
-            bookmark
+            "http://localhost:4510/_objects?bookmark={}&is-draft={}",
+            bookmark, is_draft,
         ))
         .header("Content-Type", content_type)
         .body(fs::read(path)?)
@@ -95,7 +96,7 @@ pub async fn init() -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub async fn commit(ttl: &Option<String>) -> Result<(), crate::Error> {
+pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -149,7 +150,10 @@ pub async fn commit(ttl: &Option<String>) -> Result<(), crate::Error> {
                 .first_or_octet_stream()
                 .to_string();
             let response = client
-                .post("http://localhost:4510/_objects")
+                .post(format!(
+                    "http://localhost:4510/_objects?is_draft={}",
+                    !is_release
+                ))
                 .header("Content-Type", content_type)
                 .body(fs::read(&path)?)
                 .send()
@@ -172,9 +176,18 @@ pub async fn commit(ttl: &Option<String>) -> Result<(), crate::Error> {
 
     log::debug!("hashes: {:#?}", hashes);
 
+    #[derive(Serialize)]
+    struct Request {
+        hashes: Vec<(String, String)>,
+        is_draft: bool,
+    }
+
     let response = client
         .post("http://localhost:4510/_collections")
-        .json(&hashes)
+        .json(&Request {
+            hashes,
+            is_draft: !is_release,
+        })
         .send()
         .await?;
 
@@ -292,7 +305,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
     log::info!("Starting rebuild loop");
 
     // Run the commit for the first time.
-    if let Err(err) = commit(ttl).await {
+    if let Err(err) = commit(ttl, false).await {
         println!("Error while rebuilding: {}", err);
     }
 
@@ -306,7 +319,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
 
         if watched_files_changed && now > last_exec + MIN_WAIT {
             log::info!("Rebuild triggered");
-            if let Err(err) = commit(ttl).await {
+            if let Err(err) = commit(ttl, false).await {
                 println!("Error while rebuilding: {}", err);
             }
 

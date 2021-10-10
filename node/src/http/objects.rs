@@ -35,6 +35,7 @@ fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
 /// Uploads a new object to the database.
 fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
+    #[serde(rename = "kebab-case")]
     struct Query {
         #[serde(default)]
         bookmark: bool,

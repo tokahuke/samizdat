@@ -9,12 +9,17 @@ pub enum Cli {
     Init,
     /// Creates a new version (collection) of the content in this folder.
     Commit {
+        /// Set a custom time-to-leave for this commit.
         #[structopt(long)]
         ttl: Option<String>,
+        /// Make this a release (for real) commit.
+        #[structopt(long)]
+        release: bool,
     },
     /// Watches the current directory for changes, rebilding and commiting at
     /// every change.
     Watch {
+        /// Set a custom time-to-leave for the commits.
         #[structopt(long)]
         ttl: Option<String>,
     },
@@ -23,8 +28,12 @@ pub enum Cli {
         /// The content-type of this file. Will be guessed if unspecified.
         #[structopt(long)]
         content_type: Option<String>,
+        /// Don't bookmark this object. This makes is ellegible for automatic deletion.
         #[structopt(long)]
         no_bookmark: bool,
+        /// Sets this object as drafts. Drafts are not public to the network.
+        #[structopt(long)]
+        draft: bool,
         file: PathBuf,
     },
     /// Commands for managing series.
@@ -81,19 +90,20 @@ impl Cli {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
             Cli::Init => commands::init().await,
-            Cli::Commit { ttl } => commands::commit(ttl).await,
+            Cli::Commit { ttl, release } => commands::commit(ttl, *release).await,
             Cli::Watch { ttl } => commands::watch(ttl).await,
             Cli::Upload {
                 file,
                 content_type,
                 no_bookmark,
+                draft,
             } => {
                 let content_type = content_type.clone().unwrap_or_else(|| {
                     mime_guess::from_path(&file)
                         .first_or_octet_stream()
                         .to_string()
                 });
-                commands::upload(file, content_type, !no_bookmark).await
+                commands::upload(file, content_type, !no_bookmark, *draft).await
             }
             Cli::Series {
                 command: SeriesCommand::New { series_owner_name },
