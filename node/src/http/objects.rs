@@ -54,8 +54,9 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
                     content_type,
                     is_draft: query.is_draft,
                     created_at: chrono::Utc::now(),
+                    nonce: rand::random(),
                 };
-                let (_, object) = ObjectRef::build(
+                let object = ObjectRef::build(
                     header,
                     query.bookmark,
                     stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
@@ -67,7 +68,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and_then(async_reply)
 }
 
-/// Explicitely deletes an object from the database.
+/// Explicitly deletes an object from the database.
 fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
         .and(warp::delete())

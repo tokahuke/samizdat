@@ -14,7 +14,7 @@ use samizdat_common::Hash;
 
 use crate::cli::cli;
 use crate::db::{db, Table};
-use crate::models::{CollectionItem, Dropable, ObjectRef, ObjectStatistics};
+use crate::models::{CollectionItem, Dropable, ObjectRef, ObjectStatistics, UsePrior};
 
 /// Status for a vacuum task.
 pub enum VacuumStatus {
@@ -46,11 +46,20 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // Else, prune!
     let mut heap = BinaryHeap::new();
 
+    // Define a prior for use:
+    // TODO: how to calibrate correctly?
+    let use_prior = UsePrior {
+        gamma_alpha: 1.,
+        gamma_beta: 86400., // one day in secs
+        beta_alpha: 1.,
+        beta_beta: 1.,
+    };
+
     // Test what is good and what isn't:
     for (key, value) in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
         let statistics: ObjectStatistics = bincode::deserialize(&value)?;
         heap.push(HeapEntry {
-            priority: Reverse(NotNan::from(statistics.byte_usefulness())),
+            priority: Reverse(NotNan::from(statistics.byte_usefulness(&use_prior))),
             content: (key, statistics.size()),
         });
     }

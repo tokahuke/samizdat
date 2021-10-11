@@ -86,7 +86,7 @@ impl NonceMessage {
         Ok(nonce_header.cipher(hash))
     }
 
-    /// Sendes a header from a channel and creates a cipher for all further transmissions.
+    /// Sends a header from a channel and creates a cipher for all further transmissions.
     async fn send_negotiate(
         sender: &ChannelSender,
         hash: Hash,
@@ -129,7 +129,7 @@ struct ObjectMessage {
 impl Message for ObjectMessage {}
 
 impl ObjectMessage {
-    /// Creates an object heade for a given object.
+    /// Creates an object header for a given object.
     ///
     /// # Panics:
     ///
@@ -176,8 +176,8 @@ impl ObjectMessage {
             .try_flatten();
 
         // Build content from stream (this limits content size to the advertised amount)
-        let (metadata, object) =
-            ObjectRef::import(self.content_size, false, Box::pin(content_stream)).await?;
+        let object = ObjectRef::import(self.content_size, false, Box::pin(content_stream)).await?;
+        let metadata = object.metadata()?.expect("object exists");
 
         log::info!("done building object");
 
@@ -284,7 +284,7 @@ pub async fn recv_item(
     let locator_hash_from_peer = header.item.locator().hash();
     if locator_hash_from_peer != locator_hash {
         return Err(crate::Error::Message(format!(
-            "bad item from peer: expexted {}, got {}",
+            "bad item from peer: expected {}, got {}",
             locator_hash, locator_hash_from_peer,
         )));
     }

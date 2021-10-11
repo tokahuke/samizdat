@@ -10,16 +10,30 @@ use crate::db::{db, Table};
 
 use super::{Bookmark, BookmarkType, Dropable};
 
+/// The size of a chunk. An object consists of a sequence of chunks, the hash
+/// of which are used to create the Merkle tree whose root hash is the object
 pub const CHUNK_SIZE: usize = 256_000;
 
+/// The first section before the actual content of the object. The header is
+/// encoded as a null-escaped byte sequence in the beginning of the first chunk.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectHeader {
+    /// The MIME type of this object.
     pub content_type: String,
+    /// Whether this is a draft object or not. Draft objects cannot be shared
+    /// publicly.
     pub is_draft: bool,
+    /// The date of creation of this object.
     pub created_at: DateTime<Utc>,
+    /// A number with no semantics whatsoever. You can use this to create a
+    /// different object hash for the same content.
+    pub nonce: u64,
 }
 
 impl ObjectHeader {
+    /// Reads a header from an iterator of bytes.
+    ///
+    /// TODO: should be `Read` instead of `Iterator`?
     pub fn read(
         into_iter: impl IntoIterator<Item = Result<u8, crate::Error>>,
     ) -> Result<(usize, ObjectHeader), crate::Error> {
@@ -56,6 +70,7 @@ impl ObjectHeader {
         Ok((read, bincode::deserialize(&buffer)?))
     }
 
+    /// Creates the null-encoded sequence of bytes for this header.
     pub fn buffer(&self) -> Vec<u8> {
         let serialized = bincode::serialize(self).expect("can serialize");
         let mut buffer = Vec::with_capacity(2 * serialized.len() + 1);
@@ -76,6 +91,7 @@ impl ObjectHeader {
     }
 }
 
+/// Helper function to get a chunk by its hash in the database.
 fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
     Ok(db()
         .get_cf(Table::ObjectChunks.get(), &hash)?
@@ -83,7 +99,7 @@ fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
 }
 
 /// Information about the object that is "out of band", that is, does not compose the hash
-/// directly. This is used for internal bookkeping inside the node.
+/// directly. This is used for internal bookkeeping inside the node.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectMetadata {
     /// The hashes of each chunk in the order that they appear.
@@ -209,7 +225,7 @@ impl Dropable for ObjectRef {
 }
 
 impl ObjectRef {
-    /// Creates a new object refrerence from a hash.
+    /// Creates a new object reference from a hash.
     pub fn new(hash: Hash) -> ObjectRef {
         ObjectRef { hash }
     }
@@ -229,9 +245,9 @@ impl ObjectRef {
     }
 
     /// Update statistics indicating that this object was used. This will signal to the
-    /// vacuum daemon that this object is usefull and therefore a worse candidate for deletion.
+    /// vacuum daemon that this object is useful and therefore a worse candidate for deletion.
     ///
-    /// This fucntion has no effect if the object does not exist.
+    /// This function has no effect if the object does not exist.
     ///
     /// TODO: current impl allows for TOCTOU.
     pub fn touch(&self) -> Result<(), crate::Error> {
@@ -269,12 +285,12 @@ impl ObjectRef {
         None
     }
 
-    /// Build a new object from data comming from a _trusted_ source.
+    /// Build a new object from data coming from a _trusted_ source.
     pub async fn build(
         header: ObjectHeader,
         bookmark: bool,
         mut source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
-    ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
+    ) -> Result<ObjectRef, crate::Error> {
         let mut content_size = 0;
         let mut buffer = header.buffer(); // start the first chunk with the serialized eader
         let mut hashes = Vec::new();
@@ -334,7 +350,7 @@ impl ObjectRef {
 
         db().write(batch)?;
 
-        Ok((metadata, ObjectRef { hash }))
+        Ok(ObjectRef { hash })
     }
 
     /// Imports an existing object in the database from an external data.
@@ -342,7 +358,7 @@ impl ObjectRef {
         expected_content_size: usize,
         bookmark: bool,
         source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
-    ) -> Result<(ObjectMetadata, ObjectRef), crate::Error> {
+    ) -> Result<ObjectRef, crate::Error> {
         let mut content_size = 0;
         let mut buffer = Vec::with_capacity(CHUNK_SIZE);
         let mut hashes = Vec::new();
@@ -409,7 +425,28 @@ impl ObjectRef {
 
         db().write(batch)?;
 
-        Ok((metadata, ObjectRef { hash }))
+        Ok(ObjectRef { hash })
+    }
+
+    /// Create a copy of this object, but with a different nonce header value. This new object
+    /// will have a new content hash.
+    pub async fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
+        if let Some(mut iter) = self.iter()? {
+            let (_, header) = ObjectHeader::read(&mut iter)?;
+            let reissued = ObjectRef::build(
+                ObjectHeader {
+                    nonce: rand::random(),
+                    ..header
+                },
+                bookmark,
+                stream::iter(iter),
+            )
+            .await?;
+
+            Ok(Some(reissued))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Streams the contents of an object, including the header part. To skip it, see
@@ -486,26 +523,46 @@ impl ObjectRef {
     }
 
     /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the
-    /// database, this function returns `Ok(true)`. You may need to frther check if the object
+    /// database, this function returns `Ok(true)`. You may need to further check if the object
     ///  actually exists.
     pub fn is_draft(&self) -> Result<bool, crate::Error> {
         Ok(self.metadata()?.map(|m| m.header.is_draft).unwrap_or(true))
     }
+
+    /// Create a self-sealed object for this object. A self-sealed object is an object that is
+    /// generated by the contents of another object, ciphered using its own hash. This allows the
+    /// contents of this object to be shared with third parties, without the risk of leaking
+    /// either the content or the hash of this object.
+    pub fn self_seal(&self) -> Result<ObjectRef, crate::Error> {
+        todo!()
+    }
 }
 
+/// Statistics on object usage. This entity is used by the vacuum system to decide which objects
+/// are due for automatic deletion due to lack of usage.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectStatistics {
     /// The content size of this object.
     size: usize,
     /// Time the object object was built or imported in this database.
     created_at: DateTime<Utc>,
-    /// The last time somebody touched this obect.
+    /// The last time somebody touched this object.
     last_touched_at: DateTime<Utc>,
     /// Total number of touches on this object.
     touches: usize,
 }
 
+/// The prior distribution parameters (_a priori_ suppositions) about object usage.
+#[derive(Debug)]
+pub struct UsePrior {
+    pub gamma_alpha: f64,
+    pub gamma_beta: f64,
+    pub beta_alpha: f64,
+    pub beta_beta: f64,
+}
+
 impl ObjectStatistics {
+    /// Create a new statistics struct for an object of given size.
     fn new(size: usize) -> ObjectStatistics {
         ObjectStatistics {
             size,
@@ -515,38 +572,44 @@ impl ObjectStatistics {
         }
     }
 
+    /// Marks the object as touched in a specific point in time.
     pub fn touch(&mut self) {
         self.last_touched_at = Utc::now();
         self.touches += 1;
     }
 
+    /// The size of the related object.
     pub fn size(&self) -> usize {
         self.size
     }
 
     /// This is a bit approximate modeling of the following process:
-    /// a. First, the access pattern is a Poisson process.
-    /// b. After each touch, "toss a coin" to choose if you are still going to touch the object
-    /// ever again.
-    /// TODO: needs more rigorous implementation. This makes some (gross?) mathematical
-    /// simplifications.
-    pub fn byte_usefulness(&self) -> f64 {
-        // Add one day as a prior.
-        let total_time = (self.last_touched_at - self.created_at).num_seconds() as f64 + 86400.;
-        let access_freq = self.touches as f64 / total_time;
+    /// a. First, the access pattern is a Poisson process of unknown rate. The prior is a
+    ///    Gamma Distribution.
+    /// b. After each touch, "toss a coin" to choose if you are still going to touch the
+    ///    object ever again. This is a Bernoulli variable (coin toss) with unknown
+    ///    probability. The prior is a Beta Distribution.
+    pub fn byte_usefulness(&self, use_prior: &UsePrior) -> f64 {
         let time_inactive = (Utc::now() - self.last_touched_at).num_seconds() as f64;
+
+        let post_gamma_alpha = use_prior.gamma_alpha + self.touches as f64;
+        let post_gamma_beta =
+            use_prior.gamma_beta + (self.last_touched_at - self.created_at).num_seconds() as f64;
+        // One "pseudo observation" E[exp(-time_inactive * poisson_rate)].
+        let survival_prob = (1. + time_inactive / post_gamma_beta).powf(-post_gamma_alpha);
+        let post_beta_alpha = use_prior.beta_alpha + survival_prob;
+        let post_beta_beta = use_prior.beta_beta + self.touches as f64;
 
         // Based on an uninformed beta distribution.
         // TODO: uninformed -> bad idea! Learn from other objects
-        let prob_future_use = self.touches as f64 / (1. + self.touches as f64);
+        let prob_future_use = post_beta_beta / (post_beta_alpha + post_beta_beta);
 
         // Probability it is still going to be used (Bayes'):
-        let survival =
-            (1. + time_inactive / access_freq / self.touches as f64).powi(-(self.touches as i32));
-        let prob_use =
-            prob_future_use * survival / (prob_future_use * survival + (1. - prob_future_use));
+        let prob_use = prob_future_use * survival_prob
+            / (prob_future_use * survival_prob + (1. - prob_future_use));
+        let expected_access_freq = post_gamma_alpha / post_gamma_beta;
 
-        // Add 8kB to symbolize "hidden overhead": metadata, statstics, items, etc...
-        prob_use * access_freq / (self.size + 8_192) as f64
+        // Add 8kB to symbolize "hidden overhead": metadata, statistics, items, etc...
+        prob_use * expected_access_freq / (self.size + 8_192) as f64
     }
 }

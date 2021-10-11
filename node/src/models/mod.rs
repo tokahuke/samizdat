@@ -7,7 +7,7 @@ mod series;
 
 pub use bookmark::{Bookmark, BookmarkType};
 pub use collection::{CollectionItem, CollectionRef, ItemPath, ItemPathBuf, Locator};
-pub use object::{ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, CHUNK_SIZE};
+pub use object::{ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE};
 pub use series::{SeriesItem, SeriesOwner, SeriesRef};
 
 use rocksdb::WriteBatch;
