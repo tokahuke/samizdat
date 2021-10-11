@@ -56,31 +56,34 @@ pub async fn resolve_object(
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {:?}", object);
 
-    let stream = if let Some(stream) = object.iter()? {
+    let iter = if let Some(iter) = object.iter_skip_header()? {
         log::info!("found local hash {}", object.hash());
-        Some(stream)
+        Some(iter)
     } else {
         log::info!("hash {} not found locally. Querying hubs", object.hash());
         hubs().query(*object.hash(), QueryKind::Object).await;
-        object.iter()?
+        object.iter_skip_header()?
     };
 
     // Respond with found or not found.
-    if let Some((metadata, iter)) = object.metadata()?.zip(stream) {
+    if let Some((metadata, iter)) = object.metadata()?.zip(iter) {
         object.touch()?;
         let resolved = Resolved {
-            content_type: metadata.content_type,
+            content_type: metadata.header.content_type,
             content_size: metadata.content_size,
             ext_headers: ext_headers
                 .into_iter()
-                .chain(vec![(
-                    "X-Samizdat-Bookmark",
-                    object.is_bookmarked()?.to_string(),
-                )])
+                .chain(vec![
+                    ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
+                    ("X-Samizdat-Is-Draft", metadata.header.is_draft.to_string()),
+                    (
+                        "X-Samizdat-Created-At",
+                        metadata.header.created_at.to_string(),
+                    ),
+                ])
                 .collect(),
             body: Body::wrap_stream(stream::iter(
-                iter.into_iter()
-                    .map(|thing| thing.map_err(|err| err.to_string())),
+                crate::utils::chunks(1000, iter).map(|thing| thing.map_err(|err| err.to_string())),
             )),
         };
 

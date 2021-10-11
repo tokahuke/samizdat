@@ -5,7 +5,7 @@ use warp::Filter;
 use samizdat_common::Hash;
 
 use crate::balanced_or_tree;
-use crate::models::{BookmarkType, Dropable, ObjectRef};
+use crate::models::{BookmarkType, Dropable, ObjectHeader, ObjectRef};
 
 use super::resolvers::resolve_object;
 use super::{async_reply, reply, returnable, tuple};
@@ -50,11 +50,14 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and(warp::body::bytes())
         .map(
             |content_type: String, query: Query, bytes: bytes::Bytes| async move {
-                let (_, object) = ObjectRef::build(
+                let header = ObjectHeader {
                     content_type,
-                    bytes.len(),
+                    is_draft: query.is_draft,
+                    created_at: chrono::Utc::now(),
+                };
+                let (_, object) = ObjectRef::build(
+                    header,
                     query.bookmark,
-                    query.is_draft,
                     stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
                 )
                 .await?;

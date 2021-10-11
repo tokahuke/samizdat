@@ -26,6 +26,8 @@ pub enum Error {
     InvalidSeriesItem,
     #[fail(display = "different public keys")]
     DifferentePublicKeys,
+    #[fail(display = "no header read")]
+    NoHeaderRead,
 }
 
 impl warp::reject::Reject for crate::Error {}

@@ -5,6 +5,7 @@ mod models;
 mod replay_resistance;
 mod slow_compiler_workaround;
 mod system;
+mod utils;
 mod vacuum;
 
 pub use samizdat_common::Error;

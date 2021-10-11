@@ -23,7 +23,7 @@ const MAX_STREAM_SIZE: usize = crate::models::CHUNK_SIZE * 2;
 
 /// A header that can be sent from the sender to the receiver _before_ the stream starts.
 #[async_trait::async_trait]
-trait Header: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<'a> {
+trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<'a> {
     /// Receive the header.
     async fn recv(
         receiver: &mut ChannelReceiver,
@@ -57,15 +57,15 @@ trait Header: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<
 /// Sends a _nonce_ (a number used only once) that will be used for deriving a key to transfer
 /// the stream.
 #[derive(Default, Serialize, Deserialize)]
-struct NonceHeader {
+struct NonceMessage {
     nonce: Hash,
 }
 
-impl Header for NonceHeader {}
+impl Message for NonceMessage {}
 
-impl NonceHeader {
-    fn new() -> NonceHeader {
-        NonceHeader {
+impl NonceMessage {
+    fn new() -> NonceMessage {
+        NonceMessage {
             nonce: Hash::rand(),
         }
     }
@@ -80,8 +80,8 @@ impl NonceHeader {
         receiver: &mut ChannelReceiver,
         hash: Hash,
     ) -> Result<TransferCipher, crate::Error> {
-        let init_cipher = NonceHeader::default().cipher(hash);
-        let nonce_header = NonceHeader::recv(receiver, &init_cipher).await?;
+        let init_cipher = NonceMessage::default().cipher(hash);
+        let nonce_header = NonceMessage::recv(receiver, &init_cipher).await?;
 
         Ok(nonce_header.cipher(hash))
     }
@@ -91,8 +91,8 @@ impl NonceHeader {
         sender: &ChannelSender,
         hash: Hash,
     ) -> Result<TransferCipher, crate::Error> {
-        let init_cipher = NonceHeader::default().cipher(hash);
-        let nonce_header = NonceHeader::new();
+        let init_cipher = NonceMessage::default().cipher(hash);
+        let nonce_header = NonceMessage::new();
         nonce_header.send(sender, &init_cipher).await?;
 
         Ok(nonce_header.cipher(hash))
@@ -101,18 +101,18 @@ impl NonceHeader {
 
 /// A header sending information (metadata) on a collection item.
 #[derive(Debug, Serialize, Deserialize)]
-struct ItemHeader {
+struct ItemMessage {
     item: CollectionItem,
-    object_header: ObjectHeader,
+    object_header: ObjectMessage,
 }
 
-impl Header for ItemHeader {}
+impl Message for ItemMessage {}
 
-impl ItemHeader {
+impl ItemMessage {
     /// Creates an item header for a given collection item.
-    fn for_item(item: CollectionItem) -> Result<ItemHeader, crate::Error> {
-        let object_header = ObjectHeader::for_object(&item.object()?)?;
-        Ok(ItemHeader {
+    fn for_item(item: CollectionItem) -> Result<ItemMessage, crate::Error> {
+        let object_header = ObjectMessage::for_object(&item.object()?)?;
+        Ok(ItemMessage {
             item,
             object_header,
         })
@@ -121,27 +121,25 @@ impl ItemHeader {
 
 /// A header sending information (metadata) on an item.
 #[derive(Debug, Serialize, Deserialize)]
-struct ObjectHeader {
+struct ObjectMessage {
     nonce: Hash,
     content_size: usize,
-    content_type: String,
 }
 
-impl Header for ObjectHeader {}
+impl Message for ObjectMessage {}
 
-impl ObjectHeader {
+impl ObjectMessage {
     /// Creates an object heade for a given object.
     ///
     /// # Panics:
     ///
     /// If object does not exist locally.
-    fn for_object(object: &ObjectRef) -> Result<ObjectHeader, crate::Error> {
+    fn for_object(object: &ObjectRef) -> Result<ObjectMessage, crate::Error> {
         let metadata = object.metadata()?.expect("object exists");
 
-        Ok(ObjectHeader {
+        Ok(ObjectMessage {
             nonce: Hash::rand(),
             content_size: metadata.content_size,
-            content_type: metadata.content_type,
         })
     }
 
@@ -178,14 +176,8 @@ impl ObjectHeader {
             .try_flatten();
 
         // Build content from stream (this limits content size to the advertised amount)
-        let (metadata, object) = ObjectRef::build(
-            self.content_type,
-            self.content_size,
-            false,
-            false,
-            Box::pin(content_stream),
-        )
-        .await?;
+        let (metadata, object) =
+            ObjectRef::import(self.content_size, false, Box::pin(content_stream)).await?;
 
         log::info!("done building object");
 
@@ -217,7 +209,7 @@ impl ObjectHeader {
     ) -> Result<(), crate::Error> {
         let cipher = TransferCipher::new(object.hash(), &self.nonce);
 
-        for chunk in object.iter()?.expect("object exits") {
+        for chunk in object.chunks()?.expect("object exits") {
             let chunk = chunk?;
             log::info!("stream for data opened");
             let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
@@ -244,9 +236,9 @@ pub async fn recv_object(
     hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceHeader::recv_negotiate(&mut receiver, hash).await?;
+    let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash).await?;
     log::info!("receiving object header");
-    let header = ObjectHeader::recv(&mut receiver, &transfer_cipher).await?;
+    let header = ObjectMessage::recv(&mut receiver, &transfer_cipher).await?;
     log::info!("receiving data");
     let object = header.recv_data(&mut receiver, hash).await?;
 
@@ -259,10 +251,10 @@ pub async fn recv_object(
 pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(), crate::Error> {
     object.touch()?;
 
-    let header = ObjectHeader::for_object(object)?;
+    let header = ObjectMessage::for_object(object)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceHeader::send_negotiate(sender, *object.hash()).await?;
+    let transfer_cipher = NonceMessage::send_negotiate(sender, *object.hash()).await?;
     log::info!("sending object header");
     header.send(sender, &transfer_cipher).await?;
     log::info!("sending data");
@@ -284,9 +276,9 @@ pub async fn recv_item(
     locator_hash: Hash,
 ) -> Result<ObjectRef, crate::Error> {
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceHeader::recv_negotiate(&mut receiver, locator_hash).await?;
+    let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
     log::info!("receiving item header");
-    let header = ItemHeader::recv(&mut receiver, &transfer_cipher).await?;
+    let header = ItemMessage::recv(&mut receiver, &transfer_cipher).await?;
 
     // No tricks!
     let locator_hash_from_peer = header.item.locator().hash();
@@ -317,10 +309,10 @@ pub async fn recv_item(
 pub async fn send_item(sender: &ChannelSender, item: CollectionItem) -> Result<(), crate::Error> {
     let object = item.object()?;
     let hash = item.locator().hash();
-    let header = ItemHeader::for_item(item)?;
+    let header = ItemMessage::for_item(item)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceHeader::send_negotiate(sender, hash).await?;
+    let transfer_cipher = NonceMessage::send_negotiate(sender, hash).await?;
     log::info!("sending item header");
     header.send(sender, &transfer_cipher).await?;
     log::info!("sending data");
