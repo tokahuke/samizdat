@@ -1,13 +1,23 @@
 # This is the Samizdat manifest file for this project.
 
 [series]
+# Here goes the public information of the series in this directory.
 
 name = "{{ name }}"
 public-key = "{{ public_key }}"
 # ttl = "{{ ttl }}"    # set a time-to-live different from the default
 
 
+[debug]
+# Same thing as the last section, but for debugging and testing purposes.
+
+name = "{{ name }}-debug"
+public-key = "{{ public_key_debug }}"
+# ttl = "{{ ttl }}"    
+
+
 [build]
+# Build instructions for this series.
 
 base = "./dist" # the input directory that Samizdat will read from
 # run = "npm run build" # a build command to be run before upload

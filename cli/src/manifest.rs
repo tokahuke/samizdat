@@ -12,12 +12,15 @@ pub struct ManifestTemplate<'a> {
     pub name: &'a str,
     pub public_key: &'a str,
     pub ttl: &'a str,
+    pub debug_name: &'a str,
+    pub public_key_debug: &'a str,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Manifest {
     pub series: Series,
+    pub debug: Series,
     pub build: Build,
 }
 
@@ -95,12 +98,14 @@ impl Build {
 #[template(path = "Samizdat.priv.txt")]
 pub struct PrivateManifestTemplate<'a> {
     pub private_key: &'a str,
+    pub private_key_debug: &'a str,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PrivateManifest {
     pub private_key: String,
+    pub private_key_debug: String,
 }
 
 impl PrivateManifest {

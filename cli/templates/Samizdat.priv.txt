@@ -1,1 +1,2 @@
 private-key = "{{ private_key }}"
+private-key-debug = "{{ private_key_debug }}"

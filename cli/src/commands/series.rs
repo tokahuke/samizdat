@@ -88,6 +88,18 @@ pub async fn import() -> Result<(), crate::Error> {
         .send()
         .await?;
 
+    let _debug_response = client
+        .post(format!("http://localhost:4510/_seriesowners"))
+        .json(&Request {
+            series_owner_name: &manifest.debug.name,
+            keypair: KeyPair {
+                public_key: &manifest.debug.public_key,
+                private_key: &private_manifest.private_key_debug,
+            },
+        })
+        .send()
+        .await?;
+
     println!("Status: {}", response.status());
     // println!("Response: {}", response.text().await?);
 

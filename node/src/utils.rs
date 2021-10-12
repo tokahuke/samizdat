@@ -1,7 +1,15 @@
+//! General utilities which don't fit anywhere else.
+
+/// An adaptor that splits the elements of another into vectors of a given size
+/// (except the last). This is a "try-iterator" implementation.
 pub struct Chunks<I> {
+    /// The adapted iterator
     it: I,
+    /// The size of the chunks.
     size: usize,
+    /// Whether an error has occurred.
     is_error: bool,
+    /// Whether the iterator is done iterating.
     is_done: bool,
 }
 
@@ -34,6 +42,8 @@ impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
     }
 }
 
+/// An adaptor that splits the elements of another into vectors of a given size
+/// (except the last). This is a "try-iterator" implementation.
 pub fn chunks<I>(size: usize, it: I) -> Chunks<I>
 where
     I: Iterator<Item = Result<u8, crate::Error>>,

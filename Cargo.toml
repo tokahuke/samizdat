@@ -4,4 +4,5 @@ members = ["common", "node", "hub", "cli", "proxy"]
 
 [profile.release]
 
-lto = "thin"
+opt-level = "s"
+lto = "fat"

@@ -47,6 +47,7 @@ pub async fn upload(
 pub async fn init() -> Result<(), crate::Error> {
     let pwd = env::current_dir()?;
     let name = pwd.iter().last().expect("not empty").to_string_lossy();
+    let debug_name = format!("{}-debug", name);
 
     #[derive(Serialize)]
     struct Request<'a> {
@@ -61,6 +62,13 @@ pub async fn init() -> Result<(), crate::Error> {
         })
         .send()
         .await?;
+    let response_debug = client
+        .post("http://localhost:4510/_seriesowners")
+        .json(&Request {
+            series_owner_name: &debug_name,
+        })
+        .send()
+        .await?;
 
     if response.status().is_success() {
         #[derive(Deserialize)]
@@ -72,17 +80,22 @@ pub async fn init() -> Result<(), crate::Error> {
 
         let text = response.text().await?;
         let payload: Payoad = serde_json::from_str(&text)?;
+        let text_debug = response_debug.text().await?;
+        let payload_debug: Payoad = serde_json::from_str(&text_debug)?;
 
         let rendered = crate::manifest::ManifestTemplate {
             name: &name,
             public_key: &Key::from(payload.keypair.public).to_string(),
             ttl: &humantime::format_duration(payload.default_ttl).to_string(),
+            debug_name: &debug_name,
+            public_key_debug: &Key::from(payload_debug.keypair.public).to_string(),
         }
         .render()
         .expect("can render");
 
         let rendered_private = crate::manifest::PrivateManifestTemplate {
             private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
+            private_key_debug: &PrivateKey::from(payload_debug.keypair.secret).to_string(),
         }
         .render()
         .expect("can render");
@@ -194,7 +207,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     log::info!("Status: {}", response.status());
     let collection = response.text().await?;
 
-    if let Some(series) = Some(manifest.series.name) {
+    if let Some(series) = Some(if is_release { manifest.series.name } else { manifest.debug.name }) {
         #[derive(Serialize)]
         struct Request<'a> {
             collection: String,
