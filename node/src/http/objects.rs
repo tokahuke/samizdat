@@ -1,4 +1,3 @@
-use futures::stream;
 use serde_derive::Deserialize;
 use warp::Filter;
 
@@ -56,12 +55,8 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
                     created_at: chrono::Utc::now(),
                     nonce: rand::random(),
                 };
-                let object = ObjectRef::build(
-                    header,
-                    query.bookmark,
-                    stream::iter(bytes.into_iter().map(|byte| Ok(byte))),
-                )
-                .await?;
+                let object =
+                    ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))?;
                 Ok(object.hash().to_string())
             },
         )

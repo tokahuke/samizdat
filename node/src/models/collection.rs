@@ -1,6 +1,7 @@
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::str::FromStr;
@@ -9,7 +10,7 @@ use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
 
 use crate::db::{db, Table};
 
-use super::{Dropable, ObjectRef};
+use super::{Dropable, ObjectHeader, ObjectRef};
 
 /// The function transforming an arbitrary string into its canonical path form.
 fn normalize(name: &str) -> Cow<str> {
@@ -51,6 +52,12 @@ impl FromStr for ItemPathBuf {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<ItemPathBuf, crate::Error> {
         Ok(s.into())
+    }
+}
+
+impl Display for ItemPathBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -217,12 +224,34 @@ impl CollectionRef {
     where
         I: AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
+        // Create inventory document:
+        let inventory = serde_json::to_string_pretty(
+            &objects
+                .as_ref()
+                .iter()
+                .map(|(path, object_ref)| (path.to_string(), object_ref.hash().to_string()))
+                .collect::<BTreeMap<_, _>>(),
+        )
+        .expect("can serialize");
+        let inventory_path = ItemPathBuf::from("_inventory");
+        let inventory_object = ObjectRef::build(
+            ObjectHeader {
+                content_type: "application/json".to_owned(),
+                is_draft,
+                created_at: chrono::Utc::now(),
+                nonce: rand::random(),
+            },
+            false,
+            inventory.as_bytes().into_iter().map(|&byte| Ok(byte)),
+        )?;
+
         // Note: this is the slow part of the process (by a long stretch)
-        let patricia_map = objects
+        let mut patricia_map = objects
             .as_ref()
             .iter()
             .map(|(name, object)| (name.hash(), *object.hash()))
             .collect::<PatriciaMap>();
+        patricia_map.insert(inventory_path.hash(), *inventory_object.hash());
 
         let root = *patricia_map.root();
         let collection = CollectionRef { hash: root };
@@ -241,6 +270,16 @@ impl CollectionRef {
 
             item.insert_with(&mut batch);
         }
+
+        let inventory_item = CollectionItem {
+            collection: collection.clone(),
+            name: inventory_path.clone(),
+            inclusion_proof: patricia_map
+                .proof_for(inventory_path.hash())
+                .expect("name exists in map"),
+            is_draft,
+        };
+        inventory_item.insert_with(&mut batch);
 
         // batch.put_cf(Table::Collections.get(), collection.hash, &[]);
 

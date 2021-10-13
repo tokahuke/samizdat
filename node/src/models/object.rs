@@ -286,18 +286,19 @@ impl ObjectRef {
     }
 
     /// Build a new object from data coming from a _trusted_ source.
-    pub async fn build(
+    pub fn build(
         header: ObjectHeader,
         bookmark: bool,
-        mut source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
+        source: impl IntoIterator<Item = Result<u8, crate::Error>>,
     ) -> Result<ObjectRef, crate::Error> {
         let mut content_size = 0;
         let mut buffer = header.buffer(); // start the first chunk with the serialized eader
         let mut hashes = Vec::new();
+        let mut source = source.into_iter();
 
         loop {
             // Extend buffer until (a) source stops (b) error (c) reaches limit.
-            while let Some(byte) = source.next().await {
+            while let Some(byte) = source.next() {
                 buffer.push(byte?);
 
                 if buffer.len() == CHUNK_SIZE {
@@ -430,7 +431,7 @@ impl ObjectRef {
 
     /// Create a copy of this object, but with a different nonce header value. This new object
     /// will have a new content hash.
-    pub async fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
+    pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter()? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
             let reissued = ObjectRef::build(
@@ -439,9 +440,8 @@ impl ObjectRef {
                     ..header
                 },
                 bookmark,
-                stream::iter(iter),
-            )
-            .await?;
+                iter,
+            )?;
 
             Ok(Some(reissued))
         } else {
