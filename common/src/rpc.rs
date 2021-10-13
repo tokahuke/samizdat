@@ -45,11 +45,9 @@ pub struct LatestResponse {
 
 #[tarpc::service]
 pub trait Hub {
-    // /// Returns the port for the node to connect as server.
-    // async fn reverse_port() -> u16;
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
-    ///
+    /// Gets the latest version of a series.
     async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
 }
 

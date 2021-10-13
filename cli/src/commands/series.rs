@@ -3,8 +3,6 @@ use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
 
-use crate::manifest::{Manifest, PrivateManifest};
-
 use super::show_table;
 
 pub async fn new(series_name: String) -> Result<(), crate::Error> {
@@ -55,53 +53,6 @@ pub async fn show(series_name: String) -> Result<(), crate::Error> {
 
     log::info!("Status: {}", response.status());
     println!("Series public key: {}", response.text().await?);
-
-    Ok(())
-}
-
-pub async fn import() -> Result<(), crate::Error> {
-    let manifest = Manifest::find()?;
-    let private_manifest = PrivateManifest::find()?;
-
-    #[derive(Serialize)]
-    struct KeyPair<'a> {
-        public_key: &'a str,
-        private_key: &'a str,
-    }
-
-    #[derive(Serialize)]
-    struct Request<'a> {
-        series_owner_name: &'a str,
-        keypair: KeyPair<'a>,
-    }
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("http://localhost:4510/_seriesowners"))
-        .json(&Request {
-            series_owner_name: &manifest.series.name,
-            keypair: KeyPair {
-                public_key: &manifest.series.public_key,
-                private_key: &private_manifest.private_key,
-            },
-        })
-        .send()
-        .await?;
-
-    let _debug_response = client
-        .post(format!("http://localhost:4510/_seriesowners"))
-        .json(&Request {
-            series_owner_name: &manifest.debug.name,
-            keypair: KeyPair {
-                public_key: &manifest.debug.public_key,
-                private_key: &private_manifest.private_key_debug,
-            },
-        })
-        .send()
-        .await?;
-
-    println!("Status: {}", response.status());
-    // println!("Response: {}", response.text().await?);
 
     Ok(())
 }

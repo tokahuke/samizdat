@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
-use crate::Manifest;
+use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
@@ -207,78 +207,80 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     log::info!("Status: {}", response.status());
     let collection = response.text().await?;
 
-    if let Some(series) = Some(if is_release { manifest.series.name } else { manifest.debug.name }) {
-        #[derive(Serialize)]
-        struct Request<'a> {
-            collection: String,
-            ttl: &'a Option<String>,
-        }
-
-        let response = client
-            .post(format!(
-                "http://localhost:4510/_seriesowners/{}/collections",
-                series,
-            ))
-            .json(&Request { collection, ttl })
-            .send()
-            .await?;
-
-        if response.status().is_client_error() {
-            let status = response.status();
-            let text = response.text().await?;
-            println!("Status: {}", status);
-            println!("Response: {}", text);
-
-            return Err(crate::Error::Message(format!(
-                "series {} does not exist",
-                series
-            )));
-        }
-
-        #[derive(Debug, Clone, Deserialize)]
-        pub struct CollectionRef {
-            pub hash: Hash,
-        }
-
-        #[derive(Debug, Deserialize)]
-        struct SeriesItemContent {
-            collection: CollectionRef,
-            timestamp: chrono::DateTime<chrono::Utc>,
-            ttl: Duration,
-        }
-
-        #[derive(Debug, Deserialize)]
-        pub struct SeriesItem {
-            signed: Signed<SeriesItemContent>,
-            //public_key: Key,
-            //freshness: chrono::DateTime<chrono::Utc>,
-        }
-
-        #[derive(Tabled)]
-        struct Row {
-            series: String,
-            // public_key: Key,
-            collection: Hash,
-            timestamp: chrono::DateTime<chrono::Utc>,
-            ttl: String,
-        }
-
-        let text = response.text().await?;
-        let item: SeriesItem = serde_json::from_str(&text).map_err(|err| {
-            println!("bad json: {}", text);
-            err
-        })?;
-
-        show_table([Row {
-            series: series.to_owned(),
-            // public_key: item.public_key,
-            collection: item.signed.collection.hash,
-            timestamp: item.signed.timestamp,
-            ttl: format!("{:?}", item.signed.ttl),
-        }]);
+    let series = if is_release {
+        manifest.series.name
     } else {
-        println!("Collection hash: {}", collection);
+        manifest.debug.name
+    };
+    
+    #[derive(Serialize)]
+    struct CollectionRequest<'a> {
+        collection: String,
+        ttl: &'a Option<String>,
     }
+
+    let response = client
+        .post(format!(
+            "http://localhost:4510/_seriesowners/{}/collections",
+            series,
+        ))
+        .json(&CollectionRequest { collection, ttl })
+        .send()
+        .await?;
+
+    if response.status().is_client_error() {
+        let status = response.status();
+        let text = response.text().await?;
+        println!("Status: {}", status);
+        println!("Response: {}", text);
+
+        return Err(crate::Error::Message(format!(
+            "series {} does not exist",
+            series
+        )));
+    }
+
+    #[derive(Debug, Clone, Deserialize)]
+    pub struct CollectionRef {
+        pub hash: Hash,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SeriesItemContent {
+        collection: CollectionRef,
+        timestamp: chrono::DateTime<chrono::Utc>,
+        ttl: Duration,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct SeriesItem {
+        signed: Signed<SeriesItemContent>,
+        //public_key: Key,
+        //freshness: chrono::DateTime<chrono::Utc>,
+    }
+
+    #[derive(Tabled)]
+    struct Row {
+        series: String,
+        // public_key: Key,
+        collection: Hash,
+        timestamp: chrono::DateTime<chrono::Utc>,
+        ttl: String,
+    }
+
+    let text = response.text().await?;
+    let item: SeriesItem = serde_json::from_str(&text).map_err(|err| {
+        println!("bad json: {}", text);
+        err
+    })?;
+
+    show_table([Row {
+        series: series.to_owned(),
+        // public_key: item.public_key,
+        collection: item.signed.collection.hash,
+        timestamp: item.signed.timestamp,
+        ttl: format!("{:?}", item.signed.ttl),
+    }]);
 
     Ok(())
 }
@@ -339,6 +341,53 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
             last_exec = Instant::now();
         }
     }
+
+    Ok(())
+}
+
+pub async fn import() -> Result<(), crate::Error> {
+    let manifest = Manifest::find()?;
+    let private_manifest = PrivateManifest::find()?;
+
+    #[derive(Serialize)]
+    struct KeyPair<'a> {
+        public_key: &'a str,
+        private_key: &'a str,
+    }
+
+    #[derive(Serialize)]
+    struct Request<'a> {
+        series_owner_name: &'a str,
+        keypair: KeyPair<'a>,
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://localhost:4510/_seriesowners"))
+        .json(&Request {
+            series_owner_name: &manifest.series.name,
+            keypair: KeyPair {
+                public_key: &manifest.series.public_key,
+                private_key: &private_manifest.private_key,
+            },
+        })
+        .send()
+        .await?;
+
+    let _debug_response = client
+        .post(format!("http://localhost:4510/_seriesowners"))
+        .json(&Request {
+            series_owner_name: &manifest.debug.name,
+            keypair: KeyPair {
+                public_key: &manifest.debug.public_key,
+                private_key: &private_manifest.private_key_debug,
+            },
+        })
+        .send()
+        .await?;
+
+    println!("Status: {}", response.status());
+    // println!("Response: {}", response.text().await?);
 
     Ok(())
 }

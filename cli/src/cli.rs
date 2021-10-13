@@ -7,6 +7,8 @@ use crate::commands;
 pub enum Cli {
     /// Starts a new collection in this folder.
     Init,
+    /// Imports a series from a `Samizdat.toml` in the current directory.
+    Import,
     /// Creates a new version (collection) of the content in this folder.
     Commit {
         /// Set a custom time-to-leave for this commit.
@@ -54,8 +56,6 @@ pub enum SeriesCommand {
     New { series_owner_name: String },
     /// Removes an existing locally owned series.
     Rm { series_owner_name: String },
-    /// Imports a series from a `Samizdat.toml` in the current directory.
-    Import {},
     /// Shows details on a particular locally owned series.
     Show { series_owner_name: String },
     /// Lists all loally owned series.
@@ -90,6 +90,7 @@ impl Cli {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
             Cli::Init => commands::init().await,
+            Cli::Import => commands::import().await,
             Cli::Commit { ttl, release } => commands::commit(ttl, *release).await,
             Cli::Watch { ttl } => commands::watch(ttl).await,
             Cli::Upload {
@@ -111,9 +112,6 @@ impl Cli {
             Cli::Series {
                 command: SeriesCommand::Rm { series_owner_name },
             } => commands::series::rm(series_owner_name.clone()).await,
-            Cli::Series {
-                command: SeriesCommand::Import {},
-            } => commands::series::import().await,
             Cli::Series {
                 command: SeriesCommand::Show { series_owner_name },
             } => commands::series::show(series_owner_name.clone()).await,

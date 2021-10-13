@@ -3,7 +3,7 @@ use std::io;
 
 #[derive(Debug, Fail)]
 pub enum Error {
-    #[fail(display = "message: {}", _0)]
+    #[fail(display = "{}", _0)]
     Message(String),
     #[fail(display = "http client error: {}", _0)]
     Reqwest(reqwest::Error),
@@ -44,5 +44,11 @@ impl From<toml::de::Error> for Error {
 impl From<notify::Error> for Error {
     fn from(e: notify::Error) -> Error {
         Error::NotifyError(e)
+    }
+}
+
+impl From<crate::Error> for String {
+    fn from(e: crate::Error) -> String {
+        e.to_string()
     }
 }
