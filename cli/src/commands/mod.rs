@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
 use crate::{Manifest, PrivateManifest};
+use crate::html::maybe_proxy_page;
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
@@ -168,7 +169,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
                     !is_release
                 ))
                 .header("Content-Type", content_type)
-                .body(fs::read(&path)?)
+                .body(maybe_proxy_page(path, &fs::read(&path)?).into_owned())
                 .send()
                 .await?;
             let hash = if response.status().is_success() {
@@ -212,11 +213,16 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     } else {
         manifest.debug.name
     };
+    let ttl = ttl.clone().or(if is_release {
+        manifest.series.ttl
+    } else {
+        manifest.debug.ttl
+    });
     
     #[derive(Serialize)]
-    struct CollectionRequest<'a> {
+    struct CollectionRequest {
         collection: String,
-        ttl: &'a Option<String>,
+        ttl: Option<String>,
     }
 
     let response = client
