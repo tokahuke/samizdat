@@ -45,8 +45,8 @@ impl Manifest {
         Err(last_error.expect("filename hierarchy not empty").into())
     }
 
-    pub fn run(&self) -> Result<(), crate::Error> {
-        self.build.run(&self.series.public_key)
+    pub fn run(&self, is_release: bool) -> Result<(), crate::Error> {
+        self.build.run(&self.series.public_key, is_release)
     }
 }
 
@@ -67,17 +67,24 @@ fn default_shell() -> String {
 pub struct Build {
     pub base: PathBuf,
     pub run: Option<String>,
+    pub run_debug: Option<String>,
     #[serde(default = "default_shell")]
     pub shell: String,
 }
 
 impl Build {
-    pub fn run(&self, public_key: &str) -> Result<(), crate::Error> {
+    pub fn run(&self, public_key: &str, is_release: bool) -> Result<(), crate::Error> {
+        let script = if is_release {
+            self.run.as_ref()
+        } else {
+            self.run.as_ref().or(self.run_debug.as_ref())
+        };
         let mut command = Command::new(&self.shell);
         command
             .arg("-c")
-            .arg(self.run.clone().unwrap_or_default())
-            .env("SAMIZDAT_PUBLIC_KEY", public_key);
+            .arg(script.map(String::as_str).unwrap_or_default())
+            .env("SAMIZDAT_PUBLIC_KEY", public_key)
+            .env("SAMIZDAT_RELEASE", if is_release { "release" } else { "" });
 
         println!("Running {:?}", command);
 

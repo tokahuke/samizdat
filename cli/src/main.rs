@@ -3,10 +3,10 @@
 mod cli;
 mod commands;
 mod error;
+mod html;
 mod logger;
 mod manifest;
 mod util;
-mod html;
 
 pub use error::Error;
 pub use manifest::{Manifest, PrivateManifest};

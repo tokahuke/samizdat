@@ -15,8 +15,8 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
-use crate::{Manifest, PrivateManifest};
 use crate::html::maybe_proxy_page;
+use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
@@ -147,7 +147,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
 
     let manifest = Manifest::find()?;
     let base = &manifest.build.base;
-    manifest.run()?;
+    manifest.run(is_release)?;
 
     let mut all_files = vec![];
     walk(base, &mut all_files)?;
@@ -218,7 +218,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     } else {
         manifest.debug.ttl
     });
-    
+
     #[derive(Serialize)]
     struct CollectionRequest {
         collection: String,
