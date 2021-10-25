@@ -47,7 +47,7 @@ impl ChannelManager {
         if let Some(multiplexed) = guard.remove(&peer_addr) {
             log::info!("found existing connection on recheck");
             if !multiplexed.is_closed() {
-                return Ok(multiplexed.clone());
+                return Ok(multiplexed);
             } else {
                 log::info!("existing connection already closed. Create a new one!");
             }
@@ -138,7 +138,7 @@ impl ChannelReceiver {
             header_stream
                 .read_to_end(max_len)
                 .await
-                .map(|msg| Some(msg))
+                .map(Some)
                 .map_err(read_error_to_io)
                 .map_err(crate::Error::from)
         } else {
@@ -148,10 +148,10 @@ impl ChannelReceiver {
         outcome
     }
 
-    pub fn recv_many<'a>(
-        &'a mut self,
+    pub fn recv_many(
+        &'_ mut self,
         max_len: usize,
-    ) -> impl 'a + Stream<Item = Result<Vec<u8>, crate::Error>> {
+    ) -> impl '_ + Stream<Item = Result<Vec<u8>, crate::Error>> {
         stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
             move |header_stream| async move {
                 header_stream

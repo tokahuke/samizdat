@@ -57,9 +57,7 @@ impl From<i64> for Hash {
     fn from(int: i64) -> Hash {
         let mut hash = Hash::default();
         let bytes = int.to_be_bytes();
-        for i in 0..8 {
-            hash.0[i] = bytes[i];
-        }
+        hash.0[..8].clone_from_slice(&bytes[..8]);
 
         hash
     }
@@ -122,7 +120,7 @@ impl From<Vec<Hash>> for MerkleTree {
                 .chunks(2)
                 .map(|chunk| match chunk {
                     [single] => single.rehash(&Hash::default()),
-                    [left, right] => left.rehash(&right),
+                    [left, right] => left.rehash(right),
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>()
@@ -151,6 +149,10 @@ impl MerkleTree {
 
     pub fn len(&self) -> usize {
         self.tree.last().expect("not empty").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn hashes(&self) -> &[Hash] {

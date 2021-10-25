@@ -6,7 +6,7 @@ use crate::Hash;
 use serde_derive::{Deserialize, Serialize};
 use std::iter::FromIterator;
 
-fn bits<'a>(hash: &'a Hash) -> impl 'a + DoubleEndedIterator<Item = Side> {
+fn bits(hash: &'_ Hash) -> impl '_ + DoubleEndedIterator<Item = Side> {
     hash.0.iter().flat_map(|byte| {
         (0..8).map(move |i| {
             if byte & (1 << i) != 0 {
@@ -62,7 +62,7 @@ impl Segment {
         Segment { slice, len }
     }
 
-    fn bits<'a>(&'a self) -> impl 'a + Iterator<Item = Side> {
+    fn bits(&'_ self) -> impl '_ + Iterator<Item = Side> {
         bits(&self.slice).take(self.len as usize)
     }
 
@@ -500,7 +500,7 @@ impl<'a> Iterator for Iter<'a> {
             }
         }
 
-        return None;
+        None
     }
 }
 

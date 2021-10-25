@@ -23,7 +23,7 @@ fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
 }
 
 pub async fn upload(
-    path: &PathBuf,
+    path: &Path,
     content_type: String,
     bookmark: bool,
     is_draft: bool,
@@ -112,7 +112,7 @@ pub async fn init() -> Result<(), crate::Error> {
 
 pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
-    fn walk(path: &PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             let subpath = entry.path();
@@ -128,7 +128,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
         Ok(())
     }
 
-    fn names_from_path(path: &PathBuf, base: &PathBuf) -> Vec<String> {
+    fn names_from_path(path: &Path, base: &Path) -> Vec<String> {
         let suffixed = path
             .strip_prefix(base)
             .unwrap()
@@ -136,7 +136,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
             .into_owned();
 
         let without_index = suffixed.trim_end_matches("index.html").to_owned();
-        let without_slash = without_index.trim_end_matches("/").to_owned();
+        let without_slash = without_index.trim_end_matches('/').to_owned();
 
         let mut names = vec![suffixed, without_index, without_slash];
         names.sort();
@@ -175,9 +175,9 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
             let hash = if response.status().is_success() {
                 response.text().await?
             } else {
-                return Err(crate::Error::Message(format!("")));
+                return Err("??".into()) as Result<_, crate::Error>;
             };
-            let names = names_from_path(path, &base);
+            let names = names_from_path(path, base);
 
             Ok((names, hash))
         })
@@ -369,7 +369,7 @@ pub async fn import() -> Result<(), crate::Error> {
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("http://localhost:4510/_seriesowners"))
+        .post("http://localhost:4510/_seriesowners")
         .json(&Request {
             series_owner_name: &manifest.series.name,
             keypair: KeyPair {
@@ -381,7 +381,7 @@ pub async fn import() -> Result<(), crate::Error> {
         .await?;
 
     let _debug_response = client
-        .post(format!("http://localhost:4510/_seriesowners"))
+        .post("http://localhost:4510/_seriesowners")
         .json(&Request {
             series_owner_name: &manifest.debug.name,
             keypair: KeyPair {

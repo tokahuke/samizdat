@@ -33,7 +33,7 @@ trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize
         let mut serialized_header = receiver
             .recv(MAX_HEADER_LENGTH)
             .await?
-            .ok_or_else(|| format!("channel dried"))?;
+            .ok_or("channel dried")?;
         cipher.decrypt(&mut serialized_header);
         let header: Self = bincode::deserialize(&serialized_header)?;
 

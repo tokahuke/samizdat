@@ -65,7 +65,7 @@ impl Node for NodeServer {
             }),
         );
 
-        return ResolutionResponse::FOUND;
+        ResolutionResponse::FOUND
     }
 
     async fn resolve_item(
@@ -116,7 +116,7 @@ impl Node for NodeServer {
             }),
         );
 
-        return ResolutionResponse::FOUND;
+        ResolutionResponse::FOUND
     }
 
     async fn resolve_latest(

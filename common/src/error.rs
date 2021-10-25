@@ -44,6 +44,12 @@ impl From<String> for Error {
     }
 }
 
+impl From<&'static str> for Error {
+    fn from(e: &'static str) -> Error {
+        Error::Message(e.to_string())
+    }
+}
+
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Error {
         Error::Db(e)

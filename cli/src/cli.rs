@@ -120,7 +120,7 @@ impl Cli {
             } => commands::series::list(series_owner_name).await,
             Cli::Collection {
                 command: CollectionCommand::Ls { collection },
-            } => commands::collection::ls(&collection).await,
+            } => commands::collection::ls(collection).await,
         }
     }
 }

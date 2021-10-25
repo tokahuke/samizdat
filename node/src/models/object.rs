@@ -298,7 +298,7 @@ impl ObjectRef {
 
         loop {
             // Extend buffer until (a) source stops (b) error (c) reaches limit.
-            while let Some(byte) = source.next() {
+            for byte in &mut source {
                 buffer.push(byte?);
 
                 if buffer.len() == CHUNK_SIZE {
@@ -384,7 +384,7 @@ impl ObjectRef {
 
             if maybe_header.is_none() {
                 let (_read, header) =
-                    ObjectHeader::read(buffer.iter().copied().map(|byte| Ok(byte)))?;
+                    ObjectHeader::read(buffer.iter().copied().map(Ok))?;
                 maybe_header = Some(header);
             }
 
@@ -400,7 +400,7 @@ impl ObjectRef {
         let hash = merkle_tree.root();
         let metadata = ObjectMetadata {
             hashes: merkle_tree.hashes().to_vec(),
-            header: maybe_header.ok_or_else(|| crate::Error::NoHeaderRead)?,
+            header: maybe_header.ok_or(crate::Error::NoHeaderRead)?,
             content_size,
         };
         let statistics = ObjectStatistics::new(content_size);
@@ -463,7 +463,7 @@ impl ObjectRef {
         };
 
         Ok(Some(ContentIter {
-            hashes: metadata.hashes.clone().into_iter(),
+            hashes: metadata.hashes.into_iter(),
             current_chunk: None,
             is_error: false,
         }))
@@ -496,7 +496,7 @@ impl ObjectRef {
         };
 
         Ok(Some(ChunkIter {
-            hashes: metadata.hashes.clone().into_iter(),
+            hashes: metadata.hashes.into_iter(),
             is_error: false,
         }))
     }

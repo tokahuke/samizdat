@@ -86,7 +86,7 @@ impl ConnectionManager {
                 log::info!("found expected conection {}", peer_addr);
                 Ok(connecting.await?)
             } else {
-                Err(format!("peer not expected").into()) as Result<_, crate::Error>
+                Err("peer not expected".into()) as Result<_, crate::Error>
             }
         };
 

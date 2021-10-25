@@ -24,7 +24,7 @@ impl TransferCipher {
 
         let hash_ext = extend(&content_hash.0);
         let key = Key::from_slice(&hash_ext);
-        let cipher = Aes256GcmSiv::new(&key);
+        let cipher = Aes256GcmSiv::new(key);
 
         let nonce = *Nonce::from_slice(&nonce[..12]);
 

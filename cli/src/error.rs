@@ -52,3 +52,9 @@ impl From<crate::Error> for String {
         e.to_string()
     }
 }
+
+impl From<&'static str> for Error {
+    fn from(e: &'static str) -> Error {
+        Error::Message(e.to_string())
+    }
+}

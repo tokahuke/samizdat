@@ -166,10 +166,10 @@ impl HubConnection {
 
         let candidates = match query_response {
             QueryResponse::Replayed => {
-                return Err(format!("hub has suspected replay attack").into())
+                return Err("hub has suspected replay attack".into())
             }
             QueryResponse::InternalError => {
-                return Err(format!("hub has experienced an internal error").into())
+                return Err("hub has experienced an internal error".into())
             }
             QueryResponse::Resolved { candidates } => candidates,
         };

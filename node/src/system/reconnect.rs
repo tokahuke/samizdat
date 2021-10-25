@@ -90,7 +90,7 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
     // }
 
     /// Gets the current active connection.
-    pub async fn get<'a>(&'a self) -> RwLockReadGuard<'a, T> {
+    pub async fn get(&'_ self) -> RwLockReadGuard<'_, T> {
         self.current.read().await
     }
 }

@@ -21,7 +21,7 @@ impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
         }
 
         let mut chunk = Vec::with_capacity(self.size);
-        while let Some(item) = self.it.next() {
+        for item in &mut self.it {
             match item {
                 Ok(item) => {
                     chunk.push(item);

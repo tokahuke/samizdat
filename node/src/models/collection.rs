@@ -63,7 +63,7 @@ impl Display for ItemPathBuf {
 
 impl ItemPathBuf {
     /// Transformes into a borrowed item path.
-    fn as_path<'a>(&'a self) -> ItemPath<'a> {
+    fn as_path(&self) -> ItemPath {
         ItemPath(self.0.as_ref().into())
     }
 
@@ -84,7 +84,7 @@ impl<'a> From<&'a str> for ItemPath<'a> {
 
 impl<'a> ItemPath<'a> {
     /// Retrieves the string representation of this path, in its canonical form.
-    pub fn as_str<'b: 'a>(&'a self) -> &'a str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -140,7 +140,7 @@ impl CollectionItem {
         }
     }
 
-    pub fn locator<'a>(&'a self) -> Locator<'a> {
+    pub fn locator(&self) -> Locator {
         Locator {
             collection: self.collection.clone(),
             name: self.name.as_path(),
@@ -242,7 +242,7 @@ impl CollectionRef {
                 nonce: rand::random(),
             },
             false,
-            inventory.as_bytes().into_iter().map(|&byte| Ok(byte)),
+            inventory.as_bytes().iter().map(|&byte| Ok(byte)),
         )?;
 
         // Note: this is the slow part of the process (by a long stretch)
@@ -306,16 +306,16 @@ impl CollectionRef {
         }
     }
 
-    pub fn list<'a>(&'a self) -> impl 'a + Iterator<Item = ItemPathBuf> {
+    pub fn list(&'_ self) -> impl '_ + Iterator<Item = ItemPathBuf> {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
             .map(move |(key, _)| {
                 ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..]))
             })
     }
 
-    pub fn list_objects<'a>(
-        &'a self,
-    ) -> impl 'a + Iterator<Item = Result<ObjectRef, crate::Error>> {
+    pub fn list_objects(
+        &'_ self,
+    ) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
         self.list().filter_map(move |name| {
             let locator = Locator {
                 collection: self.clone(),

@@ -144,7 +144,7 @@ pub struct Json<T>(pub T);
 
 impl<T: Serialize> Returnable for Json<T> {
     fn content_type(&self) -> Cow<str> {
-        Cow::Borrowed(&"application/json")
+        Cow::Borrowed("application/json")
     }
 
     fn status_code(&self) -> http::StatusCode {

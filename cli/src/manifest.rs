@@ -77,7 +77,7 @@ impl Build {
         let script = if is_release {
             self.run.as_ref()
         } else {
-            self.run.as_ref().or(self.run_debug.as_ref())
+            self.run.as_ref().or_else(|| self.run_debug.as_ref())
         };
         let mut command = Command::new(&self.shell);
         command
