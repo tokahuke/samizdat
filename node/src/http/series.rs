@@ -81,6 +81,7 @@ fn delete_series_owner(
         })
         .map(reply)
 }
+
 /// Gets information associates with a series owner
 fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {

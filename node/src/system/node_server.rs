@@ -125,18 +125,18 @@ impl Node for NodeServer {
         latest: Arc<LatestRequest>,
     ) -> Option<LatestResponse> {
         if let Some(series) = SeriesRef::find(&latest.key_riddle) {
-            match series.get_latest_fresh() {
+            let items = series.get_items();
+            match items.as_ref().map(|items| items.first()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,
-                Ok(Some(mut latest)) => {
+                Ok(Some(latest)) => {
                     let cipher_key = latest.public_key().hash();
                     let rand = Hash::rand();
                     let cipher = TransferCipher::new(&cipher_key, &rand);
-                    latest.erase_freshness();
 
                     Some(LatestResponse {
                         rand,
-                        series: cipher.encrypt_opaque(&latest),
+                        series: cipher.encrypt_opaque(latest),
                     })
                 }
                 Err(err) => {

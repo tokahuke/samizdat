@@ -126,7 +126,6 @@ impl SeriesOwner {
                 &self.keypair,
             ),
             public_key: Key::new(self.keypair.public),
-            freshness: chrono::Utc::now(),
             is_draft: self.is_draft,
         }
     }
@@ -139,8 +138,7 @@ impl SeriesOwner {
         let mut batch = WriteBatch::default();
 
         // But first, unbookmark all your old assets...
-        if let Some(item) = db().get_cf(Table::SeriesItems.get(), self.keypair.public)? {
-            let item: SeriesItem = bincode::deserialize(&item)?;
+        if let Some(item) = self.series().get_items()?.first() {
             for object in item.collection().list_objects() {
                 object?
                     .bookmark(BookmarkType::Reference)
@@ -224,6 +222,7 @@ impl SeriesRef {
         None
     }
 
+    /// Whether there is a local "series owner" for this series.
     pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
         for (_, owner) in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
@@ -236,33 +235,55 @@ impl SeriesRef {
         Ok(false)
     }
 
-    /// Returns the latest fresh collection in the local database _or_ the latest collection if the
-    /// series is locally owned.
-    pub fn get_latest_fresh(&self) -> Result<Option<SeriesItem>, crate::Error> {
-        let is_locally_owned = self.is_locally_owned()?;
+    /// Set this series as just recently refresh.
+    pub fn refresh(&self) -> Result<(), crate::Error> {
+        db().put_cf(
+            Table::SeresFreshnesses.get(),
+            self.key(),
+            bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
+        )?;
 
-        if let Some(value) = db().get_cf(Table::SeriesItems.get(), self.key())? {
-            let item: SeriesItem = bincode::deserialize(&value)?;
+        Ok(())
+    }
 
-            if is_locally_owned || item.is_fresh() {
-                Ok(Some(item))
+    /// Whether this series is still fresh, according to the latest time-to-leave.
+    pub fn is_fresh(&self) -> Result<bool, crate::Error> {
+        let is_fresh = if let Some(latest) = self.get_items()?.first() {
+            if let Some(freshness) = db().get_cf(Table::SeresFreshnesses.get(), self.key())? {
+                let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
+                let ttl =
+                    chrono::Duration::from_std(latest.signed.ttl).expect("can convert duration");
+
+                chrono::Utc::now() < freshness + ttl
             } else {
-                Ok(None)
+                false
             }
         } else {
-            Ok(None)
-        }
+            false
+        };
+
+        Ok(is_fresh)
     }
 
     /// Returns the latest collection in the local database, no matter the freshness or
     /// local ownership.
-    pub fn get_latest(&self) -> Result<Option<SeriesItem>, crate::Error> {
-        if let Some(value) = db().get_cf(Table::SeriesItems.get(), self.key())? {
-            let item: SeriesItem = bincode::deserialize(&value)?;
-            Ok(Some(item))
-        } else {
-            Ok(None)
-        }
+    ///
+    /// TODO: should return iterator, since normally only the latest items are important.
+    /// Although I regard this impl as safer, in a first moment.
+    pub fn get_items(&self) -> Result<Vec<SeriesItem>, crate::Error> {
+        let prefix = self.key();
+        let mut items = db()
+            .prefix_iterator_cf(Table::SeriesItems.get(), prefix)
+            .map(|(_key, value)| {
+                let item: SeriesItem = bincode::deserialize(&value)?;
+                Ok(item)
+            })
+            .collect::<Result<Vec<_>, crate::Error>>()?;
+
+        // Probably already sorted, but...
+        items.sort_unstable_by_key(|item| std::cmp::Reverse(item.timestamp()));
+
+        Ok(items)
     }
 
     pub fn advance(&self, series_item: &SeriesItem) -> Result<(), crate::Error> {
@@ -297,8 +318,6 @@ struct SeriesItemContent {
 pub struct SeriesItem {
     signed: Signed<SeriesItemContent>,
     public_key: Key,
-    /// Remember to clear this field when sending to the wire.
-    freshness: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
     is_draft: bool,
 }
@@ -321,34 +340,17 @@ impl SeriesItem {
     }
 
     #[inline(always)]
-    fn key(&self) -> &[u8] {
-        // let timestamp = self.signed.timestamp.timestamp_millis();
-        // [
-        //     self.public_key.as_bytes().as_ref(),
-        //     timestamp.to_be_bytes().as_ref(),
-        // ]
-        // .concat()
-        self.public_key.as_bytes()
+    fn key(&self) -> Vec<u8> {
+        [
+            self.public_key.as_bytes(),
+            &self.timestamp().timestamp().to_be_bytes(),
+        ]
+        .concat()
     }
 
-    pub fn erase_freshness(&mut self) {
-        self.freshness =
-            chrono::DateTime::from_utc(chrono::NaiveDateTime::from_timestamp(0, 0), chrono::Utc);
-    }
-
-    pub fn make_fresh(&mut self) {
-        self.freshness = chrono::Utc::now();
-    }
-
-    pub fn is_fresh(&self) -> bool {
-        chrono::Utc::now()
-            < self.freshness
-                + chrono::Duration::from_std(self.signed.ttl)
-                    .expect("can convert from std duration")
-    }
-
-    pub fn freshness(&self) -> chrono::DateTime<chrono::Utc> {
-        self.freshness
+    #[inline(always)]
+    pub fn timestamp(&self) -> chrono::DateTime<chrono::Utc> {
+        self.signed.timestamp
     }
 }
 

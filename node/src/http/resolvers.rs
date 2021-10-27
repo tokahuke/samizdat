@@ -132,33 +132,41 @@ pub async fn resolve_series(
     name: ItemPath<'_>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving series {}/{}", series, name.as_str());
-    if let Some(latest) = series.get_latest_fresh()? {
-        log::info!("Have a fresh result locally. Will resolve this item.");
-        let locator = latest.collection().locator_for(name);
-        Ok(resolve_item(locator).await?)
-    } else if series.is_locally_owned()? {
-        log::info!("Does not have a fresh result, but is owned. So, a result doesn't exist.");
-        let not_resolved = NotResolved {
-            message: format!("series {} is empty", series),
-        };
-        Ok(not_resolved.try_into())
-    } else if let Some(latest) = hubs().get_latest(&series).await {
-        log::info!("Does not have a fresh result, but is not owned locally. Query the network!");
-        series.advance(&latest)?;
-        let locator = latest.collection().locator_for(name);
-        Ok(resolve_item(locator).await?)
-    } else if let Some(mut latest) = series.get_latest()? {
-        log::info!("The not fresh result will have to do... Will resolve this item.");
-        // Refresh:
-        latest.make_fresh();
-        series.advance(&latest)?;
-        let locator = latest.collection().locator_for(name);
-        Ok(resolve_item(locator).await?)
-    } else {
-        log::info!("Not found!");
-        let not_resolved = NotResolved {
-            message: format!("series {} not found", series),
-        };
-        Ok(not_resolved.try_into())
+
+    log::info!("Ensuring series is fresh");
+    if !series.is_fresh()? {
+        log::info!("Series is not fresh. Ask the network");
+        if let Some(latest) = hubs().get_latest(&series).await {
+            log::info!("Found a series items (new or existing). Inserting");
+            series.advance(&latest)?;
+        }
+
+        log::info!("Seting series as fresh");
+        series.refresh()?;
     }
+
+    log::info!("Trying to find path in in each series item");
+    for item in series.get_items()? {
+        let locator = item.collection().locator_for(name.clone());
+
+        let maybe_item = if let Some(item) = locator.get()? {
+            log::info!("found item {} locally. Resolving object.", locator);
+            Some(item)
+        } else {
+            log::info!("item not found locally. Querying hubs.");
+            hubs().query(locator.hash(), QueryKind::Item).await;
+
+            locator.get()?
+        };
+
+        if let Some(item) = maybe_item {
+            return resolve_object(item.object()?, vec![]).await;
+        }
+    }
+
+    let not_resolved = NotResolved {
+        message: format!("item {}/{} not found", series, name.as_str()),
+    };
+
+    Ok(not_resolved.try_into())
 }

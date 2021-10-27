@@ -383,8 +383,7 @@ impl ObjectRef {
             hashes.push(chunk_hash);
 
             if maybe_header.is_none() {
-                let (_read, header) =
-                    ObjectHeader::read(buffer.iter().copied().map(Ok))?;
+                let (_read, header) = ObjectHeader::read(buffer.iter().copied().map(Ok))?;
                 maybe_header = Some(header);
             }
 
