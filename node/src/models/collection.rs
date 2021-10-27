@@ -73,7 +73,7 @@ impl ItemPathBuf {
 }
 
 /// A borrowed item path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ItemPath<'a>(Cow<'a, str>);
 
 impl<'a> From<&'a str> for ItemPath<'a> {
@@ -313,9 +313,7 @@ impl CollectionRef {
             })
     }
 
-    pub fn list_objects(
-        &'_ self,
-    ) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
+    pub fn list_objects(&'_ self) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
         self.list().filter_map(move |name| {
             let locator = Locator {
                 collection: self.clone(),

@@ -76,6 +76,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::CollectionItemLocators,
             Table::Series,
             Table::SeriesItems,
+            Table::SeresFreshnesses,
             Table::SeriesOwners,
             Table::RecentNonces,
         ]
@@ -125,6 +126,8 @@ pub enum Table {
     Series,
     /// The list of all most common association between collections and series.
     SeriesItems,
+    /// The last refresh dates from each series.
+    SeresFreshnesses,
     /// The list of series owners: pieces of information which allows the
     /// publication of a new version of a series in the network.
     SeriesOwners,

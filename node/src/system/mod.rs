@@ -165,9 +165,7 @@ impl HubConnection {
             .await?;
 
         let candidates = match query_response {
-            QueryResponse::Replayed => {
-                return Err("hub has suspected replay attack".into())
-            }
+            QueryResponse::Replayed => return Err("hub has suspected replay attack".into()),
             QueryResponse::InternalError => {
                 return Err("hub has experienced an internal error".into())
             }
@@ -238,7 +236,7 @@ impl HubConnection {
             }
 
             if let Some(most_recent) = most_recent.as_mut() {
-                if candidate_item.freshness() > most_recent.freshness() {
+                if candidate_item.timestamp() > most_recent.timestamp() {
                     *most_recent = candidate_item;
                 }
             } else {
@@ -246,12 +244,7 @@ impl HubConnection {
             }
         }
 
-        if let Some(mut most_recent) = most_recent {
-            most_recent.make_fresh();
-            Ok(Some(most_recent))
-        } else {
-            Ok(None)
-        }
+        Ok(most_recent)
     }
 }
 
