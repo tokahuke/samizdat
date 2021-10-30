@@ -31,8 +31,8 @@ pub async fn upload(
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
-            "http://localhost:4510/_objects?bookmark={}&is-draft={}",
-            bookmark, is_draft,
+            "{}/_objects?bookmark={}&is-draft={}",
+            crate::server(), bookmark, is_draft,
         ))
         .header("Content-Type", content_type)
         .body(fs::read(path)?)
@@ -57,14 +57,14 @@ pub async fn init() -> Result<(), crate::Error> {
 
     let client = reqwest::Client::new();
     let response = client
-        .post("http://localhost:4510/_seriesowners")
+        .post(format!("{}/_seriesowners", crate::server()))
         .json(&Request {
             series_owner_name: &name,
         })
         .send()
         .await?;
     let response_debug = client
-        .post("http://localhost:4510/_seriesowners")
+        .post(format!("{}/_seriesowners", crate::server()))
         .json(&Request {
             series_owner_name: &debug_name,
         })
@@ -165,7 +165,8 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
                 .to_string();
             let response = client
                 .post(format!(
-                    "http://localhost:4510/_objects?is_draft={}",
+                    "{}/_objects?is_draft={}",
+                    crate::server(),
                     !is_release
                 ))
                 .header("Content-Type", content_type)
@@ -197,7 +198,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     }
 
     let response = client
-        .post("http://localhost:4510/_collections")
+        .post(format!("{}/_collections", crate::server()))
         .json(&Request {
             hashes,
             is_draft: !is_release,
@@ -227,8 +228,8 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
 
     let response = client
         .post(format!(
-            "http://localhost:4510/_seriesowners/{}/collections",
-            series,
+            "{}/_seriesowners/{}/collections",
+            crate::server(), series,
         ))
         .json(&CollectionRequest { collection, ttl })
         .send()
@@ -369,7 +370,7 @@ pub async fn import() -> Result<(), crate::Error> {
 
     let client = reqwest::Client::new();
     let response = client
-        .post("http://localhost:4510/_seriesowners")
+        .post(format!("{}/_seriesowners", crate::server()))
         .json(&Request {
             series_owner_name: &manifest.series.name,
             keypair: KeyPair {
@@ -381,7 +382,7 @@ pub async fn import() -> Result<(), crate::Error> {
         .await?;
 
     let _debug_response = client
-        .post("http://localhost:4510/_seriesowners")
+        .post(format!("{}/_seriesowners", crate::server()))
         .json(&Request {
             series_owner_name: &manifest.debug.name,
             keypair: KeyPair {

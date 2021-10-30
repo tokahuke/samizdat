@@ -10,10 +10,11 @@ mod util;
 
 pub use error::Error;
 pub use manifest::{Manifest, PrivateManifest};
+pub use cli::server;
 
 async fn validate_node_is_up() -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
-    let response = client.get("http://localhost:4510/").send().await;
+    let response = client.get(format!("{}/", crate::server())).send().await;
 
     if let Err(error) = response {
         if error.is_connect() {
@@ -33,7 +34,7 @@ async fn main() -> Result<(), String> {
 
     cli::init_cli()?;
     validate_node_is_up().await?;
-    cli::cli().execute().await?;
+    cli::cli().command.execute().await?;
 
     Ok(())
 }

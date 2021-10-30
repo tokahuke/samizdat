@@ -195,7 +195,7 @@ impl CollectionItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionRef {
-    pub hash: Hash,
+    hash: Hash,
 }
 
 impl Dropable for CollectionRef {
@@ -213,6 +213,10 @@ impl Dropable for CollectionRef {
 impl CollectionRef {
     pub fn new(hash: Hash) -> CollectionRef {
         CollectionRef { hash }
+    }
+
+    pub fn hash(&self) -> Hash {
+        self.hash
     }
 
     #[cfg(test)]
@@ -341,6 +345,10 @@ impl<'a> Locator<'a> {
         self.collection
             .hash
             .rehash(&Hash::build(self.name.0.as_ref()))
+    }
+
+    pub fn collection(&self) -> CollectionRef {
+        self.collection.clone()
     }
 
     pub fn path(&self) -> Vec<u8> {

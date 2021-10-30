@@ -73,13 +73,14 @@ pub async fn resolve_object(
             content_size: metadata.content_size,
             ext_headers: ext_headers
                 .into_iter()
-                .chain(vec![
+                .chain([
                     ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
                     ("X-Samizdat-Is-Draft", metadata.header.is_draft.to_string()),
                     (
                         "X-Samizdat-Created-At",
                         metadata.header.created_at.to_string(),
                     ),
+                    ("X-Samizdat-Object", object.hash().to_string())
                 ])
                 .collect(),
             body: Body::wrap_stream(stream::iter(
@@ -101,6 +102,7 @@ pub async fn resolve_object(
 /// necessary.
 pub async fn resolve_item(
     locator: Locator<'_>,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving item {}", locator);
 
@@ -115,7 +117,9 @@ pub async fn resolve_item(
     };
 
     if let Some(item) = maybe_item {
-        resolve_object(item.object()?, vec![]).await
+        resolve_object(item.object()?, ext_headers.into_iter().chain([
+            ("X-Samizdat-Collection", locator.collection().hash().to_string())
+        ])).await
     } else {
         let not_resolved = NotResolved {
             message: format!("item {} not found", locator),
@@ -130,6 +134,7 @@ pub async fn resolve_item(
 pub async fn resolve_series(
     series: SeriesRef,
     name: ItemPath<'_>,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving series {}/{}", series, name.as_str());
 
@@ -137,17 +142,18 @@ pub async fn resolve_series(
     if !series.is_fresh()? {
         log::info!("Series is not fresh. Ask the network");
         if let Some(latest) = hubs().get_latest(&series).await {
-            log::info!("Found a series items (new or existing). Inserting");
+            log::info!("Found an edition (new or existing). Inserting");
             series.advance(&latest)?;
         }
 
-        log::info!("Seting series as fresh");
+        log::info!("Setting series as fresh");
         series.refresh()?;
     }
 
-    log::info!("Trying to find path in in each series item");
-    for item in series.get_items()? {
-        let locator = item.collection().locator_for(name.clone());
+    log::info!("Trying to find path in each edition");
+    for edition in series.get_editions()? {
+        log::info!("Trying collection {:?}", edition.collection());
+        let locator = edition.collection().locator_for(name.clone());
 
         let maybe_item = if let Some(item) = locator.get()? {
             log::info!("found item {} locally. Resolving object.", locator);
@@ -160,7 +166,10 @@ pub async fn resolve_series(
         };
 
         if let Some(item) = maybe_item {
-            return resolve_object(item.object()?, vec![]).await;
+            return resolve_object(item.object()?, ext_headers.into_iter().chain([
+                ("X-Samizdat-Collection", locator.collection().hash().to_string()),
+                ("X-Samizdat-Series", series.public_key().to_string())
+            ])).await;
         }
     }
 

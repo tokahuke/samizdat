@@ -24,7 +24,7 @@ use samizdat_common::rpc::*;
 use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cli;
-use crate::models::{ObjectRef, SeriesItem, SeriesRef};
+use crate::models::{ObjectRef, Edition, SeriesRef};
 
 use node_server::NodeServer;
 use transport::{ChannelManager, ConnectionManager};
@@ -214,8 +214,8 @@ impl HubConnection {
         outcome
     }
 
-    /// Tries to resolve the latest item of a given series.
-    pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<SeriesItem>, crate::Error> {
+    /// Tries to resolve the latest edition of a given series.
+    pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = ContentRiddle::new(&series.public_key.hash());
         let inner = self.inner.get().await;
 
@@ -224,23 +224,23 @@ impl HubConnection {
             .get_latest(context::current(), LatestRequest { key_riddle })
             .await?;
 
-        let mut most_recent: Option<SeriesItem> = None;
+        let mut most_recent: Option<Edition> = None;
 
         for candidate in response {
             let cipher = TransferCipher::new(&series.public_key.hash(), &candidate.rand);
-            let candidate_item: SeriesItem = candidate.series.decrypt_with(&cipher)?;
+            let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
-            if !candidate_item.is_valid() {
-                log::warn!("received invalid candidate item: {:?}", candidate_item);
+            if !candidate_edition.is_valid() {
+                log::warn!("received invalid candidate edition: {:?}", candidate_edition);
                 continue;
             }
 
             if let Some(most_recent) = most_recent.as_mut() {
-                if candidate_item.timestamp() > most_recent.timestamp() {
-                    *most_recent = candidate_item;
+                if candidate_edition.timestamp() > most_recent.timestamp() {
+                    *most_recent = candidate_edition;
                 }
             } else {
-                most_recent = Some(candidate_item);
+                most_recent = Some(candidate_edition);
             }
         }
 
@@ -296,8 +296,8 @@ impl Hubs {
         None
     }
 
-    /// Tries to resolve the latest item of a given series.
-    pub async fn get_latest(&self, series: &SeriesRef) -> Option<SeriesItem> {
+    /// Tries to resolve the latest edition of a given series.
+    pub async fn get_latest(&self, series: &SeriesRef) -> Option<Edition> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move { (hub.name, hub.get_latest(series).await) })
             .buffer_unordered(cli().max_parallel_hubs);

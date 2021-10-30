@@ -19,7 +19,7 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         post_series_owner(),
         delete_series_owner(),
         post_series(),
-        get_item_by_series()
+        get_edition()
     )
 }
 
@@ -106,7 +106,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .map(reply)
 }
 
-/// Pushes a new colletion to the series owner, creating a new series item.
+/// Pushes a new colletion to the series owner, creating a new edition.
 fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
@@ -133,14 +133,14 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 
 /// Gets the content of a collection item using the series public key. This will give the
 /// best-effort latest version for this item.
-fn get_item_by_series(
+fn get_edition(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
         .and(warp::get())
         .and_then(|series_key: Key, name: Tail| async move {
             let series = SeriesRef::new(series_key);
-            Ok(resolve_series(series, name.as_str().into()).await?) as Result<_, warp::Rejection>
+            Ok(resolve_series(series, name.as_str().into(), []).await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

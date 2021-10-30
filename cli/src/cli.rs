@@ -4,7 +4,15 @@ use structopt::StructOpt;
 use crate::commands;
 
 #[derive(Debug, StructOpt)]
-pub enum Cli {
+pub struct Cli {
+    #[structopt(long, short, env, default_value = "4510")]
+    pub port: u16,
+    #[structopt(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, StructOpt)]
+pub enum Command {
     /// Starts a new collection in this folder.
     Init,
     /// Imports a series from a `Samizdat.toml` in the current directory.
@@ -86,14 +94,18 @@ pub fn cli<'a>() -> &'a Cli {
     unsafe { CLI.as_ref().expect("cli not initialized") }
 }
 
-impl Cli {
+pub fn server() -> String {
+    format!("http://localhost:{}", cli().port)
+}
+
+impl Command {
     pub async fn execute(&self) -> Result<(), crate::Error> {
         match self {
-            Cli::Init => commands::init().await,
-            Cli::Import => commands::import().await,
-            Cli::Commit { ttl, release } => commands::commit(ttl, *release).await,
-            Cli::Watch { ttl } => commands::watch(ttl).await,
-            Cli::Upload {
+            Command::Init => commands::init().await,
+            Command::Import => commands::import().await,
+            Command::Commit { ttl, release } => commands::commit(ttl, *release).await,
+            Command::Watch { ttl } => commands::watch(ttl).await,
+            Command::Upload {
                 file,
                 content_type,
                 no_bookmark,
@@ -106,19 +118,19 @@ impl Cli {
                 });
                 commands::upload(file, content_type, !no_bookmark, *draft).await
             }
-            Cli::Series {
+            Command::Series {
                 command: SeriesCommand::New { series_owner_name },
             } => commands::series::new(series_owner_name.clone()).await,
-            Cli::Series {
+            Command::Series {
                 command: SeriesCommand::Rm { series_owner_name },
             } => commands::series::rm(series_owner_name.clone()).await,
-            Cli::Series {
+            Command::Series {
                 command: SeriesCommand::Show { series_owner_name },
             } => commands::series::show(series_owner_name.clone()).await,
-            Cli::Series {
+            Command::Series {
                 command: SeriesCommand::Ls { series_owner_name },
             } => commands::series::list(series_owner_name).await,
-            Cli::Collection {
+            Command::Collection {
                 command: CollectionCommand::Ls { collection },
             } => commands::collection::ls(collection).await,
         }

@@ -115,10 +115,10 @@ impl SeriesOwner {
         }
     }
 
-    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>) -> SeriesItem {
-        SeriesItem {
+    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>) -> Edition {
+        Edition {
             signed: Signed::new(
-                SeriesItemContent {
+                EditionContent {
                     collection,
                     timestamp: chrono::Utc::now().trunc_subsecs(0),
                     ttl: ttl.unwrap_or(self.default_ttl),
@@ -134,12 +134,12 @@ impl SeriesOwner {
         &self,
         collection: CollectionRef,
         ttl: Option<Duration>,
-    ) -> Result<SeriesItem, crate::Error> {
+    ) -> Result<Edition, crate::Error> {
         let mut batch = WriteBatch::default();
 
         // But first, unbookmark all your old assets...
-        if let Some(item) = self.series().get_items()?.first() {
-            for object in item.collection().list_objects() {
+        if let Some(edition) = self.series().get_editions()?.first() {
+            for object in edition.collection().list_objects() {
                 object?
                     .bookmark(BookmarkType::Reference)
                     .unmark_with(&mut batch);
@@ -153,17 +153,17 @@ impl SeriesOwner {
                 .mark_with(&mut batch);
         }
 
-        let item = self.sign(collection, ttl);
+        let edition = self.sign(collection, ttl);
 
         batch.put_cf(
-            Table::SeriesItems.get(),
-            item.key(),
-            bincode::serialize(&item).expect("can serialize"),
+            Table::Editions.get(),
+            edition.key(),
+            bincode::serialize(&edition).expect("can serialize"),
         );
 
         db().write(batch)?;
 
-        Ok(item)
+        Ok(edition)
     }
 }
 
@@ -180,7 +180,7 @@ impl Display for SeriesRef {
 
 impl Dropable for SeriesRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        batch.delete_cf(Table::SeriesItems.get(), self.key());
+        batch.delete_cf(Table::Editions.get(), self.key());
         batch.delete_cf(Table::Series.get(), self.key());
 
         Ok(())
@@ -190,6 +190,10 @@ impl Dropable for SeriesRef {
 impl SeriesRef {
     pub fn new(public_key: Key) -> SeriesRef {
         SeriesRef { public_key }
+    }
+
+    pub fn public_key(&self) -> Key {
+        self.public_key.clone()
     }
 
     pub fn key(&self) -> &[u8] {
@@ -248,7 +252,7 @@ impl SeriesRef {
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh(&self) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_items()?.first() {
+        let is_fresh = if let Some(latest) = self.get_editions()?.first() {
             if let Some(freshness) = db().get_cf(Table::SeresFreshnesses.get(), self.key())? {
                 let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
                 let ttl =
@@ -268,37 +272,37 @@ impl SeriesRef {
     /// Returns the latest collection in the local database, no matter the freshness or
     /// local ownership.
     ///
-    /// TODO: should return iterator, since normally only the latest items are important.
+    /// TODO: should return iterator, since normally only the latest editions are important.
     /// Although I regard this impl as safer, in a first moment.
-    pub fn get_items(&self) -> Result<Vec<SeriesItem>, crate::Error> {
+    pub fn get_editions(&self) -> Result<Vec<Edition>, crate::Error> {
         let prefix = self.key();
-        let mut items = db()
-            .prefix_iterator_cf(Table::SeriesItems.get(), prefix)
+        let mut editions = db()
+            .prefix_iterator_cf(Table::Editions.get(), prefix)
             .map(|(_key, value)| {
-                let item: SeriesItem = bincode::deserialize(&value)?;
-                Ok(item)
+                let edition: Edition = bincode::deserialize(&value)?;
+                Ok(edition)
             })
             .collect::<Result<Vec<_>, crate::Error>>()?;
 
         // Probably already sorted, but...
-        items.sort_unstable_by_key(|item| std::cmp::Reverse(item.timestamp()));
+        editions.sort_unstable_by_key(|edition| std::cmp::Reverse(edition.timestamp()));
 
-        Ok(items)
+        Ok(editions)
     }
 
-    pub fn advance(&self, series_item: &SeriesItem) -> Result<(), crate::Error> {
-        if !series_item.is_valid() {
-            return Err(crate::Error::InvalidSeriesItem);
+    pub fn advance(&self, edition: &Edition) -> Result<(), crate::Error> {
+        if !edition.is_valid() {
+            return Err(crate::Error::InvalidEdition);
         }
 
-        if self.public_key != series_item.public_key {
+        if self.public_key != edition.public_key {
             return Err(crate::Error::DifferentePublicKeys);
         }
 
         db().put_cf(
-            Table::SeriesItems.get(),
-            series_item.key(),
-            bincode::serialize(&series_item).expect("can serialize"),
+            Table::Editions.get(),
+            edition.key(),
+            bincode::serialize(&edition).expect("can serialize"),
         )?;
 
         // TODO: do some cleanup on the old values.
@@ -308,21 +312,21 @@ impl SeriesRef {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct SeriesItemContent {
+struct EditionContent {
     collection: CollectionRef,
     timestamp: chrono::DateTime<chrono::Utc>,
     ttl: Duration,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SeriesItem {
-    signed: Signed<SeriesItemContent>,
+pub struct Edition {
+    signed: Signed<EditionContent>,
     public_key: Key,
     #[serde(default)]
     is_draft: bool,
 }
 
-impl SeriesItem {
+impl Edition {
     pub fn collection(&self) -> CollectionRef {
         self.signed.collection.clone()
     }
@@ -365,19 +369,19 @@ fn generate_series_ownership() {
 }
 
 #[test]
-fn validate_series_item() {
+fn validate_edition() {
     let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
     let _series = owner.series();
 
     let current_collection = CollectionRef::rand();
 
-    let series_item = owner.sign(current_collection, None);
+    let edition = owner.sign(current_collection, None);
 
-    assert!(series_item.is_valid())
+    assert!(edition.is_valid())
 }
 
 #[test]
-fn not_validate_series_item() {
+fn not_validate_edition() {
     let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
 
     let other_owner =
@@ -386,8 +390,8 @@ fn not_validate_series_item() {
 
     let current_collection = CollectionRef::rand();
 
-    let mut series_item = owner.sign(current_collection, None);
-    series_item.public_key = other_series.public_key;
+    let mut edition = owner.sign(current_collection, None);
+    edition.public_key = other_series.public_key;
 
-    assert!(!series_item.is_valid())
+    assert!(!edition.is_valid())
 }

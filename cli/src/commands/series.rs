@@ -13,7 +13,7 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
 
     let client = reqwest::Client::new();
     let response = client
-        .post("http://localhost:4510/_seriesowners")
+        .post(format!("{}/_seriesowners", crate::server()))
         .json(&Request {
             series_owner_name: &*series_name,
         })
@@ -30,8 +30,8 @@ pub async fn rm(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .delete(format!(
-            "http://localhost:4510/_seriesowners/{}",
-            series_name
+            "{}/_seriesowners/{}",
+            crate::server(), series_name
         ))
         .send()
         .await?;
@@ -45,8 +45,8 @@ pub async fn show(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!(
-            "http://localhost:4510/_seriesowners/{}",
-            series_name
+            "{}/_seriesowners/{}",
+            crate::server(), series_name
         ))
         .send()
         .await?;
@@ -66,7 +66,7 @@ pub async fn list(series_owner_name: &Option<String>) -> Result<(), crate::Error
     pub async fn series_list_all() -> Result<(), crate::Error> {
         let client = reqwest::Client::new();
         let response = client
-            .get("http://localhost:4510/_seriesowners")
+            .get(format!("{}/_seriesowners", crate::server()))
             .send()
             .await?;
 
