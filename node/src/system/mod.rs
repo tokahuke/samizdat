@@ -24,7 +24,7 @@ use samizdat_common::rpc::*;
 use samizdat_common::{ContentRiddle, Hash};
 
 use crate::cli;
-use crate::models::{ObjectRef, Edition, SeriesRef};
+use crate::models::{Edition, ObjectRef, SeriesRef};
 
 use node_server::NodeServer;
 use transport::{ChannelManager, ConnectionManager};
@@ -231,7 +231,10 @@ impl HubConnection {
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
             if !candidate_edition.is_valid() {
-                log::warn!("received invalid candidate edition: {:?}", candidate_edition);
+                log::warn!(
+                    "received invalid candidate edition: {:?}",
+                    candidate_edition
+                );
                 continue;
             }
 

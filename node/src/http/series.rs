@@ -133,14 +133,14 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 
 /// Gets the content of a collection item using the series public key. This will give the
 /// best-effort latest version for this item.
-fn get_edition(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn get_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
         .and(warp::get())
         .and_then(|series_key: Key, name: Tail| async move {
             let series = SeriesRef::new(series_key);
-            Ok(resolve_series(series, name.as_str().into(), []).await?) as Result<_, warp::Rejection>
+            Ok(resolve_series(series, name.as_str().into(), []).await?)
+                as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

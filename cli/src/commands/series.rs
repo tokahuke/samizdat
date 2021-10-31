@@ -29,10 +29,7 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
 pub async fn rm(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
-        .delete(format!(
-            "{}/_seriesowners/{}",
-            crate::server(), series_name
-        ))
+        .delete(format!("{}/_seriesowners/{}", crate::server(), series_name))
         .send()
         .await?;
 
@@ -44,10 +41,7 @@ pub async fn rm(series_name: String) -> Result<(), crate::Error> {
 pub async fn show(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!(
-            "{}/_seriesowners/{}",
-            crate::server(), series_name
-        ))
+        .get(format!("{}/_seriesowners/{}", crate::server(), series_name))
         .send()
         .await?;
 

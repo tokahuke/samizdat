@@ -125,8 +125,8 @@ impl Node for NodeServer {
         latest: Arc<LatestRequest>,
     ) -> Option<LatestResponse> {
         if let Some(series) = SeriesRef::find(&latest.key_riddle) {
-            let items = series.get_items();
-            match items.as_ref().map(|items| items.first()) {
+            let editions = series.get_editions();
+            match editions.as_ref().map(|editions| editions.first()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,
                 Ok(Some(latest)) => {

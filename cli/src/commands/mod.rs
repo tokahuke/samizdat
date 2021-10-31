@@ -32,7 +32,9 @@ pub async fn upload(
     let response = client
         .post(format!(
             "{}/_objects?bookmark={}&is-draft={}",
-            crate::server(), bookmark, is_draft,
+            crate::server(),
+            bookmark,
+            is_draft,
         ))
         .header("Content-Type", content_type)
         .body(fs::read(path)?)
@@ -229,7 +231,8 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     let response = client
         .post(format!(
             "{}/_seriesowners/{}/collections",
-            crate::server(), series,
+            crate::server(),
+            series,
         ))
         .json(&CollectionRequest { collection, ttl })
         .send()

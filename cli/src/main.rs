@@ -8,9 +8,9 @@ mod logger;
 mod manifest;
 mod util;
 
+pub use cli::server;
 pub use error::Error;
 pub use manifest::{Manifest, PrivateManifest};
-pub use cli::server;
 
 async fn validate_node_is_up() -> Result<(), crate::Error> {
     let client = reqwest::Client::new();

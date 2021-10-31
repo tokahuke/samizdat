@@ -8,6 +8,7 @@ use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::time::{sleep, Instant};
+use serde_derive::{Serialize, Deserialize};
 
 use samizdat_common::heap_entry::HeapEntry;
 use samizdat_common::Hash;
@@ -17,6 +18,7 @@ use crate::db::{db, Table};
 use crate::models::{CollectionItem, Dropable, ObjectRef, ObjectStatistics, UsePrior};
 
 /// Status for a vacuum task.
+#[derive(Debug, Serialize, Deserialize)]
 pub enum VacuumStatus {
     /// Storage is within allowed parameters.
     Unnecessary,
@@ -67,7 +69,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // Prune until you get under the threshold.
     let mut status = VacuumStatus::Done;
     let mut dropped = BTreeSet::new();
-    while total_size > cli().max_storage * 1_000_000 {
+    while total_size >= cli().max_storage * 1_000_000 {
         if let Some(HeapEntry {
             content: (key, size),
             ..
@@ -84,6 +86,8 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
             break;
         }
     }
+
+    log::debug!("to drop: {:#?}", dropped);
 
     // Prune items:
     for (_, value) in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {

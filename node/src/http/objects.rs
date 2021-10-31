@@ -63,7 +63,8 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and_then(async_reply)
 }
 
-/// Explicitly deletes an object from the database.
+/// Explicitly deletes an object from the local database. This does not have the
+/// effect of deleting it from the whole network. It only clears a local buffer.
 fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
         .and(warp::delete())

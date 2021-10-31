@@ -97,6 +97,7 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
         objects::api(),
         collections::api(),
         series::api(),
+        post_vacuum(),
     )
 }
 
@@ -120,4 +121,13 @@ pub fn general_redirect(
                 Err(warp::reject::reject())
             }
         })
+}
+
+/// Triggers a manual vacuum round.
+pub fn post_vacuum(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::post()
+        .and(warp::path!("_vacuum"))
+        .map(|| crate::vacuum::vacuum().map(returnable::Json))
+        .map(reply)
 }

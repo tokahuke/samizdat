@@ -80,7 +80,7 @@ pub async fn resolve_object(
                         "X-Samizdat-Created-At",
                         metadata.header.created_at.to_string(),
                     ),
-                    ("X-Samizdat-Object", object.hash().to_string())
+                    ("X-Samizdat-Object", object.hash().to_string()),
                 ])
                 .collect(),
             body: Body::wrap_stream(stream::iter(
@@ -117,9 +117,14 @@ pub async fn resolve_item(
     };
 
     if let Some(item) = maybe_item {
-        resolve_object(item.object()?, ext_headers.into_iter().chain([
-            ("X-Samizdat-Collection", locator.collection().hash().to_string())
-        ])).await
+        resolve_object(
+            item.object()?,
+            ext_headers.into_iter().chain([(
+                "X-Samizdat-Collection",
+                locator.collection().hash().to_string(),
+            )]),
+        )
+        .await
     } else {
         let not_resolved = NotResolved {
             message: format!("item {} not found", locator),
@@ -166,10 +171,17 @@ pub async fn resolve_series(
         };
 
         if let Some(item) = maybe_item {
-            return resolve_object(item.object()?, ext_headers.into_iter().chain([
-                ("X-Samizdat-Collection", locator.collection().hash().to_string()),
-                ("X-Samizdat-Series", series.public_key().to_string())
-            ])).await;
+            return resolve_object(
+                item.object()?,
+                ext_headers.into_iter().chain([
+                    (
+                        "X-Samizdat-Collection",
+                        locator.collection().hash().to_string(),
+                    ),
+                    ("X-Samizdat-Series", series.public_key().to_string()),
+                ]),
+            )
+            .await;
         }
     }
 

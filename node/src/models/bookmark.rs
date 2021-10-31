@@ -35,7 +35,12 @@ impl Bookmark {
     }
 
     pub fn is_marked(&self) -> Result<bool, crate::Error> {
-        Ok(db().get_cf(Table::Bookmarks.get(), self.key())?.is_some())
+        let maybe_key = db().get_cf(Table::Bookmarks.get(), self.key())?;
+        let key: MergeOperation = maybe_key
+            .map(|key| bincode::deserialize(&key))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(key.eval_on_zero() != 0)
     }
 
     pub fn mark_with(&self, batch: &mut WriteBatch) {

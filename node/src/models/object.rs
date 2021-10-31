@@ -249,7 +249,8 @@ impl ObjectRef {
     ///
     /// This function has no effect if the object does not exist.
     ///
-    /// TODO: current impl allows for TOCTOU.
+    /// TODO: current impl allows for TOCTOU. Need transactions, which are not exposed in the
+    /// Rust API as of oct 2021.
     pub fn touch(&self) -> Result<(), crate::Error> {
         if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
             let mut statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
@@ -514,11 +515,10 @@ impl ObjectRef {
     /// does not exist in the database, this function returns `Ok(false)`. You need to further
     /// check if the object actually exists.
     pub fn is_bookmarked(&self) -> Result<bool, crate::Error> {
-        // TODO: where is iterator error?
-        Ok(db()
-            .prefix_iterator_cf(Table::Bookmarks.get(), self.hash)
-            .next()
-            .is_some())
+        let reference = Bookmark::new(BookmarkType::Reference, self.clone());
+        let user = Bookmark::new(BookmarkType::User, self.clone());
+
+        Ok(reference.is_marked()? || user.is_marked()?)
     }
 
     /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the

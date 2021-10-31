@@ -145,9 +145,9 @@ impl Table {
     }
 
     /// Merge operator for the column family, if any.
-    fn merge_operator(self) -> Option<(MergeFunction, MergeFunction)> {
+    fn merge_operator(self) -> Option<MergeFunction> {
         match self {
-            Table::Bookmarks => Some((MergeOperation::partial_merge, MergeOperation::full_merge)),
+            Table::Bookmarks => Some(MergeOperation::full_merge),
             _ => None,
         }
     }
@@ -157,8 +157,8 @@ impl Table {
         let mut column_opts = rocksdb::Options::default();
         let name = self.name();
 
-        if let Some((partial, full)) = self.merge_operator() {
-            column_opts.set_merge_operator(&name, partial, full)
+        if let Some(operator) = self.merge_operator() {
+            column_opts.set_merge_operator_associative(&name, operator);
         }
 
         rocksdb::ColumnFamilyDescriptor::new(self.name(), column_opts)
@@ -173,7 +173,7 @@ impl Table {
 }
 
 /// Possible merge operations
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MergeOperation {
     /// Increments an `i16` key by some number.
     Increment(i16),
@@ -181,9 +181,15 @@ pub enum MergeOperation {
     Set(i16),
 }
 
+impl Default for MergeOperation {
+    fn default() -> MergeOperation {
+        MergeOperation::Increment(0)
+    }
+}
+
 impl MergeOperation {
     /// Evalues the resulting operation from successive operations.
-    fn associative(&self, other: &Self) -> MergeOperation {
+    fn associative(self, other: Self) -> MergeOperation {
         match (self, other) {
             (MergeOperation::Increment(inc1), MergeOperation::Increment(inc2)) => {
                 MergeOperation::Increment(inc1 + inc2)
@@ -191,88 +197,57 @@ impl MergeOperation {
             (MergeOperation::Set(val), MergeOperation::Increment(inc)) => {
                 MergeOperation::Set(val + inc)
             }
-            (_, MergeOperation::Set(val)) => MergeOperation::Set(*val),
+            (_, MergeOperation::Set(val)) => MergeOperation::Set(val),
         }
     }
 
     /// Does the merge operation dance for one operand.
-    fn eval(&self, current: Option<Vec<u8>>) -> Result<Option<Vec<u8>>, crate::Error> {
-        let r#final = match (self, current) {
-            (MergeOperation::Increment(inc), None) => *inc,
-            (MergeOperation::Increment(inc), Some(current)) => {
-                let count = i16::from_be_bytes([current[0], current[1]]);
-                count + inc
-            }
-            (MergeOperation::Set(val), _) => *val,
-        };
-
-        if r#final != 0 {
-            Ok(Some(r#final.to_be_bytes().to_vec()))
-        } else {
-            Ok(None)
+    pub fn eval_on_zero(self) -> i16 {
+        match self {
+            MergeOperation::Increment(inc) => inc,
+            MergeOperation::Set(set) => set,
         }
-    }
-
-    /// The partial merge operator for rockesDB.
-    fn partial_merge(
-        new_key: &[u8],
-        _existing_val: Option<&[u8]>,
-        operands: &mut rocksdb::MergeOperands,
-    ) -> Option<Vec<u8>> {
-        // This is an identity op:
-        let mut current = MergeOperation::Increment(0);
-
-        for operand in operands {
-            match bincode::deserialize::<MergeOperation>(operand) {
-                Err(err) => {
-                    log::error!(
-                        "partial merge got bad operation for key {} with operand {} at {:?}: {}",
-                        base64_url::encode(new_key),
-                        base64_url::encode(operand),
-                        current,
-                        err
-                    );
-                    break;
-                }
-                Ok(operation) => current = current.associative(&operation),
-            }
-        }
-
-        Some(bincode::serialize(&current).expect("can serialize"))
     }
 
     /// The full merge operator for rocksDB
+    fn try_full_merge(
+        _new_key: &[u8],
+        existing_val: Option<&[u8]>,
+        operands: &mut rocksdb::MergeOperands,
+    ) -> Result<Option<Vec<u8>>, crate::Error> {
+        let mut current: MergeOperation = existing_val
+            .map(bincode::deserialize)
+            .transpose()?
+            .unwrap_or_default();
+
+        for operand in operands {
+            let right = bincode::deserialize::<MergeOperation>(operand)?;
+            current = current.associative(right);
+        }
+
+        Ok(Some(bincode::serialize(&current).expect("can serialize")))
+    }
+
     fn full_merge(
         new_key: &[u8],
         existing_val: Option<&[u8]>,
         operands: &mut rocksdb::MergeOperands,
     ) -> Option<Vec<u8>> {
-        let mut current = existing_val.map(Vec::from);
-
-        for operand in operands {
-            match bincode::deserialize::<MergeOperation>(operand) {
-                Err(err) => {
-                    log::error!(
-                        "full merge got bad operation for key {} with operand {}: {}",
-                        base64_url::encode(new_key),
-                        base64_url::encode(operand),
-                        err
-                    );
-                    return existing_val.map(Vec::from);
-                }
-                Ok(operation) => match operation.eval(current) {
-                    Err(err) => {
-                        log::error!("merge operation {:?} failed with {}", operation, err);
-                        return existing_val.map(Vec::from);
-                    }
-                    Ok(next) => {
-                        current = next;
-                    }
-                },
+        match MergeOperation::try_full_merge(new_key, existing_val, operands) {
+            Ok(val) => val,
+            Err(err) => {
+                log::error!(
+                    "full merge got bad operation for key {} with operands {:?}: {}",
+                    base64_url::encode(new_key),
+                    operands
+                        .into_iter()
+                        .map(base64_url::encode)
+                        .collect::<Vec<_>>(),
+                    err
+                );
+                existing_val.map(Vec::from)
             }
         }
-
-        current
     }
 }
 
@@ -286,4 +261,56 @@ fn migrate(db: &mut rocksdb::DB) -> Result<(), crate::Error> {
     let _ = db; // suppresses unused variable warning.
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge() {
+        let _ = crate::logger::init_logger();
+
+        crate::cli::init_cli().unwrap();
+        init_db().unwrap();
+
+        db().merge_cf(
+            Table::Bookmarks.get(),
+            b"a",
+            bincode::serialize(&MergeOperation::Set(1)).unwrap(),
+        )
+        .unwrap();
+
+        let value: MergeOperation =
+            bincode::deserialize(&*db().get_cf(Table::Bookmarks.get(), b"a").unwrap().unwrap())
+                .unwrap();
+        assert_eq!(value.eval_on_zero(), 1);
+
+        db().merge_cf(
+            Table::Bookmarks.get(),
+            b"a",
+            bincode::serialize(&MergeOperation::Increment(1)).unwrap(),
+        )
+        .unwrap();
+
+        let value: MergeOperation =
+            bincode::deserialize(&*db().get_cf(Table::Bookmarks.get(), b"a").unwrap().unwrap())
+                .unwrap();
+        assert_eq!(value.eval_on_zero(), 2);
+
+        db().merge_cf(
+            Table::Bookmarks.get(),
+            b"a",
+            bincode::serialize(&MergeOperation::Increment(-2)).unwrap(),
+        )
+        .unwrap();
+
+        log::info!(
+            "{:?}",
+            bincode::deserialize::<MergeOperation>(
+                &db().get_cf(Table::Bookmarks.get(), b"a").unwrap().unwrap()
+            )
+            .unwrap()
+        );
+    }
 }
