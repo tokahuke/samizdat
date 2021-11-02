@@ -43,7 +43,7 @@ pub struct LatestResponse {
     pub rand: Hash,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditionAnnouncement {
     pub key_riddle: ContentRiddle,
     pub edition: OpaqueEncrypted,

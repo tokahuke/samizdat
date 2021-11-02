@@ -61,7 +61,7 @@ impl ContentRiddle {
     }
 }
 
-#[derive(Debug, SerdeSerialize, SerdeDeserialize)]
+#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
 pub struct MessageRiddle {
     pub timestamp: i64,
     pub rand: Hash,

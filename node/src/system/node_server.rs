@@ -150,11 +150,10 @@ impl Node for NodeServer {
     }
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
+        log::info!("Sending announcement to hub");
         if let Some(subscription) = SubscriptionRef::find(&announcement.key_riddle) {
-            let cipher = TransferCipher::new(
-                &Hash::build(subscription.public_key.as_bytes()),
-                &announcement.rand,
-            );
+            let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
+
             let try_refresh = async move {
                 let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
 

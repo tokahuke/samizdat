@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use crate::Hash;
 
-#[derive(Debug, DeriveSerialize, DeriveDeserialize)]
+#[derive(Debug, Clone, DeriveSerialize, DeriveDeserialize)]
 pub struct Signed<T> {
     content: T,
     signature: Signature,

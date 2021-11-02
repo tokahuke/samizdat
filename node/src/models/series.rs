@@ -5,7 +5,8 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::time::Duration;
 
-use samizdat_common::{ContentRiddle, Key, PrivateKey, Signed};
+use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
+use samizdat_common::{rpc::EditionAnnouncement, ContentRiddle, Hash, Key, PrivateKey, Signed};
 
 use crate::db;
 use crate::db::Table;
@@ -311,14 +312,14 @@ impl SeriesRef {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EditionContent {
     collection: CollectionRef,
     timestamp: chrono::DateTime<chrono::Utc>,
     ttl: Duration,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edition {
     signed: Signed<EditionContent>,
     public_key: Key,
@@ -355,6 +356,20 @@ impl Edition {
     #[inline(always)]
     pub fn timestamp(&self) -> chrono::DateTime<chrono::Utc> {
         self.signed.timestamp
+    }
+
+    pub fn announcement(&self) -> EditionAnnouncement {
+        let rand = Hash::rand();
+        let content_hash = self.public_key.hash();
+        let key_riddle = ContentRiddle::new(&content_hash);
+        let cipher = TransferCipher::new(&content_hash, &rand);
+        let edition = OpaqueEncrypted::new(&self, &cipher);
+
+        EditionAnnouncement {
+            rand,
+            key_riddle,
+            edition,
+        }
     }
 }
 

@@ -23,7 +23,7 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 {
     #[derive(Deserialize)]
     struct Request {
-        public_key: Key,
+        public_key: String,
         #[serde(default)]
         kind: SubscriptionKind,
     }
@@ -32,9 +32,11 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .and(warp::post())
         .and(warp::body::json())
         .map(|request: Request| {
-            let subscription =
-                SubscriptionRef::build(Subscription::new(request.public_key, request.kind));
-            Ok(returnable::Json(subscription?))
+            let subscription = SubscriptionRef::build(Subscription::new(
+                request.public_key.parse()?,
+                request.kind,
+            ));
+            Ok(subscription?.public_key.to_string())
         })
         .map(reply)
 }
@@ -62,7 +64,6 @@ fn get_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         })
         .map(reply)
 }
-
 
 /// Gets information associates with a series owner
 fn get_subscriptions() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone

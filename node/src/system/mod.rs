@@ -249,6 +249,20 @@ impl HubConnection {
 
         Ok(most_recent)
     }
+
+    pub async fn announce_edition(
+        &self,
+        announcement: &EditionAnnouncement,
+    ) -> Result<(), crate::Error> {
+        let inner = self.inner.get().await;
+
+        inner
+            .client
+            .announce_edition(context::current(), announcement.clone())
+            .await?;
+
+        Ok(())
+    }
 }
 
 /// Set of all hub connection from this node.
@@ -316,5 +330,20 @@ impl Hubs {
         }
 
         None
+    }
+
+    pub async fn announce_edition(&self, announcement: &EditionAnnouncement) {
+        let mut results = stream::iter(self.hubs.iter().cloned())
+            .map(|hub| async move { (hub.name, hub.announce_edition(announcement).await) })
+            .buffer_unordered(cli().max_parallel_hubs);
+
+        while let Some((hub_name, result)) = results.next().await {
+            match result {
+                Ok(_) => {}
+                Err(err) => {
+                    log::error!("Error while querying {}: {}", hub_name, err)
+                }
+            }
+        }
     }
 }

@@ -94,7 +94,7 @@ pub struct OpaqueEncrypted {
 }
 
 impl OpaqueEncrypted {
-    fn new<T>(thing: &T, cipher: &TransferCipher) -> OpaqueEncrypted
+    pub fn new<T>(thing: &T, cipher: &TransferCipher) -> OpaqueEncrypted
     where
         T: Serialize,
     {

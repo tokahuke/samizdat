@@ -5,8 +5,8 @@ use warp::Filter;
 
 use samizdat_common::Key;
 
-use crate::balanced_or_tree;
 use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
+use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
 use super::{reply, returnable, tuple};
@@ -106,7 +106,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .map(reply)
 }
 
-/// Pushes a new colletion to the series owner, creating a new edition.
+/// Pushes a new collection to the series owner, creating a new edition.
 fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
@@ -121,9 +121,19 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and(warp::body::json())
         .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let series = series_owner
+                let edition = series_owner
                     .advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
-                Ok(Some(returnable::Json(series)))
+                let announcement = edition.announcement();
+
+                tokio::spawn({
+                    let edition = edition.clone();
+                    async move {
+                        log::info!("Announcing edition {:?}", edition);
+                        hubs().announce_edition(&announcement).await
+                    }
+                });
+
+                Ok(Some(returnable::Json(edition)))
             } else {
                 Ok(None)
             }
