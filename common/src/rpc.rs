@@ -43,12 +43,21 @@ pub struct LatestResponse {
     pub rand: Hash,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EditionAnnouncement {
+    pub key_riddle: ContentRiddle,
+    pub edition: OpaqueEncrypted,
+    pub rand: Hash,
+}
+
 #[tarpc::service]
 pub trait Hub {
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
     /// Gets the latest version of a series.
     async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
+    /// Announces a new edition of a series to the network.
+    async fn announce_edition(announcement: EditionAnnouncement);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,4 +92,5 @@ pub trait Node {
     async fn resolve_object(resolution: Arc<Resolution>) -> ResolutionResponse;
     async fn resolve_item(resolution: Arc<Resolution>) -> ResolutionResponse;
     async fn resolve_latest(latest: Arc<LatestRequest>) -> Option<LatestResponse>;
+    async fn announce_edition(announcement: Arc<EditionAnnouncement>);
 }

@@ -80,10 +80,12 @@ This is just the tip of the iceberg, however! Check out more [here](https://prox
     1. Query if you have a copy of The Book.
     2. Serve you a copy of The Book and then send you to room 101.
 * UX: do you have a freakin' mobile app?
-
+All code under the Samizdat Project is Free Software and is licensed to any individal or
+    organization under the AGPLv3 license. You are free to run, study, alter and redistribute
+    the software as you wish, as long as you abide by the terms of the aforementioned license.
 ## Licensing
 
-Copyright 2021 Pedro B. Arruda
+Copyright 2021 Tokahuke
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

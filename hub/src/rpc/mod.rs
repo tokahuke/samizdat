@@ -208,6 +208,29 @@ impl Hub for HubServer {
 
         responses
     }
+
+    async fn announce_edition(self, ctx: context::Context, announcement: EditionAnnouncement) {
+        let client_addr = self.0.addr;
+
+        // Now, broadcast the announcement:
+        let announcement = Arc::new(announcement);
+
+        ROOM.with_peers(client_addr, |peer_id, peer| {
+            let announcement = announcement.clone();
+            async move {
+                let outcome = peer.client.announce_edition(ctx, announcement).await;
+
+                match outcome {
+                    Ok(_) => Some(()),
+                    Err(err) => {
+                        log::warn!("error announcing to peer {}: {}", peer_id, err);
+                        None
+                    }
+                }
+            }
+        })
+        .await;
+    }
 }
 
 pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {

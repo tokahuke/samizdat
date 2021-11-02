@@ -432,7 +432,7 @@ impl ObjectRef {
     /// Create a copy of this object, but with a different nonce header value. This new object
     /// will have a new content hash.
     pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
-        if let Some(mut iter) = self.iter()? {
+        if let Some(mut iter) = self.iter_content()? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
             let reissued = ObjectRef::build(
                 ObjectHeader {
@@ -455,7 +455,7 @@ impl ObjectRef {
     /// This function returns `Ok(None)` if the object does not actually exist.
     ///  
     /// TODO: lock for reading? Reading is not atomic. (snapshots?)
-    pub fn iter(&self) -> Result<Option<ContentIter>, crate::Error> {
+    pub fn iter_content(&self) -> Result<Option<ContentIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
             metadata
         } else {
@@ -475,7 +475,7 @@ impl ObjectRef {
     ///  
     /// TODO: lock for reading? Reading is not atomic. (snapshots?)
     pub fn iter_skip_header(&self) -> Result<Option<ContentIter>, crate::Error> {
-        if let Some(mut iter) = self.iter()? {
+        if let Some(mut iter) = self.iter_content()? {
             let (_read, _header) = ObjectHeader::read(&mut iter)?;
             Ok(Some(iter))
         } else {
@@ -499,6 +499,20 @@ impl ObjectRef {
             hashes: metadata.hashes.into_iter(),
             is_error: false,
         }))
+    }
+
+    /// Returns the whole content of this object as a `Vec<u8>`.
+    ///
+    /// # Note
+    ///
+    /// Be careful when using this method. If the file is too big, you might get out of
+    /// memory!
+    pub fn content(&self) -> Result<Option<Vec<u8>>, crate::Error> {
+        if let Some(iter) = self.iter_skip_header()? {
+            Ok(Some(iter.collect::<Result<Vec<_>, _>>()?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns a bookmark handle for the supplied bookmark type (see [`BookmarkType`]).

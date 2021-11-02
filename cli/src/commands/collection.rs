@@ -1,4 +1,4 @@
-pub async fn ls(collection: &str) -> Result<(), crate::Error> {
+pub async fn ls(collection: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!(

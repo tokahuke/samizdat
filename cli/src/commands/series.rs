@@ -51,8 +51,8 @@ pub async fn show(series_name: String) -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub async fn list(series_owner_name: &Option<String>) -> Result<(), crate::Error> {
-    pub async fn series_list_series(_series_owner_name: &str) -> Result<(), crate::Error> {
+pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error> {
+    pub async fn series_list_series(_series_owner_name: String) -> Result<(), crate::Error> {
         // let client = reqwest::Client::new();
         todo!()
     }

@@ -3,12 +3,12 @@
 
 use decorum::NotNan;
 use rocksdb::{IteratorMode, WriteBatch};
+use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::time::{sleep, Instant};
-use serde_derive::{Serialize, Deserialize};
 
 use samizdat_common::heap_entry::HeapEntry;
 use samizdat_common::Hash;

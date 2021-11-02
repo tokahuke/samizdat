@@ -1,5 +1,6 @@
 pub mod collection;
 pub mod series;
+pub mod subscription;
 
 use askama::Template;
 use futures::prelude::*;

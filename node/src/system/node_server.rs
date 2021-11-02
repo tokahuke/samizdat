@@ -9,7 +9,7 @@ use samizdat_common::rpc::*;
 use samizdat_common::ChannelAddr;
 use samizdat_common::Hash;
 
-use crate::models::{CollectionItem, ObjectRef, SeriesRef};
+use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
 
 use super::file_transfer;
 use super::transport::ChannelManager;
@@ -146,6 +146,38 @@ impl Node for NodeServer {
             }
         } else {
             None
+        }
+    }
+
+    async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
+        if let Some(subscription) = SubscriptionRef::find(&announcement.key_riddle) {
+            let cipher = TransferCipher::new(
+                &Hash::build(subscription.public_key.as_bytes()),
+                &announcement.rand,
+            );
+            let try_refresh = async move {
+                let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
+
+                if !edition.is_valid() {
+                    log::warn!("an invalid edition was announced: {:?}", edition);
+                    return Ok(());
+                }
+
+                if subscription.must_refresh()? {
+                    subscription.refresh(edition).await
+                } else {
+                    Ok(())
+                }
+            };
+
+            tokio::spawn(async move {
+                // Sleep a random amount so as not for eeeeverybody to ask for the same items at
+                // the same time.
+                tokio::time::sleep(std::time::Duration::from_secs_f32(rand::random())).await;
+                if let Err(err) = try_refresh.await {
+                    log::warn!("{}", err);
+                }
+            });
         }
     }
 }

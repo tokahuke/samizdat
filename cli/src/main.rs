@@ -34,7 +34,7 @@ async fn main() -> Result<(), String> {
 
     cli::init_cli()?;
     validate_node_is_up().await?;
-    cli::cli().command.execute().await?;
+    cli::cli().clone().command.execute().await?;
 
     Ok(())
 }

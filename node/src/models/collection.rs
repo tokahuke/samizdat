@@ -27,7 +27,7 @@ fn normalize(name: &str) -> Cow<str> {
 }
 
 /// An owned item path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ItemPathBuf(Box<str>);
 
 impl<'a> From<&'a str> for ItemPathBuf {
@@ -63,7 +63,7 @@ impl Display for ItemPathBuf {
 
 impl ItemPathBuf {
     /// Transformes into a borrowed item path.
-    fn as_path(&self) -> ItemPath {
+    pub(super) fn as_path(&self) -> ItemPath {
         ItemPath(self.0.as_ref().into())
     }
 
@@ -86,6 +86,36 @@ impl<'a> ItemPath<'a> {
     /// Retrieves the string representation of this path, in its canonical form.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Inventory {
+    inventory: BTreeMap<ItemPathBuf, Hash>,
+}
+
+impl FromIterator<(ItemPathBuf, Hash)> for Inventory {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = (ItemPathBuf, Hash)>,
+    {
+        Inventory {
+            inventory: iter.into_iter().collect::<BTreeMap<ItemPathBuf, Hash>>(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Inventory {
+    type IntoIter = std::collections::btree_map::Iter<'a, ItemPathBuf, Hash>;
+    type Item = (&'a ItemPathBuf, &'a Hash);
+    fn into_iter(self) -> Self::IntoIter {
+        self.inventory.iter()
+    }
+}
+
+impl Inventory {
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+        self.into_iter()
     }
 }
 
@@ -233,8 +263,8 @@ impl CollectionRef {
             &objects
                 .as_ref()
                 .iter()
-                .map(|(path, object_ref)| (path.to_string(), object_ref.hash().to_string()))
-                .collect::<BTreeMap<_, _>>(),
+                .map(|(path, object_ref)| (path.clone(), *object_ref.hash()))
+                .collect::<Inventory>(),
         )
         .expect("can serialize");
         let inventory_path = ItemPathBuf::from("_inventory");

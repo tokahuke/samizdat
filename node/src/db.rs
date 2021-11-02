@@ -78,6 +78,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Editions,
             Table::SeresFreshnesses,
             Table::SeriesOwners,
+            Table::Subscriptions,
             Table::RecentNonces,
         ]
         .into_iter()
@@ -131,6 +132,8 @@ pub enum Table {
     /// The list of series owners: pieces of information which allows the
     /// publication of a new version of a series in the network.
     SeriesOwners,
+    /// Subscription to series on the network.
+    Subscriptions,
     /// A set of current recent nonces.
     RecentNonces,
 }

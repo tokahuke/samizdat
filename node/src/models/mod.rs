@@ -4,11 +4,13 @@ mod bookmark;
 mod collection;
 mod object;
 mod series;
+mod subscription;
 
 pub use bookmark::{Bookmark, BookmarkType};
-pub use collection::{CollectionItem, CollectionRef, ItemPath, ItemPathBuf, Locator};
+pub use collection::{CollectionItem, CollectionRef, Inventory, ItemPath, ItemPathBuf, Locator};
 pub use object::{ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE};
 pub use series::{Edition, SeriesOwner, SeriesRef};
+pub use subscription::{Subscription, SubscriptionKind, SubscriptionRef};
 
 use rocksdb::WriteBatch;
 

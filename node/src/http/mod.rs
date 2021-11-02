@@ -5,6 +5,7 @@ mod objects;
 mod resolvers;
 mod returnable;
 mod series;
+mod subscriptions;
 
 pub use returnable::{Json, Return, Returnable};
 
@@ -97,6 +98,7 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
         objects::api(),
         collections::api(),
         series::api(),
+        subscriptions::api(),
         post_vacuum(),
     )
 }
@@ -124,8 +126,8 @@ pub fn general_redirect(
 }
 
 /// Triggers a manual vacuum round.
-pub fn post_vacuum(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn post_vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::post()
         .and(warp::path!("_vacuum"))
         .map(|| crate::vacuum::vacuum().map(returnable::Json))
