@@ -40,6 +40,8 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         bookmark: bool,
         #[serde(default)]
         is_draft: bool,
+        #[serde(default)]
+        created_at: Option<chrono::DateTime<chrono::Utc>>,
     }
 
     warp::path!("_objects")
@@ -52,7 +54,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
                 let header = ObjectHeader {
                     content_type,
                     is_draft: query.is_draft,
-                    created_at: chrono::Utc::now(),
+                    created_at: query.created_at.unwrap_or_else(|| chrono::Utc::now()),
                     nonce: rand::random(),
                 };
                 let object =

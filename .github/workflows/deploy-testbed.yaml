@@ -62,6 +62,9 @@ jobs:
         rsync -avz \
           ./proxy/samizdat-proxy.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service
+        rsync -avz \
+          ./target/release/samizdat \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat
     
     - name: Restart services
       run: |

@@ -114,6 +114,8 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         #[serde(default)]
         #[serde(with = "humantime_serde")]
         ttl: Option<std::time::Duration>,
+        #[serde(default)]
+        no_annouce: bool,
     }
 
     warp::path!("_seriesowners" / String / "collections")
@@ -123,15 +125,17 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
                 let edition = series_owner
                     .advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
-                let announcement = edition.announcement();
 
-                tokio::spawn({
-                    let edition = edition.clone();
-                    async move {
-                        log::info!("Announcing edition {:?}", edition);
-                        hubs().announce_edition(&announcement).await
-                    }
-                });
+                if !request.no_annouce {
+                    let announcement = edition.announcement();
+                    tokio::spawn({
+                        let edition = edition.clone();
+                        async move {
+                            log::info!("Announcing edition {:?}", edition);
+                            hubs().announce_edition(&announcement).await
+                        }
+                    });
+                }
 
                 Ok(Some(returnable::Json(edition)))
             } else {

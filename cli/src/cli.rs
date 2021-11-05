@@ -47,6 +47,9 @@ pub enum Command {
         /// Make this a release (for real) commit.
         #[structopt(long)]
         release: bool,
+        /// Whether to announce this new edition to he network or to keep quiet.
+        #[structopt(long)]
+        no_annouce: bool,
     },
     /// Watches the current directory for changes, rebilding and commiting at
     /// every change.
@@ -89,7 +92,11 @@ impl Command {
         match self {
             Command::Init => commands::init().await,
             Command::Import => commands::import().await,
-            Command::Commit { ttl, release } => commands::commit(&ttl, release).await,
+            Command::Commit {
+                ttl,
+                release,
+                no_annouce,
+            } => commands::commit(&ttl, release, no_annouce).await,
             Command::Watch { ttl } => commands::watch(&ttl).await,
             Command::Upload {
                 file,

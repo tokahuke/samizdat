@@ -113,7 +113,11 @@ pub async fn init() -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate::Error> {
+pub async fn commit(
+    ttl: &Option<String>,
+    is_release: bool,
+    no_annouce: bool,
+) -> Result<(), crate::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -170,7 +174,8 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
                 .post(format!(
                     "{}/_objects?is_draft={}",
                     crate::server(),
-                    !is_release
+                    !is_release,
+                    //fs::metadata(&path)?.created().expect("created time exists"),
                 ))
                 .header("Content-Type", content_type)
                 .body(maybe_proxy_page(path, &fs::read(&path)?).into_owned())
@@ -227,6 +232,7 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
     struct CollectionRequest {
         collection: String,
         ttl: Option<String>,
+        no_annouce: bool,
     }
 
     let response = client
@@ -235,7 +241,11 @@ pub async fn commit(ttl: &Option<String>, is_release: bool) -> Result<(), crate:
             crate::server(),
             series,
         ))
-        .json(&CollectionRequest { collection, ttl })
+        .json(&CollectionRequest {
+            collection,
+            ttl,
+            no_annouce,
+        })
         .send()
         .await?;
 
@@ -331,7 +341,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
     log::info!("Starting rebuild loop");
 
     // Run the commit for the first time.
-    if let Err(err) = commit(ttl, false).await {
+    if let Err(err) = commit(ttl, false, true).await {
         println!("Error while rebuilding: {}", err);
     }
 
@@ -345,7 +355,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
 
         if watched_files_changed && now > last_exec + MIN_WAIT {
             log::info!("Rebuild triggered");
-            if let Err(err) = commit(ttl, false).await {
+            if let Err(err) = commit(ttl, false, true).await {
                 println!("Error while rebuilding: {}", err);
             }
 
