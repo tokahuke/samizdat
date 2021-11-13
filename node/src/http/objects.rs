@@ -12,12 +12,20 @@ use super::{async_reply, reply, returnable, tuple};
 /// The entrypoint of the Samizdat node HTTP API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
+        // Object CRUD
         get_object(),
         post_object(),
         delete_object(),
+        // Bookmark CRUD:
         get_bookmark(),
         post_bookmark(),
         delete_bookmark(),
+        // Statistics:
+        get_stats(),
+        get_byte_usefulness(),
+        // Utils:
+        post_reissue(),
+        get_reference_count(),
     )
 }
 
@@ -40,8 +48,6 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         bookmark: bool,
         #[serde(default)]
         is_draft: bool,
-        #[serde(default)]
-        created_at: Option<chrono::DateTime<chrono::Utc>>,
     }
 
     warp::path!("_objects")
@@ -51,12 +57,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and(warp::body::bytes())
         .map(
             |content_type: String, query: Query, bytes: bytes::Bytes| async move {
-                let header = ObjectHeader {
-                    content_type,
-                    is_draft: query.is_draft,
-                    created_at: query.created_at.unwrap_or_else(|| chrono::Utc::now()),
-                    nonce: rand::random(),
-                };
+                let header = ObjectHeader::new(content_type, query.is_draft)?;
                 let object =
                     ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))?;
                 Ok(object.hash().to_string())
@@ -100,11 +101,72 @@ fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .map(reply)
 }
 
+/// Returns the internal reference count on the object.
+///
+/// # Warning
+///
+/// By now, this returns `200 OK` even if the object does not exist.
+fn get_reference_count() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_objects" / Hash / "reference-count")
+        .and(warp::get())
+        .map(|hash| {
+            ObjectRef::new(hash)
+                .bookmark(BookmarkType::Reference)
+                .get_count()
+                .map(returnable::Json)
+        })
+        .map(reply)
+}
+
 /// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
 fn delete_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     warp::path!("_objects" / Hash / "bookmark")
         .and(warp::delete())
         .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
+        .map(reply)
+}
+
+/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+fn get_stats() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_objects" / Hash / "stats")
+        .and(warp::get())
+        .map(|hash| ObjectRef::new(hash).statistics().map(returnable::Json))
+        .map(reply)
+}
+
+/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+fn get_byte_usefulness(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_objects" / Hash / "stats" / "byte-usefulness")
+        .and(warp::get())
+        .map(|hash| {
+            ObjectRef::new(hash)
+                .statistics()
+                .map(|stats| {
+                    stats.map(|stats| stats.byte_usefulness(&crate::models::UsePrior::default()))
+                })
+                .map(returnable::Json)
+        })
+        .map(reply)
+}
+
+/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Deserialize)]
+    #[serde(rename = "kebab-case")]
+    struct Query {
+        #[serde(default)]
+        bookmark: bool,
+    }
+
+    warp::path!("_objects" / Hash / "reissue")
+        .and(warp::post())
+        .and(warp::query())
+        .map(|hash, query: Query| {
+            ObjectRef::new(hash)
+                .reissue(query.bookmark)
+                .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
+        })
         .map(reply)
 }

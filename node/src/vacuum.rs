@@ -50,12 +50,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 
     // Define a prior for use:
     // TODO: how to calibrate correctly?
-    let use_prior = UsePrior {
-        gamma_alpha: 1.,
-        gamma_beta: 86400., // one day in secs
-        beta_alpha: 1.,
-        beta_beta: 1.,
-    };
+    let use_prior = UsePrior::default();
 
     // Test what is good and what isn't:
     for (key, value) in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {

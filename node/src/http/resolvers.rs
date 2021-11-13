@@ -69,16 +69,15 @@ pub async fn resolve_object(
     if let Some((metadata, iter)) = object.metadata()?.zip(iter) {
         object.touch()?;
         let resolved = Resolved {
-            content_type: metadata.header.content_type,
+            content_type: metadata.header.content_type().to_owned(),
             content_size: metadata.content_size,
             ext_headers: ext_headers
                 .into_iter()
                 .chain([
                     ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
-                    ("X-Samizdat-Is-Draft", metadata.header.is_draft.to_string()),
                     (
-                        "X-Samizdat-Created-At",
-                        metadata.header.created_at.to_string(),
+                        "X-Samizdat-Is-Draft",
+                        metadata.header.is_draft().to_string(),
                     ),
                     ("X-Samizdat-Object", object.hash().to_string()),
                 ])

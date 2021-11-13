@@ -81,6 +81,7 @@ pub enum Command {
         #[structopt(subcommand)]
         command: CollectionCommand,
     },
+    /// Commands for managing subscriptions.
     Subscription {
         #[structopt(subcommand)]
         command: SubscriptionCommand,

@@ -34,13 +34,17 @@ impl Bookmark {
         .concat()
     }
 
-    pub fn is_marked(&self) -> Result<bool, crate::Error> {
+    pub fn get_count(&self) -> Result<i16, crate::Error> {
         let maybe_key = db().get_cf(Table::Bookmarks.get(), self.key())?;
         let key: MergeOperation = maybe_key
             .map(|key| bincode::deserialize(&key))
             .transpose()?
             .unwrap_or_default();
-        Ok(key.eval_on_zero() != 0)
+        Ok(key.eval_on_zero())
+    }
+
+    pub fn is_marked(&self) -> Result<bool, crate::Error> {
+        Ok(self.get_count()? != 0)
     }
 
     pub fn mark_with(&self, batch: &mut WriteBatch) {
@@ -88,4 +92,5 @@ impl Bookmark {
     pub fn clear_with(&self, batch: &mut WriteBatch) {
         batch.delete_cf(Table::Bookmarks.get(), self.key())
     }
+
 }

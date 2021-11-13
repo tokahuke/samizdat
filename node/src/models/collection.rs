@@ -269,12 +269,7 @@ impl CollectionRef {
         .expect("can serialize");
         let inventory_path = ItemPathBuf::from("_inventory");
         let inventory_object = ObjectRef::build(
-            ObjectHeader {
-                content_type: "application/json".to_owned(),
-                is_draft,
-                created_at: chrono::Utc::now(),
-                nonce: rand::random(),
-            },
+            ObjectHeader::new("application/json".to_owned(), is_draft)?,
             false,
             inventory.as_bytes().iter().map(|&byte| Ok(byte)),
         )?;

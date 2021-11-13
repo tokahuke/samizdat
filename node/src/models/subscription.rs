@@ -11,7 +11,7 @@ use crate::db;
 use crate::db::Table;
 use crate::hubs;
 
-use super::{Dropable, SeriesRef, Edition, Inventory};
+use super::{Dropable, Edition, Inventory, SeriesRef};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SubscriptionKind {

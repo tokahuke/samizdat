@@ -19,18 +19,40 @@ pub const CHUNK_SIZE: usize = 256_000;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectHeader {
     /// The MIME type of this object.
-    pub content_type: String,
+    content_type: String,
     /// Whether this is a draft object or not. Draft objects cannot be shared
     /// publicly.
-    pub is_draft: bool,
-    /// The date of creation of this object.
-    pub created_at: DateTime<Utc>,
+    is_draft: bool,
     /// A number with no semantics whatsoever. You can use this to create a
     /// different object hash for the same content.
     pub nonce: u64,
 }
 
 impl ObjectHeader {
+    pub fn new(content_type: String, is_draft: bool) -> Result<ObjectHeader, crate::Error> {
+        Ok(ObjectHeader {
+            content_type,
+            is_draft,
+            nonce: 0,
+        })
+    }
+
+    pub fn content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    pub fn is_draft(&self) -> bool {
+        self.is_draft
+    }
+
+    pub fn reissue(&self) -> ObjectHeader {
+        ObjectHeader {
+            content_type: self.content_type.clone(),
+            is_draft: self.is_draft,
+            nonce: rand::random(),
+        }
+    }
+
     /// Reads a header from an iterator of bytes.
     ///
     /// TODO: should be `Read` instead of `Iterator`?
@@ -109,6 +131,8 @@ pub struct ObjectMetadata {
     pub header: ObjectHeader,
     /// Sum of the sizes of all chunks. This includes the header size.
     pub content_size: usize,
+    /// The timestamp this object was received on.
+    pub received_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// An iterator over the bytes of an object, including its header.
@@ -244,6 +268,16 @@ impl ObjectRef {
         }
     }
 
+    /// Gets statistics on this object. Returns `Ok(None)` if the object does not exist.
+    pub fn statistics(&self) -> Result<Option<ObjectStatistics>, crate::Error> {
+        if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
+            let statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
+            Ok(Some(statistics))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Update statistics indicating that this object was used. This will signal to the
     /// vacuum daemon that this object is useful and therefore a worse candidate for deletion.
     ///
@@ -328,6 +362,7 @@ impl ObjectRef {
             hashes: merkle_tree.hashes().to_vec(),
             header,
             content_size,
+            received_at: chrono::Utc::now(),
         };
         let statistics = ObjectStatistics::new(content_size);
 
@@ -402,6 +437,7 @@ impl ObjectRef {
             hashes: merkle_tree.hashes().to_vec(),
             header: maybe_header.ok_or(crate::Error::NoHeaderRead)?,
             content_size,
+            received_at: chrono::Utc::now(),
         };
         let statistics = ObjectStatistics::new(content_size);
 
@@ -434,14 +470,7 @@ impl ObjectRef {
     pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter_content()? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
-            let reissued = ObjectRef::build(
-                ObjectHeader {
-                    nonce: rand::random(),
-                    ..header
-                },
-                bookmark,
-                iter,
-            )?;
+            let reissued = ObjectRef::build(header.reissue(), bookmark, iter)?;
 
             Ok(Some(reissued))
         } else {
@@ -574,6 +603,17 @@ pub struct UsePrior {
     pub beta_beta: f64,
 }
 
+impl Default for UsePrior {
+    fn default() -> UsePrior {
+        UsePrior {
+            gamma_alpha: 1.,
+            gamma_beta: 86400., // one day in secs
+            beta_alpha: 1.,
+            beta_beta: 1.,
+        }
+    }
+}
+
 impl ObjectStatistics {
     /// Create a new statistics struct for an object of given size.
     fn new(size: usize) -> ObjectStatistics {
@@ -610,7 +650,7 @@ impl ObjectStatistics {
             use_prior.gamma_beta + (self.last_touched_at - self.created_at).num_seconds() as f64;
         // One "pseudo observation" E[exp(-time_inactive * poisson_rate)].
         let survival_prob = (1. + time_inactive / post_gamma_beta).powf(-post_gamma_alpha);
-        let post_beta_alpha = use_prior.beta_alpha + survival_prob;
+        let post_beta_alpha = use_prior.beta_alpha + (1. - survival_prob);
         let post_beta_beta = use_prior.beta_beta + self.touches as f64;
 
         // Based on an uninformed beta distribution.
