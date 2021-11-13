@@ -1,0 +1,35 @@
+{
+  "name": "samizdatjs",
+  "version": "0.1.0",
+  "description": "SamizdatJS, a library for creating webpages interacting with Samizdat Node",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack --mode production",
+    "serve": "webpack serve --mode development",
+    "fmt": "prettier --write src"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tokahuke/samizdat.git"
+  },
+  "keywords": [
+    "samizdat",
+    "samizdat-node"
+  ],
+  "author": "tokahuke",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tokahuke/samizdat/issues"
+  },
+  "homepage": "https://github.com/tokahuke/samizdat#readme",
+  "devDependencies": {
+    "copy-webpack-plugin": "^9.1.0",
+    "prettier": "^2.4.1",
+    "ts-loader": "^9.2.6",
+    "typescript": "^4.4.4",
+    "webpack": "^5.64.0",
+    "webpack-cli": "^4.9.1",
+    "webpack-dev-server": "^4.5.0"
+  }
+}
