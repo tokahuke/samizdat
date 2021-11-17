@@ -1,3 +1,5 @@
+use crate::access_token;
+
 pub async fn ls(collection: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
@@ -6,6 +8,7 @@ pub async fn ls(collection: String) -> Result<(), crate::Error> {
             crate::server(),
             collection
         ))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 

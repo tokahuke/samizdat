@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::num::ParseIntError;
+use std::path::PathBuf;
 use std::str::FromStr;
 use structopt::StructOpt;
 
@@ -9,8 +10,8 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Path to the locally stored program data.
-    #[structopt(env, long, default_value = "data/db")]
-    pub db_path: String,
+    #[structopt(env, long, default_value = "data")]
+    pub data: PathBuf,
     /// The port on which to sever the local HTTP proxy. This is the port you will use to access in
     ///  your browser.
     #[structopt(env, long, default_value = "4510")]

@@ -62,7 +62,7 @@ pub fn init_db() -> Result<(), crate::Error> {
     // Open with column families:
     let mut db = rocksdb::DB::open_cf_descriptors(
         &db_opts,
-        &cli().db_path,
+        &format!("{}/db", cli().data.to_str().expect("path is not a string")),
         vec![
             Table::Global,
             Table::Objects,

@@ -6,9 +6,9 @@ use samizdat_common::Key;
 use crate::balanced_or_tree;
 use crate::models::{Dropable, Subscription, SubscriptionKind, SubscriptionRef};
 
-use super::{reply, returnable};
+use super::{reply, returnable, authenticate};
 
-/// The entrypoint of the Samizdat node HTTP API.
+/// The entrypoint of the subscriptions API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
         get_subscription(),
@@ -30,6 +30,7 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 
     warp::path!("_subscriptions")
         .and(warp::post())
+        .and(authenticate())
         .and(warp::body::json())
         .map(|request: Request| {
             let subscription = SubscriptionRef::build(Subscription::new(
@@ -46,6 +47,7 @@ fn delete_subscription(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_subscriptions" / Key)
         .and(warp::delete())
+        .and(authenticate())
         .map(|public_key: Key| {
             let subscription = SubscriptionRef::new(public_key);
             Ok(subscription.drop_if_exists())
@@ -58,6 +60,7 @@ fn get_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 {
     warp::path!("_subscriptions" / Key)
         .and(warp::get())
+        .and(authenticate())
         .map(|public_key: Key| {
             let maybe_subscription = SubscriptionRef::new(public_key).get()?;
             Ok(returnable::Json(maybe_subscription))
@@ -70,6 +73,7 @@ fn get_subscriptions() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 {
     warp::path!("_subscriptions")
         .and(warp::get())
+        .and(authenticate())
         .map(|| {
             let subscriptions = SubscriptionRef::get_all()?;
             Ok(returnable::Json(subscriptions))

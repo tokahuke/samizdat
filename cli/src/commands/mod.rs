@@ -18,6 +18,7 @@ use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
 use crate::html::maybe_proxy_page;
 use crate::{Manifest, PrivateManifest};
+use crate::access_token;
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
@@ -38,6 +39,7 @@ pub async fn upload(
             is_draft,
         ))
         .header("Content-Type", content_type)
+        .header("Authorization", format!("Bearer {}", access_token()))
         .body(fs::read(path)?)
         .send()
         .await?;
@@ -61,6 +63,7 @@ pub async fn init() -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .post(format!("{}/_seriesowners", crate::server()))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .json(&Request {
             series_owner_name: &name,
         })
@@ -68,6 +71,7 @@ pub async fn init() -> Result<(), crate::Error> {
         .await?;
     let response_debug = client
         .post(format!("{}/_seriesowners", crate::server()))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .json(&Request {
             series_owner_name: &debug_name,
         })
@@ -178,6 +182,7 @@ pub async fn commit(
                     //fs::metadata(&path)?.created().expect("created time exists"),
                 ))
                 .header("Content-Type", content_type)
+                .header("Authorization", format!("Bearer {}", access_token()))
                 .body(maybe_proxy_page(path, &fs::read(&path)?).into_owned())
                 .send()
                 .await?;
@@ -211,6 +216,7 @@ pub async fn commit(
             hashes,
             is_draft: !is_release,
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -246,6 +252,7 @@ pub async fn commit(
             ttl,
             no_annouce,
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -392,6 +399,7 @@ pub async fn import() -> Result<(), crate::Error> {
                 private_key: &private_manifest.private_key,
             },
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -404,6 +412,7 @@ pub async fn import() -> Result<(), crate::Error> {
                 private_key: &private_manifest.private_key_debug,
             },
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 

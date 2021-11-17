@@ -7,10 +7,12 @@ mod html;
 mod logger;
 mod manifest;
 mod util;
+mod access_token;
 
 pub use cli::server;
 pub use error::Error;
 pub use manifest::{Manifest, PrivateManifest};
+pub use access_token::access_token;
 
 async fn validate_node_is_up() -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
@@ -33,7 +35,10 @@ async fn main() -> Result<(), String> {
     let _ = logger::init_logger();
 
     cli::init_cli()?;
+    access_token::init_access_token()?;
+
     validate_node_is_up().await?;
+    
     cli::cli().clone().command.execute().await?;
 
     Ok(())

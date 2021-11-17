@@ -3,6 +3,8 @@ use tabled::Tabled;
 
 use samizdat_common::Key;
 
+use crate::access_token;
+
 use super::show_table;
 
 pub async fn new(public_key: String) -> Result<(), crate::Error> {
@@ -17,6 +19,7 @@ pub async fn new(public_key: String) -> Result<(), crate::Error> {
         .json(&Request {
             public_key: &public_key,
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -30,6 +33,7 @@ pub async fn rm(public_key: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .delete(format!("{}/_subscriptions/{}", crate::server(), public_key))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -48,6 +52,7 @@ pub async fn ls(public_key: Option<String>) -> Result<(), crate::Error> {
         let client = reqwest::Client::new();
         let response = client
             .get(format!("{}/_subscriptions", crate::server()))
+            .header("Authorization", format!("Bearer {}", access_token()))
             .send()
             .await?;
 

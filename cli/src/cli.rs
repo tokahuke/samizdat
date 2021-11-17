@@ -22,11 +22,17 @@ pub fn cli<'a>() -> &'a Cli {
 }
 
 pub fn server() -> String {
-    format!("http://localhost:{}", cli().port)
+    format!(
+        "http://localhost:{}",
+        cli()
+            .port
+    )
 }
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Cli {
+    #[structopt(long, short, env, default_value = "/var/samizdat/node")]
+    pub data: PathBuf,
     #[structopt(long, short, env, default_value = "4510")]
     pub port: u16,
     #[structopt(subcommand)]

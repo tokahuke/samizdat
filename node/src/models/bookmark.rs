@@ -92,5 +92,4 @@ impl Bookmark {
     pub fn clear_with(&self, batch: &mut WriteBatch) {
         batch.delete_cf(Table::Bookmarks.get(), self.key())
     }
-
 }

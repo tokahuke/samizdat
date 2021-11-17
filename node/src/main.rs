@@ -1,3 +1,4 @@
+mod access_token;
 mod cli;
 mod db;
 mod http;
@@ -20,6 +21,7 @@ use warp::Filter;
 
 use samizdat_common::logger;
 
+use access_token::init_access_token;
 use cli::init_cli;
 use db::init_db;
 use system::Hubs;
@@ -65,6 +67,7 @@ async fn main() -> Result<(), crate::Error> {
 
     // Init resources:
     init_cli()?;
+    init_access_token()?;
     init_db()?;
     init_hubs().await?;
 
@@ -72,7 +75,7 @@ async fn main() -> Result<(), crate::Error> {
     tokio::spawn(crate::vacuum::run_vacuum_daemon());
 
     // Describe server:
-    let server = warp::filters::addr::remote()
+    let public_server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {
             if let Some(addr) = addr {
                 if addr.ip().is_loopback() {
@@ -91,10 +94,10 @@ async fn main() -> Result<(), crate::Error> {
         .or(http::api())
         .with(warp::log("api"));
 
-    // Run server:
-    let http_server = tokio::spawn(warp::serve(server).run(([0, 0, 0, 0], cli().port)));
+    // Run public server:
+    let server = tokio::spawn(warp::serve(public_server).run(([0, 0, 0, 0], cli().port)));
 
-    maybe_resume_panic(http_server.await);
+    maybe_resume_panic(server.await);
 
     // Exit:
     Ok(())

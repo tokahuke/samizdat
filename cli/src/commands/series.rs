@@ -3,6 +3,8 @@ use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
 
+use crate::access_token;
+
 use super::show_table;
 
 pub async fn new(series_name: String) -> Result<(), crate::Error> {
@@ -17,6 +19,7 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
         .json(&Request {
             series_owner_name: &*series_name,
         })
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -30,6 +33,7 @@ pub async fn rm(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .delete(format!("{}/_seriesowners/{}", crate::server(), series_name))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -42,6 +46,7 @@ pub async fn show(series_name: String) -> Result<(), crate::Error> {
     let client = reqwest::Client::new();
     let response = client
         .get(format!("{}/_seriesowners/{}", crate::server(), series_name))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await?;
 
@@ -61,6 +66,7 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error>
         let client = reqwest::Client::new();
         let response = client
             .get(format!("{}/_seriesowners", crate::server()))
+            .header("Authorization", format!("Bearer {}", access_token()))
             .send()
             .await?;
 

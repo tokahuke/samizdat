@@ -8,11 +8,11 @@ use crate::balanced_or_tree;
 use crate::models::{CollectionRef, ItemPathBuf, ObjectRef};
 
 use super::resolvers::resolve_item;
-use super::{reply, returnable, tuple};
+use super::{reply, returnable, tuple, authenticate};
 
-/// The entrypoint of the Samizdat node HTTP API.
+/// The entrypoint of the collection public API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(post_collection(), get_item(),)
+    balanced_or_tree!(get_item(), post_collection())
 }
 
 /// Uploads a new collection.
@@ -27,6 +27,7 @@ pub fn post_collection(
 
     warp::path!("_collections")
         .and(warp::post())
+        .and(authenticate())
         .and(warp::body::json())
         .map(|request: Request| {
             let collection = CollectionRef::build(

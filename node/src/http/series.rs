@@ -9,17 +9,17 @@ use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
-use super::{reply, returnable, tuple};
+use super::{reply, returnable, tuple, authenticate};
 
-/// The entrypoint of the Samizdat node HTTP API.
+/// The entrypoint of the series API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
+        get_edition(),
         get_series_owner(),
         get_series_owners(),
         post_series_owner(),
         delete_series_owner(),
         post_series(),
-        get_edition()
     )
 }
 
@@ -43,6 +43,7 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 
     warp::path!("_seriesowners")
         .and(warp::post())
+        .and(authenticate())
         .and(warp::body::json())
         .map(|request: Request| {
             let series_owner = if let Some(Keypair {
@@ -75,6 +76,7 @@ fn delete_series_owner(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_seriesowners" / String)
         .and(warp::delete())
+        .and(authenticate())
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
             Ok(maybe_owner.map(|owner| owner.drop_if_exists()))
@@ -87,6 +89,7 @@ fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 {
     warp::path!("_seriesowners" / String)
         .and(warp::get())
+        .and(authenticate())
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
             Ok(maybe_owner.map(|owner| owner.series().to_string()))
@@ -99,6 +102,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 {
     warp::path!("_seriesowners")
         .and(warp::get())
+        .and(authenticate())
         .map(|| {
             let series = SeriesOwner::get_all()?;
             Ok(returnable::Json(series))
@@ -120,6 +124,7 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 
     warp::path!("_seriesowners" / String / "collections")
         .and(warp::post())
+        .and(authenticate())
         .and(warp::body::json())
         .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
@@ -150,6 +155,7 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 fn get_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
+        .and(authenticate())
         .and(warp::get())
         .and_then(|series_key: Key, name: Tail| async move {
             let series = SeriesRef::new(series_key);

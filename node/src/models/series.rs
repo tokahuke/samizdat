@@ -20,7 +20,6 @@ pub struct SeriesOwner {
     default_ttl: Duration,
     #[serde(default)]
     is_draft: bool,
-    
 }
 
 impl Dropable for SeriesOwner {
