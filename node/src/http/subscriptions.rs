@@ -3,10 +3,11 @@ use warp::Filter;
 
 use samizdat_common::Key;
 
+use crate::access_token::AccessRight;
 use crate::balanced_or_tree;
 use crate::models::{Dropable, Subscription, SubscriptionKind, SubscriptionRef};
 
-use super::{reply, returnable, authenticate};
+use super::{authenticate, reply, returnable};
 
 /// The entrypoint of the subscriptions API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -30,7 +31,7 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 
     warp::path!("_subscriptions")
         .and(warp::post())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageSubscriptions]))
         .and(warp::body::json())
         .map(|request: Request| {
             let subscription = SubscriptionRef::build(Subscription::new(
@@ -47,7 +48,7 @@ fn delete_subscription(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_subscriptions" / Key)
         .and(warp::delete())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|public_key: Key| {
             let subscription = SubscriptionRef::new(public_key);
             Ok(subscription.drop_if_exists())
@@ -60,7 +61,7 @@ fn get_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 {
     warp::path!("_subscriptions" / Key)
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|public_key: Key| {
             let maybe_subscription = SubscriptionRef::new(public_key).get()?;
             Ok(returnable::Json(maybe_subscription))
@@ -73,7 +74,7 @@ fn get_subscriptions() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 {
     warp::path!("_subscriptions")
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|| {
             let subscriptions = SubscriptionRef::get_all()?;
             Ok(returnable::Json(subscriptions))

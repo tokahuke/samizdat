@@ -3,11 +3,12 @@ use warp::Filter;
 
 use samizdat_common::Hash;
 
+use crate::access_token::AccessRight;
 use crate::balanced_or_tree;
 use crate::models::{BookmarkType, Dropable, ObjectHeader, ObjectRef};
 
 use super::resolvers::resolve_object;
-use super::{async_reply, reply, returnable, tuple, authenticate};
+use super::{async_reply, authenticate, reply, returnable, tuple};
 
 /// The entrypoint of the object API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -52,7 +53,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 
     warp::path!("_objects")
         .and(warp::post())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageObjects]))
         .and(warp::header("content-type"))
         .and(warp::query())
         .and(warp::body::bytes())
@@ -71,7 +72,7 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 /// effect of deleting it from the whole network. It only clears a local buffer.
 fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageObjects]))
         .and(warp::delete())
         .map(|hash| ObjectRef::new(hash).drop_if_exists())
         .map(reply)
@@ -81,7 +82,7 @@ fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
 /// by the vacuum daemon.
 fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "bookmark")
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageBookmarks]))
         .and(warp::post())
         .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).mark())
         .map(reply)
@@ -95,7 +96,7 @@ fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
 fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "bookmark")
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageBookmarks]))
         .map(|hash| {
             ObjectRef::new(hash)
                 .bookmark(BookmarkType::User)
@@ -114,7 +115,7 @@ fn get_reference_count(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "reference-count")
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::GetObjectStats]))
         .map(|hash| {
             ObjectRef::new(hash)
                 .bookmark(BookmarkType::Reference)
@@ -129,7 +130,7 @@ fn delete_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 {
     warp::path!("_objects" / Hash / "bookmark")
         .and(warp::delete())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageBookmarks]))
         .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
         .map(reply)
 }
@@ -138,7 +139,7 @@ fn delete_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 fn get_stats() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "stats")
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::GetObjectStats]))
         .map(|hash| ObjectRef::new(hash).statistics().map(returnable::Json))
         .map(reply)
 }
@@ -148,7 +149,7 @@ fn get_byte_usefulness(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "stats" / "byte-usefulness")
         .and(warp::get())
-        .and(authenticate())
+        .and(authenticate([AccessRight::GetObjectStats]))
         .map(|hash| {
             ObjectRef::new(hash)
                 .statistics()
@@ -171,7 +172,7 @@ fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
 
     warp::path!("_objects" / Hash / "reissue")
         .and(warp::post())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageObjects]))
         .and(warp::query())
         .map(|hash, query: Query| {
             ObjectRef::new(hash)

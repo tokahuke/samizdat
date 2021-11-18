@@ -1,3 +1,4 @@
+use serde_derive::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 
@@ -43,4 +44,33 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AccessRight {
+    ManageObjects,
+    GetObjectStats,
+    ManageBookmarks,
+    ManageCollections,
+    ManageSeries,
+    ManageSubscriptions,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Entity {
+    r#type: String,
+    identifier: String,
+}
+
+impl Entity {
+    pub fn from_path(path: &str) -> Option<Entity> {
+        let mut split = path.split('/');
+        let r#type = split.next()?;
+        let identifier = split.next()?;
+
+        Some(Entity {
+            r#type: r#type.to_owned(),
+            identifier: identifier.to_owned(),
+        })
+    }
 }

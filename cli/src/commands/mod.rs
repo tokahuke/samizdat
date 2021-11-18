@@ -16,9 +16,9 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
+use crate::access_token;
 use crate::html::maybe_proxy_page;
 use crate::{Manifest, PrivateManifest};
-use crate::access_token;
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!("{}", Table::new(t).with(tabled::Style::github_markdown()))

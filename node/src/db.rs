@@ -80,6 +80,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::SeriesOwners,
             Table::Subscriptions,
             Table::RecentNonces,
+            Table::AccessRights,
         ]
         .into_iter()
         .map(Table::descriptor),
@@ -136,6 +137,8 @@ pub enum Table {
     Subscriptions,
     /// A set of current recent nonces.
     RecentNonces,
+    /// Access rights granted for each entity to the local Samizdat node.
+    AccessRights,
 }
 
 /// An aliase fot the merge function pointer.

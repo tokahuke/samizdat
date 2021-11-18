@@ -16,7 +16,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
         "{}/access-token",
         cli().data.to_str().expect("path is not a string")
     );
-    
+
     let access_token = fs::read_to_string(&path)?.trim().to_owned();
 
     // Set static:

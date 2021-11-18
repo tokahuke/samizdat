@@ -1,5 +1,6 @@
 //! HTTP API for the Samizdat Node.
 
+mod auth;
 mod collections;
 mod objects;
 mod resolvers;
@@ -8,11 +9,12 @@ mod series;
 mod subscriptions;
 
 pub use returnable::{Json, Return, Returnable};
+pub use auth::authenticate;
 
 use warp::Filter;
 
-use crate::access_token::access_token;
 use crate::balanced_or_tree;
+
 
 /// Transforms a `Result<T, crate::Error>` into a Warp reply.
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
@@ -92,64 +94,6 @@ fn maybe_redirect_empty(path: &str) -> Option<String> {
     }
 }
 
-/// Authentication header was sent, but token was invalid.
-#[derive(Debug, Clone, Copy)]
-struct Forbidden;
-
-impl warp::reject::Reject for Forbidden {}
-
-/// Authentication header was not sent and must be sent.
-#[derive(Debug, Clone, Copy)]
-struct Unauthorized;
-
-impl warp::reject::Reject for Unauthorized {}
-
-/// Authenticate to the private part of the API. This requires access to the filesystem (only that)
-pub fn authenticate() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
-    warp::header::optional("Authorization").and_then(|authorization: Option<String>| async move {
-        if let Some(authorization) = authorization {
-            let token = authorization
-                .trim_start_matches("Bearer ")
-                .trim_start_matches("bearer ");
-
-            if token == access_token() {
-                Ok(())
-            } else {
-                Err(warp::reject::custom(Unauthorized))
-            }
-        } else {
-            Err(warp::reject::custom(Forbidden))
-        }
-    }).untuple_one()
-}
-
-/// The entrypoint of the Samizdat node public HTTP API.
-pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        general_redirect(),
-        objects::api(),
-        collections::api(),
-        series::api(),
-        subscriptions::api(),
-        post_vacuum(),
-    )
-    .recover(|rejection: warp::Rejection| async move {
-        if let Some(Unauthorized) = rejection.find() {
-            Ok(warp::reply::with_status(
-                "Unauthorized",
-                http::StatusCode::UNAUTHORIZED,
-            ))
-        } else if let Some(Forbidden) = rejection.find() {
-            Ok(warp::reply::with_status(
-                "Forbidden",
-                http::StatusCode::FORBIDDEN,
-            ))
-        } else {
-            Err(rejection)
-        }
-    })
-}
-
 /// Does all the redirection dances and shenenigans.
 pub fn general_redirect(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -170,6 +114,34 @@ pub fn general_redirect(
                 Err(warp::reject::reject())
             }
         })
+}
+
+/// The entrypoint of the Samizdat node public HTTP API.
+pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    balanced_or_tree!(
+        general_redirect(),
+        objects::api(),
+        collections::api(),
+        series::api(),
+        subscriptions::api(),
+        auth::api(),
+        post_vacuum(),
+    )
+    .recover(|rejection: warp::Rejection| async move {
+        if let Some(auth::Unauthorized) = rejection.find() {
+            Ok(warp::reply::with_status(
+                "Unauthorized".to_owned(),
+                http::StatusCode::UNAUTHORIZED,
+            ))
+        } else if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
+            Ok(warp::reply::with_status(
+                forbidden.to_string(),
+                http::StatusCode::FORBIDDEN,
+            ))
+        } else {
+            Err(rejection)
+        }
+    })
 }
 
 /// Triggers a manual vacuum round.

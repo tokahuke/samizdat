@@ -4,11 +4,12 @@ use warp::Filter;
 
 use samizdat_common::Hash;
 
+use crate::access_token::AccessRight;
 use crate::balanced_or_tree;
 use crate::models::{CollectionRef, ItemPathBuf, ObjectRef};
 
 use super::resolvers::resolve_item;
-use super::{reply, returnable, tuple, authenticate};
+use super::{authenticate, reply, returnable, tuple};
 
 /// The entrypoint of the collection public API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -27,7 +28,7 @@ pub fn post_collection(
 
     warp::path!("_collections")
         .and(warp::post())
-        .and(authenticate())
+        .and(authenticate([AccessRight::ManageCollections]))
         .and(warp::body::json())
         .map(|request: Request| {
             let collection = CollectionRef::build(

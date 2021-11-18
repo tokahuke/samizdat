@@ -22,11 +22,7 @@ pub fn cli<'a>() -> &'a Cli {
 }
 
 pub fn server() -> String {
-    format!(
-        "http://localhost:{}",
-        cli()
-            .port
-    )
+    format!("http://localhost:{}", cli().port)
 }
 
 #[derive(Clone, Debug, StructOpt)]
