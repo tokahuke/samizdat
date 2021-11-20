@@ -171,7 +171,7 @@ pub fn authenticate<const N: usize>(
     ];
 
     warp::header::optional("Authorization")
-        .and(warp::header::optional("Referrer"))
+        .and(warp::header::optional("Referer"))
         .map(
             move |authorization: Option<String>, referrer: Option<String>| match (
                 authorization,

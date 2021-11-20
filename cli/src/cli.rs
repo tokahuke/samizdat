@@ -88,6 +88,11 @@ pub enum Command {
         #[structopt(subcommand)]
         command: SubscriptionCommand,
     },
+    /// Commands for managing authentication of scopes.
+    Auth {
+        #[structopt(subcommand)]
+        command: AuthCommand,
+    }
 }
 
 impl Command {
@@ -117,6 +122,7 @@ impl Command {
             Command::Series { command } => command.execute().await,
             Command::Collection { command } => command.execute().await,
             Command::Subscription { command } => command.execute().await,
+            Command::Auth { command } => command.execute().await,
         }
     }
 }
@@ -188,6 +194,31 @@ impl SubscriptionCommand {
             SubscriptionCommand::Rm { public_key } => commands::subscription::rm(public_key).await,
             // SubscriptionCommand::Show { public_key } => todo!(),
             SubscriptionCommand::Ls { public_key } => commands::subscription::ls(public_key).await,
+        }
+    }
+}
+
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum AuthCommand {
+    Grant {
+        scope: String,
+        access_rights: Vec<String>,
+    },
+    Revoke {
+        scope: String,
+    },
+}
+
+impl AuthCommand {
+    async fn execute(self) -> Result<(), crate::Error> {
+        match self {
+            AuthCommand::Grant {scope, access_rights} => {
+                commands::auth::grant(scope, access_rights).await
+            },
+            AuthCommand::Revoke {scope} => {
+                commands::auth::revoke(scope).await
+            },
         }
     }
 }

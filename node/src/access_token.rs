@@ -65,7 +65,12 @@ pub struct Entity {
 impl Entity {
     pub fn from_path(path: &str) -> Option<Entity> {
         let mut split = path.split('/');
-        let r#type = split.next()?;
+        let mut r#type = split.next()?;
+
+        if r#type.is_empty() {
+            r#type = split.next()?;
+        }
+
         let identifier = split.next()?;
 
         Some(Entity {
