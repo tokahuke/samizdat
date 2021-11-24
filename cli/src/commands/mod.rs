@@ -244,7 +244,7 @@ pub async fn commit(
 
     let response = client
         .post(format!(
-            "{}/_seriesowners/{}/collections",
+            "{}/_seriesowners/{}/editions",
             crate::server(),
             series,
         ))

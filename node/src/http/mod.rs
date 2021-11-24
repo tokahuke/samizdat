@@ -8,13 +8,12 @@ mod returnable;
 mod series;
 mod subscriptions;
 
-pub use returnable::{Json, Return, Returnable};
 pub use auth::authenticate;
+pub use returnable::{Json, Return, Returnable};
 
 use warp::Filter;
 
 use crate::balanced_or_tree;
-
 
 /// Transforms a `Result<T, crate::Error>` into a Warp reply.
 fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
@@ -40,6 +39,14 @@ where
 /// Utility to create a tuple of one value _very explicitely_.
 fn tuple<T>(t: T) -> (T,) {
     (t,)
+}
+
+fn html(rendered: String) -> impl warp::Reply {
+    warp::reply::with_header(
+        warp::reply::with_status(rendered, http::StatusCode::OK),
+        http::header::CONTENT_TYPE,
+        "text/html; charset=UTF-8",
+    )
 }
 
 /// Optionaly implements the "tilde redirect". Similarly to Unix platforms, the `~`
@@ -137,6 +144,11 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
             Ok(warp::reply::with_status(
                 forbidden.to_string(),
                 http::StatusCode::FORBIDDEN,
+            ))
+        } else if let Some(error) = rejection.find::<crate::Error>() {
+            Ok(warp::reply::with_status(
+                error.to_string(),
+                http::StatusCode::BAD_REQUEST,
             ))
         } else {
             Err(rejection)

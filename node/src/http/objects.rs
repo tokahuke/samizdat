@@ -136,6 +136,27 @@ fn delete_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 }
 
 /// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Deserialize)]
+    #[serde(rename = "kebab-case")]
+    struct Query {
+        #[serde(default)]
+        bookmark: bool,
+    }
+
+    warp::path!("_objects" / Hash / "reissue")
+        .and(warp::post())
+        .and(authenticate([AccessRight::ManageObjects]))
+        .and(warp::query())
+        .map(|hash, query: Query| {
+            ObjectRef::new(hash)
+                .reissue(query.bookmark)
+                .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
+        })
+        .map(reply)
+}
+
+/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
 fn get_stats() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash / "stats")
         .and(warp::get())
@@ -157,27 +178,6 @@ fn get_byte_usefulness(
                     stats.map(|stats| stats.byte_usefulness(&crate::models::UsePrior::default()))
                 })
                 .map(returnable::Json)
-        })
-        .map(reply)
-}
-
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[derive(Deserialize)]
-    #[serde(rename = "kebab-case")]
-    struct Query {
-        #[serde(default)]
-        bookmark: bool,
-    }
-
-    warp::path!("_objects" / Hash / "reissue")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageObjects]))
-        .and(warp::query())
-        .map(|hash, query: Query| {
-            ObjectRef::new(hash)
-                .reissue(query.bookmark)
-                .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
         })
         .map(reply)
 }

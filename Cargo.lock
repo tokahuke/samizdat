@@ -155,6 +155,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn",
  "toml",
 ]
@@ -2269,6 +2270,7 @@ name = "samizdat-node"
 version = "0.1.0"
 dependencies = [
  "aes-gcm-siv",
+ "askama",
  "async-trait",
  "async_once",
  "base64-url",

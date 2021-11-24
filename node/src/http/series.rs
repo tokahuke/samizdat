@@ -20,7 +20,7 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         get_series_owners(),
         post_series_owner(),
         delete_series_owner(),
-        post_series(),
+        post_edition(),
     )
 }
 
@@ -80,7 +80,8 @@ fn delete_series_owner(
         .and(authenticate([AccessRight::ManageSeries]))
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            Ok(maybe_owner.map(|owner| owner.drop_if_exists()))
+            let existed = maybe_owner.map(|owner| owner.drop_if_exists()).transpose()?.is_some();
+            Ok(returnable::Json(existed))
         })
         .map(reply)
 }
@@ -112,7 +113,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 }
 
 /// Pushes a new collection to the series owner, creating a new edition.
-fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
         collection: String,
@@ -123,7 +124,7 @@ fn post_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         no_annouce: bool,
     }
 
-    warp::path!("_seriesowners" / String / "collections")
+    warp::path!("_seriesowners" / String / "editions")
         .and(warp::post())
         .and(authenticate([AccessRight::ManageSeries]))
         .and(warp::body::json())

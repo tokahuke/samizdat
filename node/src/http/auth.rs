@@ -1,23 +1,27 @@
+use askama::Template;
+use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
 use serde_derive::Deserialize;
-use warp::Filter;
 use std::fmt::{self, Display};
 use url::Url;
+use warp::Filter;
 
-use crate::access_token::{AccessRight, Entity, access_token};
-use crate::db::{db, Table};
+use crate::access_token::{access_token, AccessRight, Entity};
 use crate::balanced_or_tree;
 use crate::cli;
+use crate::db::{db, Table};
 
-use super::{reply, Json};
+use super::{html, reply, Json};
 
 /// The authrntication management API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
+        get_auth_current(),
         get_auth(),
         get_auths(),
         patch_auth(),
         delete_auth(),
+        get_register(),
     )
 }
 
@@ -39,6 +43,33 @@ fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
         })
         .map(reply)
 }
+
+
+fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_auth" / "_current")
+        .and(warp::get())
+        .and(warp::header("Referer"))
+        .map(|referer: String| {
+            let maybe_entity = entity_from_referer(&referer)
+                .map_err(|err| crate::Error::Message(format!("Referer {} not an entity: {}", referer, err)))?;
+            
+            if let Some(entity) = maybe_entity {
+
+                let serialized = bincode::serialize(&entity).expect("can serialize");
+                let current: Vec<AccessRight> = db()
+                    .get_cf(Table::AccessRights.get(), &serialized)?
+                    .map(|rights| bincode::deserialize(&rights))
+                    .transpose()?
+                    .unwrap_or_default();
+    
+                Ok(Json(current))
+            } else {
+                Err(crate::Error::Message("Accessing /_auth/_current from trusted context".to_owned()))
+            }
+        })
+        .map(reply)
+}
+
 
 fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth")
@@ -112,7 +143,6 @@ fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .map(reply)
 }
 
-
 /// Authentication header was sent, but token was invalid.
 #[derive(Debug)]
 pub enum Forbidden {
@@ -143,11 +173,8 @@ pub struct Unauthorized;
 
 impl warp::reject::Reject for Unauthorized {}
 
-/// Authenticate to the private part of the API. This requires access to the filesystem (only that)
-pub fn authenticate<const N: usize>(
-    required_rights: [AccessRight; N],
-) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
-    let samizdat_origins = [
+lazy_static! {
+    static ref SAMIZDA_ORIGINS: [url::Origin; 4] = [
         url::Origin::Tuple(
             "http".to_owned(),
             url::Host::Domain("localhost".to_owned()),
@@ -169,13 +196,53 @@ pub fn authenticate<const N: usize>(
             cli().port,
         ),
     ];
+}
 
+/// Checks whether the request is _realy_ comming from Samizdat. This is a
+/// complement to CORS.
+fn check_origin(referer: &Url) -> Result<(), Forbidden> {
+    let origin = referer.origin();
+
+    // Find out if some cross-origin thing is trying ot trick you.
+    // TODO: also implement proper CORS.
+    if !SAMIZDA_ORIGINS.contains(&origin) {
+        Err(Forbidden::BadOrigin(origin))
+    } else {
+        Ok(())
+    }
+}
+
+/// Paths which are *always* trusted.
+fn is_trusted_context(referer: &Url) -> bool {
+    ["/_register"].contains(&referer.path())
+}
+
+/// Returns `Ok(None)` when trusted context.
+fn entity_from_referer(raw_referer: &str) -> Result<Option<Entity>, Forbidden> {
+    let referer: Url = raw_referer.parse().unwrap();
+
+    check_origin(&referer)?;
+
+    if is_trusted_context(&referer) {
+        Ok(None)
+    } else {
+        // Find which entity is requesting authorization.
+        Ok(Some(Entity::from_path(referer.path()).ok_or_else(
+            || Forbidden::NotAnEntity(referer.path().to_owned()),
+        )?))
+    }
+}
+
+/// Authenticate to the private part of the API. This requires access to the filesystem (only that)
+pub fn authenticate<const N: usize>(
+    required_rights: [AccessRight; N],
+) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
     warp::header::optional("Authorization")
         .and(warp::header::optional("Referer"))
         .map(
-            move |authorization: Option<String>, referrer: Option<String>| match (
+            move |authorization: Option<String>, referer: Option<String>| match (
                 authorization,
-                referrer,
+                referer,
             ) {
                 (None, None) => Err(warp::reject::custom(Unauthorized)),
                 (Some(authorization), _) => {
@@ -189,45 +256,72 @@ pub fn authenticate<const N: usize>(
                         Err(warp::reject::custom(Forbidden::BadToken(token.to_owned())))
                     }
                 }
-                (_, Some(referrer)) => {
-                    // Need the referrer to judge if page can access API route.
-                    let referrer: Url = referrer.parse().unwrap();
-                    let origin = referrer.origin();
+                (_, Some(referer)) => {
+                    let maybe_entity = entity_from_referer(&referer)
+                        .map_err(|forbidden| warp::reject::custom(forbidden))?;
 
-                    // Find out if some cross-origin thing is trying ot trick you.
-                    // TODO: also implement proper CORS.
-                    if !samizdat_origins.contains(&origin) {
-                        return Err(warp::reject::custom(Forbidden::BadOrigin(origin)));
-                    }
+                    if let Some(entity) = maybe_entity {
+                        // Get rights from db:
+                        let serialized = db()
+                            .get_cf(
+                                Table::AccessRights.get(),
+                                bincode::serialize(&entity).expect("can serialize"),
+                            )
+                            .unwrap()
+                            .ok_or_else(|| warp::reject::custom(Forbidden::InsuficientPrivilege))?;
+                        let granted_rights: Vec<AccessRight> =
+                            bincode::deserialize(&serialized).unwrap();
 
-                    // Find which entity is requesting authorization.
-                    let entity = Entity::from_path(referrer.path()).ok_or_else(|| {
-                        warp::reject::custom(Forbidden::NotAnEntity(referrer.path().to_owned()))
-                    })?;
-
-                    // Get rights from db:
-                    let serialized = db()
-                        .get_cf(
-                            Table::AccessRights.get(),
-                            bincode::serialize(&entity).expect("can serialize"),
-                        )
-                        .unwrap()
-                        .ok_or_else(|| warp::reject::custom(Forbidden::InsuficientPrivilege))?;
-                    let granted_rights: Vec<AccessRight> =
-                        bincode::deserialize(&serialized).unwrap();
-
-                    // See if rights correspond to what is needed:
-                    if granted_rights
-                        .iter()
-                        .any(|right| required_rights.contains(right))
-                    {
-                        Ok(())
+                        // See if rights correspond to what is needed:
+                        if granted_rights
+                            .iter()
+                            .any(|right| required_rights.contains(right))
+                        {
+                            Ok(())
+                        } else {
+                            Err(warp::reject::custom(Forbidden::InsuficientPrivilege))
+                        }
                     } else {
-                        Err(warp::reject::custom(Forbidden::InsuficientPrivilege))
+                        Ok(())
                     }
                 }
             },
         )
         .and_then(|auth| async move { auth })
         .untuple_one()
+}
+
+#[derive(askama::Template)]
+#[template(path = "register.html")]
+struct RegisterTemplate<'a> {
+    entity: &'a Entity,
+    rights: &'a [AccessRight],
+}
+
+fn get_register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_register")
+        .and(warp::header("Referer"))
+        .and(warp::query())
+        .map(|referer: String, query: Vec<(String, AccessRight)>| {
+            let maybe_entity = entity_from_referer(&referer)
+                .map_err(|forbidden| warp::reject::custom(forbidden))?;
+
+            if let Some(entity) = maybe_entity {
+                let register = RegisterTemplate {
+                    entity: &entity,
+                    rights: &*query
+                        .into_iter()
+                        .filter(|(field, _)| field == "right")
+                        .map(|(_, right)| right)
+                        .collect::<Vec<_>>(),
+                };
+
+                Ok(html(register.render().expect("rendering _register failed")))
+            } else {
+                Err(warp::reject::custom(crate::Error::Message(
+                    "Accessing /_register from trusted context".to_owned(),
+                )))
+            }
+        })
+        .and_then(|auth: Result<_, warp::Rejection>| async move { auth })
 }

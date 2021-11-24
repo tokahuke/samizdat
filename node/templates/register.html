@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <title>Register an App | SAMIZDAT</title>
+  </head>
+  <body>
+    <h1>The scope <br><code>{{ entity }}</code><br> wants to access your SAMIZDAT node</h1>
+    <p>The following rights were requested:</p>
+    <ul>
+      {% for right in rights %}
+        <li>
+          {% match right %}
+            {% when AccessRight::ManageObjects %}
+              Manage your local objects, including uploading new objects and deleting existing
+              ones.
+            {% when AccessRight::GetObjectStats %}
+              Get statistics on object use and user behavior.
+            {% when AccessRight::ManageBookmarks %}
+              Manage bookmarks.
+            {% when AccessRight::ManageCollections %}
+              Manage your local objects, including uploading whole new collections.
+            {% when AccessRight::ManageSeries %}
+              Manage your locally owned series, including reading your private keys and uploading
+              new editions.
+            {% when AccessRight::ManageSubscriptions %}
+              Manage your subscriptions to series.
+          {% endmatch %}
+        </li>
+      {% endfor %}
+    </ul>
+    <p>
+      Make sure you <em>trust</em> this scope before continuing. You may be sharing sensitive
+      information with it.
+    </p>
+    <div>
+      <button onclick="cancel()">Cancel</button>
+      <button onclick="allow()">Allow</button>
+    </div>
+    <script>
+      async function allow() {
+        const response = await fetch("/_auth{{ entity|safe }}", {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+          body: `{ "granted_rights": {{ rights|json }} }`,
+        });
+
+        window.dispatchEvent(new CustomEvent("auth", {
+          detail: {
+            status: response.status == 204 ? "success" : "fail",
+          }
+        }));
+        
+        window.close();
+      }
+
+      function cancel() {
+        window.dispatchEvent(new CustomEvent("auth", {
+          detail: {
+            status: "canceled",
+          }
+        }));
+
+        window.close();
+      }
+    </script>
+  </body>
+</html>

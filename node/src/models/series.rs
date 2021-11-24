@@ -316,6 +316,7 @@ impl SeriesRef {
 struct EditionContent {
     collection: CollectionRef,
     timestamp: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "humantime_serde")]
     ttl: Duration,
 }
 

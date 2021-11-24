@@ -41,3 +41,4 @@ decorum = "0.3.1"
 semver = "1.0.4"
 rand = "0.8.4"
 url = "2.2.2"
+askama = {version = "0.10.5", features = ["serde-json"] }

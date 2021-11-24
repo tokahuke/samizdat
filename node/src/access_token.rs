@@ -1,4 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 
@@ -60,6 +61,12 @@ pub enum AccessRight {
 pub struct Entity {
     r#type: String,
     identifier: String,
+}
+
+impl Display for Entity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "/{}/{}", self.r#type, self.identifier)
+    }
 }
 
 impl Entity {
