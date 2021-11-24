@@ -7,7 +7,7 @@ use crate::access_token::AccessRight;
 use crate::balanced_or_tree;
 use crate::models::{Dropable, Subscription, SubscriptionKind, SubscriptionRef};
 
-use super::{authenticate, reply, returnable};
+use super::{api_reply, authenticate};
 
 /// The entrypoint of the subscriptions API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -40,7 +40,7 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
             ));
             Ok(subscription?.public_key.to_string())
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Removes a subscription.
@@ -51,9 +51,9 @@ fn delete_subscription(
         .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|public_key: Key| {
             let subscription = SubscriptionRef::new(public_key);
-            Ok(subscription.drop_if_exists())
+            subscription.drop_if_exists()
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Gets information associates with a series owner
@@ -64,9 +64,9 @@ fn get_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|public_key: Key| {
             let maybe_subscription = SubscriptionRef::new(public_key).get()?;
-            Ok(returnable::Json(maybe_subscription))
+            Ok(maybe_subscription)
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Gets information associates with a series owner
@@ -77,7 +77,7 @@ fn get_subscriptions() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|| {
             let subscriptions = SubscriptionRef::get_all()?;
-            Ok(returnable::Json(subscriptions))
+            Ok(subscriptions)
         })
-        .map(reply)
+        .map(api_reply)
 }

@@ -4,36 +4,48 @@ mod auth;
 mod collections;
 mod objects;
 mod resolvers;
-mod returnable;
 mod series;
 mod subscriptions;
 
 pub use auth::authenticate;
-pub use returnable::{Json, Return, Returnable};
 
 use warp::Filter;
 
 use crate::balanced_or_tree;
 
-/// Transforms a `Result<T, crate::Error>` into a Warp reply.
-fn reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
-where
-    T: Returnable,
-{
-    warp::reply::with_header(
-        warp::reply::with_status(t.render().into_owned(), t.status_code()),
-        http::header::CONTENT_TYPE,
-        &*t.content_type(),
-    )
+fn error_status_code(err: &crate::Error) -> http::StatusCode {
+    match err {
+        crate::Error::Message(_) => http::StatusCode::BAD_REQUEST,
+        crate::Error::Base64(_) => http::StatusCode::BAD_REQUEST,
+        crate::Error::Db(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+        crate::Error::Io(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+        crate::Error::BadHashLength(_) => http::StatusCode::BAD_REQUEST,
+        crate::Error::Bincode(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+        crate::Error::QuicConnectionError(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+        crate::Error::AllCandidatesFailed => http::StatusCode::BAD_GATEWAY,
+        crate::Error::InvalidCollectionItem => http::StatusCode::BAD_REQUEST,
+        crate::Error::InvalidEdition => http::StatusCode::BAD_REQUEST,
+        crate::Error::DifferentePublicKeys => http::StatusCode::BAD_REQUEST,
+        crate::Error::NoHeaderRead => http::StatusCode::INTERNAL_SERVER_ERROR,
+        //_ => http::StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
-/// Transforms a `Result<T, crate::Error>` future into a Warp reply.
-async fn async_reply<F, T>(fut: F) -> Result<Box<dyn warp::Reply>, warp::Rejection>
+fn api_reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
-    F: std::future::Future<Output = Result<T, crate::Error>>,
-    T: 'static + Returnable,
+    T: serde::Serialize,
 {
-    Ok(Box::new(reply(fut.await)) as Box<dyn warp::Reply>)
+    let status = t
+        .as_ref()
+        .map_err(error_status_code)
+        .err()
+        .unwrap_or_default();
+    let json = t.map_err(|err| err.to_string());
+    warp::reply::with_header(
+        warp::reply::with_status(serde_json::to_string_pretty(&json).expect("can serialize JSON"), status),
+        http::header::CONTENT_TYPE,
+        "application/json",
+    )
 }
 
 /// Utility to create a tuple of one value _very explicitely_.
@@ -161,6 +173,6 @@ pub fn post_vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 {
     warp::post()
         .and(warp::path!("_vacuum"))
-        .map(|| crate::vacuum::vacuum().map(returnable::Json))
-        .map(reply)
+        .map(|| crate::vacuum::vacuum())
+        .map(api_reply)
 }

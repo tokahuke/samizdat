@@ -11,7 +11,7 @@ use crate::balanced_or_tree;
 use crate::cli;
 use crate::db::{db, Table};
 
-use super::{html, reply, Json};
+use super::{api_reply, html};
 
 /// The authrntication management API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -39,37 +39,38 @@ fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
                 .transpose()?
                 .unwrap_or_default();
 
-            Ok(Json(current)) as Result<_, crate::Error>
+            Ok(current) as Result<_, crate::Error>
         })
-        .map(reply)
+        .map(api_reply)
 }
 
-
-fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("_auth" / "_current")
         .and(warp::get())
         .and(warp::header("Referer"))
         .map(|referer: String| {
-            let maybe_entity = entity_from_referer(&referer)
-                .map_err(|err| crate::Error::Message(format!("Referer {} not an entity: {}", referer, err)))?;
-            
-            if let Some(entity) = maybe_entity {
+            let maybe_entity = entity_from_referer(&referer).map_err(|err| {
+                crate::Error::Message(format!("Referer {} not an entity: {}", referer, err))
+            })?;
 
+            if let Some(entity) = maybe_entity {
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let current: Vec<AccessRight> = db()
                     .get_cf(Table::AccessRights.get(), &serialized)?
                     .map(|rights| bincode::deserialize(&rights))
                     .transpose()?
                     .unwrap_or_default();
-    
-                Ok(Json(current))
+
+                Ok(current)
             } else {
-                Err(crate::Error::Message("Accessing /_auth/_current from trusted context".to_owned()))
+                Err(crate::Error::Message(
+                    "Accessing /_auth/_current from trusted context".to_owned(),
+                ))
             }
         })
-        .map(reply)
+        .map(api_reply)
 }
-
 
 fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth")
@@ -86,9 +87,9 @@ fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                 })
                 .collect::<Result<Vec<_>, crate::Error>>()?;
 
-            Ok(Json(all_auths)) as Result<_, crate::Error>
+            Ok(all_auths) as Result<_, crate::Error>
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -123,7 +124,7 @@ fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
 
             Ok(()) as Result<_, crate::Error>
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -140,7 +141,7 @@ fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 
             Ok(()) as Result<(), crate::Error>
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Authentication header was sent, but token was invalid.

@@ -10,7 +10,7 @@ use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
-use super::{authenticate, reply, returnable, tuple};
+use super::{api_reply, authenticate, tuple};
 
 /// The entrypoint of the series API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -67,9 +67,9 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                 )
             };
 
-            Ok(returnable::Json(series_owner?))
+            Ok(series_owner?)
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Removes a series owner
@@ -80,10 +80,13 @@ fn delete_series_owner(
         .and(authenticate([AccessRight::ManageSeries]))
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            let existed = maybe_owner.map(|owner| owner.drop_if_exists()).transpose()?.is_some();
-            Ok(returnable::Json(existed))
+            let existed = maybe_owner
+                .map(|owner| owner.drop_if_exists())
+                .transpose()?
+                .is_some();
+            Ok(existed)
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Gets information associates with a series owner
@@ -96,7 +99,7 @@ fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
             Ok(maybe_owner.map(|owner| owner.series().to_string()))
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Lists all series owners.
@@ -107,9 +110,9 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .and(authenticate([AccessRight::ManageSeries]))
         .map(|| {
             let series = SeriesOwner::get_all()?;
-            Ok(returnable::Json(series))
+            Ok(series)
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Pushes a new collection to the series owner, creating a new edition.
@@ -144,12 +147,12 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
                     });
                 }
 
-                Ok(Some(returnable::Json(edition)))
+                Ok(edition)
             } else {
-                Ok(None)
+                Err(crate::Error::Message(format!("Series owner {} not found", series_owner_name)))
             }
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Gets the content of a collection item using the series public key. This will give the

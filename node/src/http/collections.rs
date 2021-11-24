@@ -9,7 +9,7 @@ use crate::balanced_or_tree;
 use crate::models::{CollectionRef, ItemPathBuf, ObjectRef};
 
 use super::resolvers::resolve_item;
-use super::{authenticate, reply, returnable, tuple};
+use super::{authenticate, api_reply, tuple};
 
 /// The entrypoint of the collection public API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -41,13 +41,9 @@ pub fn post_collection(
                     })
                     .collect::<Result<Vec<_>, crate::Error>>()?,
             )?;
-            Ok(returnable::Return {
-                content_type: "text/plain".to_owned(),
-                status_code: http::StatusCode::OK,
-                content: collection.hash().to_string().as_bytes().to_vec(),
-            })
+            Ok(collection.hash().to_string())
         })
-        .map(reply)
+        .map(api_reply)
 }
 
 /// Gets the contents of a collection item.
