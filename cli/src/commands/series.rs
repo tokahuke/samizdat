@@ -3,7 +3,7 @@ use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
 
-use crate::access_token;
+use crate::api;
 
 use super::show_table;
 
@@ -13,71 +13,41 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
         series_owner_name: &'a str,
     }
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/_seriesowners", crate::server()))
-        .json(&Request {
+    api::post(
+        "/_seriesowners",
+        Request {
             series_owner_name: &*series_name,
-        })
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    println!("Series key: {}", response.text().await?);
+        },
+    )
+    .await??;
 
     Ok(())
 }
 
 pub async fn rm(series_name: String) -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .delete(format!("{}/_seriesowners/{}", crate::server(), series_name))
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
-
-    println!("Status: {}", response.status());
-
+    api::delete(format!("/_seriesowners/{}", series_name)).await??;
     Ok(())
 }
 
 pub async fn show(series_name: String) -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/_seriesowners/{}", crate::server(), series_name))
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    println!("Series public key: {}", response.text().await?);
-
+    api::get(format!("/_seriesowners/{}", series_name)).await??;
     Ok(())
 }
 
 pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error> {
     pub async fn series_list_series(_series_owner_name: String) -> Result<(), crate::Error> {
-        // let client = reqwest::Client::new();
         todo!()
     }
 
     pub async fn series_list_all() -> Result<(), crate::Error> {
-        let client = reqwest::Client::new();
-        let response = client
-            .get(format!("{}/_seriesowners", crate::server()))
-            .header("Authorization", format!("Bearer {}", access_token()))
-            .send()
-            .await?;
-
-        log::info!("Status: {}", response.status());
-
         #[derive(Debug, Deserialize)]
         struct SeriesOwner {
             name: String,
             keypair: ed25519_dalek::Keypair,
             default_ttl: std::time::Duration,
         }
+
+        let response: Vec<SeriesOwner> = api::get("/_seriesowners").await??;
 
         #[derive(Tabled)]
         struct Row {
@@ -89,8 +59,6 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error>
 
         show_table(
             response
-                .json::<Vec<SeriesOwner>>()
-                .await?
                 .into_iter()
                 .map(|series_owner| Row {
                     name: series_owner.name,

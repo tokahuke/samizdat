@@ -92,7 +92,7 @@ pub enum Command {
     Auth {
         #[structopt(subcommand)]
         command: AuthCommand,
-    }
+    },
 }
 
 impl Command {
@@ -198,7 +198,6 @@ impl SubscriptionCommand {
     }
 }
 
-
 #[derive(Clone, Debug, StructOpt)]
 pub enum AuthCommand {
     Grant {
@@ -213,12 +212,11 @@ pub enum AuthCommand {
 impl AuthCommand {
     async fn execute(self) -> Result<(), crate::Error> {
         match self {
-            AuthCommand::Grant {scope, access_rights} => {
-                commands::auth::grant(scope, access_rights).await
-            },
-            AuthCommand::Revoke {scope} => {
-                commands::auth::revoke(scope).await
-            },
+            AuthCommand::Grant {
+                scope,
+                access_rights,
+            } => commands::auth::grant(scope, access_rights).await,
+            AuthCommand::Revoke { scope } => commands::auth::revoke(scope).await,
         }
     }
 }

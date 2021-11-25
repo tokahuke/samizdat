@@ -1,6 +1,8 @@
 use failure_derive::Fail;
 use std::io;
 
+use crate::api::ApiError;
+
 #[derive(Debug, Fail)]
 pub enum Error {
     #[fail(display = "{}", _0)]
@@ -15,6 +17,8 @@ pub enum Error {
     DeserializeToml(toml::de::Error),
     #[fail(display = "notify error: {}", _0)]
     NotifyError(notify::Error),
+    #[fail(display = "samizdat error: {}", _0)]
+    ApiError(String),
 }
 
 impl From<reqwest::Error> for Error {
@@ -56,5 +60,11 @@ impl From<crate::Error> for String {
 impl From<&'static str> for Error {
     fn from(e: &'static str) -> Error {
         Error::Message(e.to_string())
+    }
+}
+
+impl From<ApiError> for Error {
+    fn from(e: ApiError) -> Error {
+        Error::ApiError(e.0)
     }
 }

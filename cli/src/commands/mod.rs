@@ -1,7 +1,7 @@
+pub mod auth;
 pub mod collection;
 pub mod series;
 pub mod subscription;
-pub mod auth;
 
 use askama::Template;
 use futures::prelude::*;
@@ -17,8 +17,9 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Key, PrivateKey, Signed};
 
-use crate::access_token;
+use crate::api::ApiError;
 use crate::html::maybe_proxy_page;
+use crate::{access_token, api};
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
@@ -31,8 +32,7 @@ pub async fn upload(
     bookmark: bool,
     is_draft: bool,
 ) -> Result<(), crate::Error> {
-    let client = reqwest::Client::new();
-    let response = client
+    let response = api::CLIENT
         .post(format!(
             "{}/_objects?bookmark={}&is-draft={}",
             crate::server(),
@@ -46,7 +46,8 @@ pub async fn upload(
         .await?;
 
     log::info!("Status: {}", response.status());
-    println!("Object hash: {}", response.text().await?);
+    let returned: Result<String, ApiError> = response.json().await?;
+    println!("Object hash: {}", returned?);
 
     Ok(())
 }
@@ -61,59 +62,49 @@ pub async fn init() -> Result<(), crate::Error> {
         series_owner_name: &'a str,
     }
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/_seriesowners", crate::server()))
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .json(&Request {
-            series_owner_name: &name,
-        })
-        .send()
-        .await?;
-    let response_debug = client
-        .post(format!("{}/_seriesowners", crate::server()))
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .json(&Request {
-            series_owner_name: &debug_name,
-        })
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        #[derive(Deserialize)]
-        struct Payoad {
-            //name: String,
-            keypair: ed25519_dalek::Keypair,
-            default_ttl: Duration,
-        }
-
-        let text = response.text().await?;
-        let payload: Payoad = serde_json::from_str(&text)?;
-        let text_debug = response_debug.text().await?;
-        let payload_debug: Payoad = serde_json::from_str(&text_debug)?;
-
-        let rendered = crate::manifest::ManifestTemplate {
-            name: &name,
-            public_key: &Key::from(payload.keypair.public).to_string(),
-            ttl: &humantime::format_duration(payload.default_ttl).to_string(),
-            debug_name: &debug_name,
-            public_key_debug: &Key::from(payload_debug.keypair.public).to_string(),
-        }
-        .render()
-        .expect("can render");
-
-        let rendered_private = crate::manifest::PrivateManifestTemplate {
-            private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
-            private_key_debug: &PrivateKey::from(payload_debug.keypair.secret).to_string(),
-        }
-        .render()
-        .expect("can render");
-
-        fs::write("./Samizdat.toml", rendered)?;
-        fs::write("./.Samizdat.priv", rendered_private)?;
-    } else {
-        println!("Bad status: {}", response.status());
+    #[derive(Deserialize)]
+    struct Payoad {
+        //name: String,
+        keypair: ed25519_dalek::Keypair,
+        #[serde(with = "humantime_serde")]
+        default_ttl: Duration,
     }
+
+    let payload: Payoad = api::post(
+        "/_seriesowners",
+        Request {
+            series_owner_name: &name,
+        },
+    )
+    .await??;
+
+    let payload_debug: Payoad = api::post(
+        "/_seriesowners",
+        Request {
+            series_owner_name: &debug_name,
+        },
+    )
+    .await??;
+
+    let rendered = crate::manifest::ManifestTemplate {
+        name: &name,
+        public_key: &Key::from(payload.keypair.public).to_string(),
+        ttl: &humantime::format_duration(payload.default_ttl).to_string(),
+        debug_name: &debug_name,
+        public_key_debug: &Key::from(payload_debug.keypair.public).to_string(),
+    }
+    .render()
+    .expect("can render");
+
+    let rendered_private = crate::manifest::PrivateManifestTemplate {
+        private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
+        private_key_debug: &PrivateKey::from(payload_debug.keypair.secret).to_string(),
+    }
+    .render()
+    .expect("can render");
+
+    fs::write("./Samizdat.toml", rendered)?;
+    fs::write("./.Samizdat.priv", rendered_private)?;
 
     Ok(())
 }
@@ -167,8 +158,8 @@ pub async fn commit(
     log::debug!("committing: {:#?}", all_files);
 
     let client = reqwest::Client::new();
-    let client = &client; // TODO: awaiting new Rust edition.
-
+    let client = &client;
+    
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
             log::info!("Creating object for {:?}", path);
@@ -188,7 +179,7 @@ pub async fn commit(
                 .send()
                 .await?;
             let hash = if response.status().is_success() {
-                response.text().await?
+                response.json::<Result<String, ApiError>>().await??
             } else {
                 return Err("??".into()) as Result<_, crate::Error>;
             };
@@ -211,18 +202,14 @@ pub async fn commit(
         is_draft: bool,
     }
 
-    let response = client
-        .post(format!("{}/_collections", crate::server()))
-        .json(&Request {
+    let collection = api::post(
+        "/_collections",
+        Request {
             hashes,
             is_draft: !is_release,
-        })
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    let collection = response.text().await?;
+        },
+    )
+    .await??;
 
     let series = if is_release {
         manifest.series.name
@@ -242,48 +229,22 @@ pub async fn commit(
         no_annouce: bool,
     }
 
-    let response = client
-        .post(format!(
-            "{}/_seriesowners/{}/editions",
-            crate::server(),
-            series,
-        ))
-        .json(&CollectionRequest {
-            collection,
-            ttl,
-            no_annouce,
-        })
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
-
-    if response.status().is_client_error() {
-        let status = response.status();
-        let text = response.text().await?;
-        println!("Status: {}", status);
-        println!("Response: {}", text);
-
-        return Err(crate::Error::Message(format!(
-            "series {} does not exist",
-            series
-        )));
-    }
-
     #[derive(Debug, Clone, Deserialize)]
     pub struct CollectionRef {
         pub hash: Hash,
     }
 
     #[derive(Debug, Deserialize)]
-    struct SeriesItemContent {
+    struct EditionContent {
         collection: CollectionRef,
         timestamp: chrono::DateTime<chrono::Utc>,
+        #[serde(with = "humantime_serde")]
         ttl: Duration,
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct SeriesItem {
-        signed: Signed<SeriesItemContent>,
+    pub struct Edition {
+        signed: Signed<EditionContent>,
         //public_key: Key,
         //freshness: chrono::DateTime<chrono::Utc>,
     }
@@ -297,21 +258,32 @@ pub async fn commit(
         ttl: String,
     }
 
-    let text = response.text().await?;
-    let item: SeriesItem = serde_json::from_str(&text).map_err(|err| {
-        println!("bad json: {}", text);
-        err
-    })?;
+    let edition: Result<Edition, ApiError> = api::post(
+        format!("/_seriesowners/{}/editions", series,),
+        CollectionRequest {
+            collection,
+            ttl,
+            no_annouce,
+        },
+    )
+    .await?;
 
-    show_table([Row {
-        series: series.to_owned(),
-        // public_key: item.public_key,
-        collection: item.signed.collection.hash,
-        timestamp: item.signed.timestamp,
-        ttl: format!("{:?}", item.signed.ttl),
-    }]);
+    if let Ok(edition) = edition {
+        show_table([Row {
+            series: series.to_owned(),
+            // public_key: item.public_key,
+            collection: edition.signed.collection.hash,
+            timestamp: edition.signed.timestamp,
+            ttl: format!("{:?}", edition.signed.ttl),
+        }]);
 
-    Ok(())
+        Ok(())
+    } else {
+        Err(crate::Error::Message(format!(
+            "series {} does not exist",
+            series
+        )))
+    }
 }
 
 pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
@@ -390,34 +362,31 @@ pub async fn import() -> Result<(), crate::Error> {
         keypair: KeyPair<'a>,
     }
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/_seriesowners", crate::server()))
-        .json(&Request {
+    let _response = api::post(
+        "/_seriesowners",
+        Request {
             series_owner_name: &manifest.series.name,
             keypair: KeyPair {
                 public_key: &manifest.series.public_key,
                 private_key: &private_manifest.private_key,
             },
-        })
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
+        },
+    )
+    .await??;
 
-    let _debug_response = client
-        .post(format!("{}/_seriesowners", crate::server()))
-        .json(&Request {
+    let _debug_response = api::post(
+        "/_seriesowners",
+        Request {
             series_owner_name: &manifest.debug.name,
             keypair: KeyPair {
                 public_key: &manifest.debug.public_key,
                 private_key: &private_manifest.private_key_debug,
             },
-        })
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .send()
-        .await?;
+        },
+    )
+    .await??;
 
-    println!("Status: {}", response.status());
+    // println!("Status: {}", response.status());
     // println!("Response: {}", response.text().await?);
 
     Ok(())
