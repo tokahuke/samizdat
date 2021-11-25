@@ -362,7 +362,7 @@ pub async fn import() -> Result<(), crate::Error> {
         keypair: KeyPair<'a>,
     }
 
-    let _response = api::post(
+    let _response: serde_json::Value = api::post(
         "/_seriesowners",
         Request {
             series_owner_name: &manifest.series.name,
@@ -374,7 +374,7 @@ pub async fn import() -> Result<(), crate::Error> {
     )
     .await??;
 
-    let _debug_response = api::post(
+    let _debug_response: serde_json::Value = api::post(
         "/_seriesowners",
         Request {
             series_owner_name: &manifest.debug.name,

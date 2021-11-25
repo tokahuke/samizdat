@@ -57,7 +57,7 @@ pub enum AccessRight {
     ManageSubscriptions,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
     r#type: String,
     identifier: String,

@@ -41,6 +41,10 @@ pub fn init_cli() -> Result<(), crate::Error> {
 
     log::info!("Arguments from command line: {:#?}", cli);
 
+    std::fs::create_dir_all(&cli.data)?;
+
+    log::debug!("Initialized data folder");
+
     unsafe {
         CLI = Some(cli);
     }

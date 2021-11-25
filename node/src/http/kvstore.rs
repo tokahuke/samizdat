@@ -1,6 +1,6 @@
 use serde_derive::Deserialize;
 use warp::Filter;
-use rocksdb::WriteBatch;
+use rocksdb::{WriteBatch, IteratorMode};
 
 use crate::access::{Entity};
 use crate::balanced_or_tree;
@@ -13,12 +13,8 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     balanced_or_tree!(get(), put(), delete(), clear(),)
 }
 
-fn prefix(entity: &Entity) -> Vec<u8> {
-    bincode::serialize(&(entity, '\0', "")).expect("can serialize")
-}
-
 fn key(entity: &Entity, tail: &warp::path::Tail) -> Vec<u8> {
-    bincode::serialize(&(entity, '\0', tail.as_str())).expect("can serialize")
+    bincode::serialize(&(entity, tail.as_str())).expect("can serialize")
 }
 
 pub fn get() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -73,8 +69,11 @@ pub fn clear() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .map(|entity: Entity| {
             let mut batch = WriteBatch::default();
 
-            for (key, _) in db().prefix_iterator_cf(Table::KVStore.get(), prefix(&entity)) {
-                batch.delete_cf(Table::KVStore.get(), &key);
+            for (key, _) in db().iterator_cf(Table::KVStore.get(), IteratorMode::Start) {
+                let (key_entity, _): (Entity, String) = bincode::deserialize(&*key)?;
+                if entity == key_entity {
+                    batch.delete_cf(Table::KVStore.get(), &key);
+                }
             }
 
             db().write(batch)?;

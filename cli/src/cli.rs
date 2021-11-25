@@ -27,7 +27,7 @@ pub fn server() -> String {
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Cli {
-    #[structopt(long, short, env, default_value = "/var/samizdat/node")]
+    #[structopt(long, short, env, default_value = "/var/run/samizdat/node")]
     pub data: PathBuf,
     #[structopt(long, short, env, default_value = "4510")]
     pub port: u16,
