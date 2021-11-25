@@ -3,7 +3,7 @@ use warp::Filter;
 
 use samizdat_common::Hash;
 
-use crate::access_token::AccessRight;
+use crate::access::AccessRight;
 use crate::balanced_or_tree;
 use crate::models::{BookmarkType, Dropable, ObjectHeader, ObjectRef};
 

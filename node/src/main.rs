@@ -1,4 +1,4 @@
-mod access_token;
+mod access;
 mod cli;
 mod db;
 mod http;
@@ -21,7 +21,7 @@ use warp::Filter;
 
 use samizdat_common::logger;
 
-use access_token::init_access_token;
+use access::init_access_token;
 use cli::init_cli;
 use db::init_db;
 use system::Hubs;

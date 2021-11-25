@@ -2,6 +2,7 @@
 
 mod auth;
 mod collections;
+mod kvstore;
 mod objects;
 mod resolvers;
 mod series;
@@ -42,7 +43,10 @@ where
         .unwrap_or_default();
     let json = t.map_err(|err| err.to_string());
     warp::reply::with_header(
-        warp::reply::with_status(serde_json::to_string_pretty(&json).expect("can serialize JSON"), status),
+        warp::reply::with_status(
+            serde_json::to_string_pretty(&json).expect("can serialize JSON"),
+            status,
+        ),
         http::header::CONTENT_TYPE,
         "application/json",
     )
@@ -138,6 +142,7 @@ pub fn general_redirect(
 /// The entrypoint of the Samizdat node public HTTP API.
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
+        kvstore::api(), // kvstore not subject to redirect rules.
         general_redirect(),
         objects::api(),
         collections::api(),
@@ -147,9 +152,9 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
         post_vacuum(),
     )
     .recover(|rejection: warp::Rejection| async move {
-        if let Some(auth::Unauthorized) = rejection.find() {
+        if let Some(unauthorized) = rejection.find::<auth::Unauthorized>() {
             Ok(warp::reply::with_status(
-                "Unauthorized".to_owned(),
+                unauthorized.to_string(),
                 http::StatusCode::UNAUTHORIZED,
             ))
         } else if let Some(forbidden) = rejection.find::<auth::Forbidden>() {

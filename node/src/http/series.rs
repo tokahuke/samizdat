@@ -5,7 +5,7 @@ use warp::Filter;
 
 use samizdat_common::Key;
 
-use crate::access_token::AccessRight;
+use crate::access::AccessRight;
 use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
@@ -149,7 +149,10 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
 
                 Ok(edition)
             } else {
-                Err(crate::Error::Message(format!("Series owner {} not found", series_owner_name)))
+                Err(crate::Error::Message(format!(
+                    "Series owner {} not found",
+                    series_owner_name
+                )))
             }
         })
         .map(api_reply)

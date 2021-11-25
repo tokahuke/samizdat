@@ -1,6 +1,9 @@
 export async function call(method: string, route: string, payload?: Object) {
   return await fetch(`http://localhost:4510${route}`, {
     method,
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: payload ? JSON.stringify(payload) : undefined,
   });
 }

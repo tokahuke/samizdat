@@ -81,6 +81,7 @@ pub fn init_db() -> Result<(), crate::Error> {
             Table::Subscriptions,
             Table::RecentNonces,
             Table::AccessRights,
+            Table::KVStore,
         ]
         .into_iter()
         .map(Table::descriptor),
@@ -139,6 +140,8 @@ pub enum Table {
     RecentNonces,
     /// Access rights granted for each entity to the local Samizdat node.
     AccessRights,
+    /// General key-value store for application (because `LocalStorage` is broken in Samizdat).
+    KVStore,
 }
 
 /// An aliase fot the merge function pointer.

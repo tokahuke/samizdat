@@ -6,7 +6,7 @@ use std::fmt::{self, Display};
 use url::Url;
 use warp::Filter;
 
-use crate::access_token::{access_token, AccessRight, Entity};
+use crate::access::{access_token, AccessRight, Entity};
 use crate::balanced_or_tree;
 use crate::cli;
 use crate::db::{db, Table};
@@ -48,26 +48,16 @@ fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 {
     warp::path!("_auth" / "_current")
         .and(warp::get())
-        .and(warp::header("Referer"))
-        .map(|referer: String| {
-            let maybe_entity = entity_from_referer(&referer).map_err(|err| {
-                crate::Error::Message(format!("Referer {} not an entity: {}", referer, err))
-            })?;
+        .and(security_scope())
+        .map(|entity: Entity| {
+            let serialized = bincode::serialize(&entity).expect("can serialize");
+            let current: Vec<AccessRight> = db()
+                .get_cf(Table::AccessRights.get(), &serialized)?
+                .map(|rights| bincode::deserialize(&rights))
+                .transpose()?
+                .unwrap_or_default();
 
-            if let Some(entity) = maybe_entity {
-                let serialized = bincode::serialize(&entity).expect("can serialize");
-                let current: Vec<AccessRight> = db()
-                    .get_cf(Table::AccessRights.get(), &serialized)?
-                    .map(|rights| bincode::deserialize(&rights))
-                    .transpose()?
-                    .unwrap_or_default();
-
-                Ok(current)
-            } else {
-                Err(crate::Error::Message(
-                    "Accessing /_auth/_current from trusted context".to_owned(),
-                ))
-            }
+            Ok(current)
         })
         .map(api_reply)
 }
@@ -150,6 +140,7 @@ pub enum Forbidden {
     BadToken(String),
     BadOrigin(url::Origin),
     NotAnEntity(String),
+    TrustedContext(String),
     InsuficientPrivilege,
 }
 
@@ -163,6 +154,9 @@ impl Display for Forbidden {
                 write!(f, "bad origin: {}", origin.unicode_serialization())
             }
             Forbidden::NotAnEntity(bad_path) => write!(f, "not an entity: {}", bad_path),
+            Forbidden::TrustedContext(context) => {
+                write!(f, "accesing from trusted context {}", context)
+            }
             Forbidden::InsuficientPrivilege => write!(f, "insuficient privilege"),
         }
     }
@@ -170,9 +164,21 @@ impl Display for Forbidden {
 
 /// Authentication header was not sent and must be sent.
 #[derive(Debug, Clone, Copy)]
-pub struct Unauthorized;
+pub enum Unauthorized {
+    MissingReferer,
+    Unauthorized,
+}
 
 impl warp::reject::Reject for Unauthorized {}
+
+impl Display for Unauthorized {
+    fn fmt(&self, f: &'_ mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Unauthorized::MissingReferer => write!(f, "missing Referer header"),
+            Unauthorized::Unauthorized => write!(f, "missing Referer header or Bearer token"),
+        }
+    }
+}
 
 lazy_static! {
     static ref SAMIZDA_ORIGINS: [url::Origin; 4] = [
@@ -234,61 +240,62 @@ fn entity_from_referer(raw_referer: &str) -> Result<Option<Entity>, Forbidden> {
     }
 }
 
+/// Extracts the "security scope" (akin to "origin" in the normal Web) from the Referer header.
+pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Rejection> + Clone {
+    warp::header::optional("Referer").and_then(|maybe_referer: Option<String>| async move {
+        let referer =
+            maybe_referer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferer))?;
+        let maybe_entity =
+            entity_from_referer(&referer).map_err(|forbidden| warp::reject::custom(forbidden))?;
+        let entity =
+            maybe_entity.ok_or_else(|| warp::reject::custom(Forbidden::TrustedContext(referer)))?;
+
+        Ok(entity) as Result<Entity, warp::Rejection>
+    })
+}
+
 /// Authenticate to the private part of the API. This requires access to the filesystem (only that)
 pub fn authenticate<const N: usize>(
     required_rights: [AccessRight; N],
 ) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
     warp::header::optional("Authorization")
-        .and(warp::header::optional("Referer"))
-        .map(
-            move |authorization: Option<String>, referer: Option<String>| match (
-                authorization,
-                referer,
-            ) {
-                (None, None) => Err(warp::reject::custom(Unauthorized)),
-                (Some(authorization), _) => {
-                    let token = authorization
-                        .trim_start_matches("Bearer ")
-                        .trim_start_matches("bearer ");
+        .and_then(|maybe_authorization: Option<String>| async move {
+            if let Some(authorization) = maybe_authorization {
+                let token = authorization
+                    .trim_start_matches("Bearer ")
+                    .trim_start_matches("bearer ");
 
-                    if token == access_token() {
-                        Ok(())
-                    } else {
-                        Err(warp::reject::custom(Forbidden::BadToken(token.to_owned())))
-                    }
+                if token == access_token() {
+                    Ok(())
+                } else {
+                    Err(warp::reject::custom(Forbidden::BadToken(token.to_owned())))
                 }
-                (_, Some(referer)) => {
-                    let maybe_entity = entity_from_referer(&referer)
-                        .map_err(|forbidden| warp::reject::custom(forbidden))?;
+            } else {
+                Err(warp::reject::custom(Unauthorized::Unauthorized))
+            }
+        })
+        .or(security_scope().and_then(move |entity: Entity| async move {
+            // Get rights from db:
+            let serialized = db()
+                .get_cf(
+                    Table::AccessRights.get(),
+                    bincode::serialize(&entity).expect("can serialize"),
+                )
+                .unwrap()
+                .ok_or_else(|| warp::reject::custom(Forbidden::InsuficientPrivilege))?;
+            let granted_rights: Vec<AccessRight> = bincode::deserialize(&serialized).unwrap();
 
-                    if let Some(entity) = maybe_entity {
-                        // Get rights from db:
-                        let serialized = db()
-                            .get_cf(
-                                Table::AccessRights.get(),
-                                bincode::serialize(&entity).expect("can serialize"),
-                            )
-                            .unwrap()
-                            .ok_or_else(|| warp::reject::custom(Forbidden::InsuficientPrivilege))?;
-                        let granted_rights: Vec<AccessRight> =
-                            bincode::deserialize(&serialized).unwrap();
-
-                        // See if rights correspond to what is needed:
-                        if granted_rights
-                            .iter()
-                            .any(|right| required_rights.contains(right))
-                        {
-                            Ok(())
-                        } else {
-                            Err(warp::reject::custom(Forbidden::InsuficientPrivilege))
-                        }
-                    } else {
-                        Ok(())
-                    }
-                }
-            },
-        )
-        .and_then(|auth| async move { auth })
+            // See if rights correspond to what is needed:
+            if granted_rights
+                .iter()
+                .any(|right| required_rights.contains(right))
+            {
+                Ok(())
+            } else {
+                Err(warp::reject::custom(Forbidden::InsuficientPrivilege))
+            }
+        }))
+        .map(|_| ())
         .untuple_one()
 }
 
@@ -301,28 +308,19 @@ struct RegisterTemplate<'a> {
 
 fn get_register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_register")
-        .and(warp::header("Referer"))
+        .and(security_scope())
         .and(warp::query())
-        .map(|referer: String, query: Vec<(String, AccessRight)>| {
-            let maybe_entity = entity_from_referer(&referer)
-                .map_err(|forbidden| warp::reject::custom(forbidden))?;
+        .map(|entity: Entity, query: Vec<(String, AccessRight)>| {
+            let register = RegisterTemplate {
+                entity: &entity,
+                rights: &*query
+                    .into_iter()
+                    .filter(|(field, _)| field == "right")
+                    .map(|(_, right)| right)
+                    .collect::<Vec<_>>(),
+            };
 
-            if let Some(entity) = maybe_entity {
-                let register = RegisterTemplate {
-                    entity: &entity,
-                    rights: &*query
-                        .into_iter()
-                        .filter(|(field, _)| field == "right")
-                        .map(|(_, right)| right)
-                        .collect::<Vec<_>>(),
-                };
-
-                Ok(html(register.render().expect("rendering _register failed")))
-            } else {
-                Err(warp::reject::custom(crate::Error::Message(
-                    "Accessing /_register from trusted context".to_owned(),
-                )))
-            }
+            Ok(html(register.render().expect("rendering _register failed")))
         })
         .and_then(|auth: Result<_, warp::Rejection>| async move { auth })
 }
