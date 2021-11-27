@@ -8,7 +8,7 @@ use crate::db::{db, Table};
 
 use super::{api_reply, auth};
 
-/// The authrntication management API.
+/// The authentication management API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(get(), put(), delete(), clear(),)
 }
