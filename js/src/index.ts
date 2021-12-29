@@ -60,6 +60,15 @@ export interface Edition {
   is_draft: boolean;
 }
 
+export enum SubscriptionKind {
+  FullInventory = "FullInventory"
+}
+
+export interface Subscription {
+  public_key: Array<number>,
+  kind: SubscriptionKind, 
+}
+
 export class Samizdat {
   accessRights: Array<AccessRight>;
   isAuthenticated: boolean;
@@ -213,6 +222,21 @@ export class Samizdat {
   async getSeriesItem(seriesKey: string, path: string) {
     const response = await call("GET", `/_series${seriesKey}${path}`);
     return await response.blob();
+  }
+
+  async getSubscription(seriesKey: string) {
+    const response = await call("GET", `/_subscriptions${seriesKey}`);
+    return (await response.json())["Ok"] as Subscription | null;
+  }
+
+  async postSubscription(seriesKey: string, kind: SubscriptionKind = SubscriptionKind.FullInventory) {
+    const response = await call("POST", `/_subscriptions`, { series_key: seriesKey, kind });
+    return (await response.json())["Ok"] as string;
+  }
+
+  async deleteSubscription(seriesKey: string) {
+    const response = await call("DELETE", `/_subscriptions${seriesKey}`);
+    return (await response.json())["Ok"] as null;
   }
 }
 

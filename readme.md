@@ -36,23 +36,35 @@ This is still a proof of concept implementation. So three caveats are in place:
 
 Samizdat (from a Russian term meaning "self-publishing") aims to provide a decentralized internet application that enables one to do the following:
 
-1. Be able to allow one to serve a public, static site without the need for a hosting service. The content is to be hosted in the person's own device or in caches from people who visit the site.
+1. Be able to allow one to serve a public, static site without the need for a hosting service. The content is to be hosted in the person's own device or in caches from people who visit the site. (READY)
 
-2. Provide a human-friendly identifier for resources contained in this network, i.e., a URL scheme. This URL is to be content-addressed, not location-addressed.
+2. Provide a human-friendly identifier for resources contained in this network, i.e., a URL scheme. This URL is to be content-addressed, not location-addressed. (IN CONSTRUCTION)
 
-3. Oblivious hosting: only the device serving the content and the device asking for the content can extract any information about the content or its metadata.
+3. Oblivious hosting: only the device serving the content and the device asking for the content can extract any information about the content or its metadata. (BY DESIGN)
 
-4. Do all this _easily_ and _conveniently_. Graphical interfaces, mobile apps and amenities are welcome.
+4. Do all this _easily_ and _conveniently_. Graphical interfaces, mobile apps and amenities are welcome. (IN CONSTRUCTION)
 
 We are not quite there yet...
+ 
+## 📢 Help wanted! 🗯
+
+These are important issues where help is most appreciated:
+
+* **Samizdat identity**: offer human-readable handles to entities inside the network.
+  * Why it matters: do you browse the network using IP addresses or do you use DNS?
+  * Why it's hard: this involves _consensus_ in the net. Yeah, Byzantine Generals, Bitcoin and stuff. 
+
+* **Multi-platform support**: make Samizdat Node run on Mac, Windows and Android.
+    * Why it matters: this is an end-user product and end-users are mostly trapped in these platforms.
+    * Why it's hard: I'm too lazy to open my Windows 10, I don't have a Mac. 
 
 ## Architecture
 
-The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The nodes are the consumers and producers of content; all content transmission is handled by the nodes. The hubs are used for signaling and NAT traversal. One node can connect to many hubs simultaneously so that content can diffuse through different tribes with time.
+The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The nodes are the consumers and producers of content; all content transmission is handled by the nodes. The hubs are used for routing, discovery and NAT traversal. One node can connect to many hubs simultaneously so that content can diffuse through different tribes with time.
 
 ## Installation
 
-Go [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install).
+Go [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install). This is a _proxy_ to the Samizdat Network which will allow you to download the latest version from the network itself.
 
 ## Quick start
 
@@ -69,21 +81,12 @@ they will be abe to access it.
 
 This is just the tip of the iceberg, however! Check out more [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/docs).
 
-## Open issues
 
-* Sending large files. By now, only one peer will send the whole files. On the bright side, Merkle Trees are already implemented; only parallelization is missing.
-* Scalability:
-    1. Hubs broadcast queries, in a slightly informed way, but we can do better.
-    2. Clients are forced to do an `O(n)` search, instead of the typical `O(lg n)`. Blessing in disguise?
-* Identities: you want nice personal handles, don't you? 
-* Anti-censorship: it is hard for hubs to censor, but malicious nodes run by _them_ can exploit the system to
-    1. Query if you have a copy of The Book.
-    2. Serve you a copy of The Book and then send you to room 101.
-* UX: do you have a freakin' mobile app?
+## Licensing
+
 All code under the Samizdat Project is Free Software and is licensed to any individal or
     organization under the AGPLv3 license. You are free to run, study, alter and redistribute
     the software as you wish, as long as you abide by the terms of the aforementioned license.
-## Licensing
 
 Copyright 2021 Tokahuke
 

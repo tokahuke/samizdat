@@ -1,0 +1,12 @@
+{
+    "language": "Solidity",
+    "source": {
+        "samizdatIdentity.sol": {}
+    },
+    "settings": {
+        "optimizer": {
+            "enabled": true,
+            "runs": 10000
+        }
+    }
+}
