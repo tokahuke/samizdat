@@ -19,7 +19,6 @@ pub struct Room {
 impl Room {
     pub fn new() -> Room {
         let participants = Arc::default();
-
         Room { participants }
     }
 
@@ -41,6 +40,7 @@ impl Room {
     ) -> impl Stream<Item = (SocketAddr, Arc<Node>)> {
         let mut queue = BinaryHeap::new();
 
+        // Thompson sampling solution to find the most successful peers.
         for (&peer_addr, peer) in self.participants.read().await.iter() {
             let priority = if current.ip() != peer_addr.ip() {
                 (peer.statistics.rand_priority() * 1e6) as i64

@@ -159,7 +159,7 @@ pub async fn commit(
 
     let client = reqwest::Client::new();
     let client = &client;
-    
+
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
             log::info!("Creating object for {:?}", path);

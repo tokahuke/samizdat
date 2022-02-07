@@ -1,8 +1,8 @@
+use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::Deserialize;
 use warp::Filter;
-use rocksdb::{WriteBatch, IteratorMode};
 
-use crate::access::{Entity};
+use crate::access::Entity;
 use crate::balanced_or_tree;
 use crate::db::{db, Table};
 
@@ -24,7 +24,8 @@ pub fn get() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         .and(auth::security_scope())
         .map(|tail, entity: Entity| {
             let maybe_value_encoded = db().get_cf(Table::KVStore.get(), key(&entity, &tail))?;
-            let maybe_value = maybe_value_encoded.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+            let maybe_value =
+                maybe_value_encoded.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
 
             Ok(maybe_value)
         })
@@ -44,7 +45,11 @@ pub fn put() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         .and(warp::body::content_length_limit(8_192))
         .and(warp::body::json())
         .map(|tail, entity: Entity, request: Request| {
-            db().put_cf(Table::KVStore.get(), key(&entity, &tail), request.value.as_bytes())?;
+            db().put_cf(
+                Table::KVStore.get(),
+                key(&entity, &tail),
+                request.value.as_bytes(),
+            )?;
             Ok(())
         })
         .map(api_reply)

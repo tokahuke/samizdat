@@ -19,14 +19,9 @@ pub struct NodeServer {
     pub channel_manager: Arc<ChannelManager>,
 }
 
-#[tarpc::server]
-impl Node for NodeServer {
-    async fn resolve_object(
-        self,
-        _: context::Context,
-        resolution: Arc<Resolution>,
-    ) -> ResolutionResponse {
-        log::info!("Resolving {:?}", resolution);
+impl NodeServer {
+    async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
+        log::info!("got object {:?}", resolution);
 
         let object = match ObjectRef::find(&resolution.content_riddle) {
             Some(object) if !object.is_draft().unwrap_or(true) => object,
@@ -51,7 +46,7 @@ impl Node for NodeServer {
             }
         };
 
-        log::info!("Found peer at {}", peer_addr);
+        log::info!("Found peer at {peer_addr}");
 
         tokio::spawn(
             async move {
@@ -68,11 +63,7 @@ impl Node for NodeServer {
         ResolutionResponse::FOUND
     }
 
-    async fn resolve_item(
-        self,
-        _: context::Context,
-        resolution: Arc<Resolution>,
-    ) -> ResolutionResponse {
+    async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got item {:?}", resolution);
 
         let item = match CollectionItem::find(&resolution.content_riddle) {
@@ -117,6 +108,16 @@ impl Node for NodeServer {
         );
 
         ResolutionResponse::FOUND
+    }
+}
+
+#[tarpc::server]
+impl Node for NodeServer {
+    async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> ResolutionResponse {
+        match resolution.kind {
+            QueryKind::Object => self.resolve_object(resolution).await,
+            QueryKind::Item => self.resolve_item(resolution).await,
+        }
     }
 
     async fn resolve_latest(

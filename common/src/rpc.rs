@@ -89,8 +89,7 @@ pub enum ResolutionStatus {
 
 #[tarpc::service]
 pub trait Node {
-    async fn resolve_object(resolution: Arc<Resolution>) -> ResolutionResponse;
-    async fn resolve_item(resolution: Arc<Resolution>) -> ResolutionResponse;
+    async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
     async fn resolve_latest(latest: Arc<LatestRequest>) -> Option<LatestResponse>;
     async fn announce_edition(announcement: Arc<EditionAnnouncement>);
 }

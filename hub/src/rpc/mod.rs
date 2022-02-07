@@ -1,3 +1,4 @@
+mod hub_as_node;
 mod room;
 
 use futures::prelude::*;
@@ -80,8 +81,9 @@ impl HubServer {
 
     /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
     /// client. This may mitigate DoS.
-    async fn throttle<'a, Fut, T>(&'a self, f: Box<dyn 'a + Send + FnOnce(&'a Self) -> Fut>) -> T
+    async fn throttle<'a, F, Fut, T>(&'a self, f: F) -> T
     where
+        F: 'a + Send + FnOnce(&'a Self) -> Fut,
         Fut: 'a + Future<Output = T>,
     {
         // First, make sure we are not being trolled:
@@ -100,11 +102,52 @@ impl HubServer {
     }
 }
 
+async fn candidates_for_resolution(
+    ctx: context::Context,
+    client_addr: SocketAddr,
+    resolution: Arc<Resolution>,
+) -> Vec<SocketAddr> {
+    ROOM.with_peers(client_addr, move |peer_id, peer| {
+        let resolution = resolution.clone();
+        async move {
+            log::debug!("starting resolve for {}", peer_id);
+
+            peer.statistics.requests.fetch_add(1, Ordering::Relaxed);
+
+            let start = Instant::now();
+            let outcome = peer.client.resolve(ctx, resolution).await;
+            let elapsed = start.elapsed().as_millis() as usize;
+            peer.statistics
+                .total_latency
+                .fetch_add(elapsed, Ordering::Relaxed);
+
+            let response = match outcome {
+                Ok(response) => response,
+                Err(err) => {
+                    log::warn!("error asking {} to resolve: {}", peer_id, err);
+                    peer.statistics.errors.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+            };
+
+            log::debug!("resolve done for {}", peer_id);
+
+            if let ResolutionStatus::Found = response.status {
+                peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
+                Some(peer.addr)
+            } else {
+                None
+            }
+        }
+    })
+    .await
+}
+
 #[tarpc::server]
 impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
-        self.throttle(Box::new(|server| async move {
+        self.throttle(|server| async move {
             log::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
@@ -130,45 +173,7 @@ impl Hub for HubServer {
             });
 
             // And then send the request to the peers:
-            let kind = query.kind;
-            let candidates = ROOM
-                .with_peers(client_addr, move |peer_id, peer| {
-                    let resolution = resolution.clone();
-                    async move {
-                        log::debug!("starting resolve for {}", peer_id);
-
-                        peer.statistics.requests.fetch_add(1, Ordering::Relaxed);
-
-                        let start = Instant::now();
-                        let outcome = match kind {
-                            QueryKind::Object => peer.client.resolve_object(ctx, resolution).await,
-                            QueryKind::Item => peer.client.resolve_item(ctx, resolution).await,
-                        };
-                        let elapsed = start.elapsed().as_millis() as usize;
-                        peer.statistics
-                            .total_latency
-                            .fetch_add(elapsed, Ordering::Relaxed);
-
-                        let response = match outcome {
-                            Ok(response) => response,
-                            Err(err) => {
-                                log::warn!("error asking {} to resolve: {}", peer_id, err);
-                                peer.statistics.errors.fetch_add(1, Ordering::Relaxed);
-                                return None;
-                            }
-                        };
-
-                        log::debug!("resolve done for {}", peer_id);
-
-                        if let ResolutionStatus::Found = response.status {
-                            peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
-                            Some(peer.addr)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .await;
+            let candidates = candidates_for_resolution(ctx, client_addr, resolution).await;
 
             log::debug!("query done");
 
@@ -178,58 +183,64 @@ impl Hub for HubServer {
                     .map(|candidate_addr| ChannelAddr::new(candidate_addr, channel))
                     .collect(),
             }
-        }))
+        })
         .await
     }
 
     async fn get_latest(self, ctx: context::Context, latest: LatestRequest) -> Vec<LatestResponse> {
         let client_addr = self.0.addr;
 
-        // Now broadcast the request:
-        let latest = Arc::new(latest);
+        self.throttle(|_| async move {
+            // Now broadcast the request:
+            let latest = Arc::new(latest);
 
-        let responses = ROOM
-            .with_peers(client_addr, |peer_id, peer| {
-                let latest = latest.clone();
-                async move {
-                    let outcome = peer.client.resolve_latest(ctx, latest).await;
-                    let response = match outcome {
-                        Ok(response) => response,
-                        Err(err) => {
-                            log::warn!("error asking {} for latest: {}", peer_id, err);
-                            return None;
-                        }
-                    };
+            let responses = ROOM
+                .with_peers(client_addr, |peer_id, peer| {
+                    let latest = latest.clone();
+                    async move {
+                        let outcome = peer.client.resolve_latest(ctx, latest).await;
+                        let response = match outcome {
+                            Ok(response) => response,
+                            Err(err) => {
+                                log::warn!("error asking {} for latest: {}", peer_id, err);
+                                return None;
+                            }
+                        };
 
-                    response
-                }
-            })
-            .await;
+                        response
+                    }
+                })
+                .await;
 
-        responses
+            responses
+        })
+        .await
     }
 
     async fn announce_edition(self, ctx: context::Context, announcement: EditionAnnouncement) {
         let client_addr = self.0.addr;
 
-        // Now, broadcast the announcement:
-        let announcement = Arc::new(announcement);
+        self.throttle(|_| async move {
+            // Now, broadcast the announcement:
+            let announcement = Arc::new(announcement);
 
-        ROOM.with_peers(client_addr, |peer_id, peer| {
-            let announcement = announcement.clone();
-            async move {
-                let outcome = peer.client.announce_edition(ctx, announcement).await;
+            ROOM.with_peers(client_addr, |peer_id, peer| {
+                let announcement = announcement.clone();
+                async move {
+                    let outcome = peer.client.announce_edition(ctx, announcement).await;
 
-                match outcome {
-                    Ok(_) => Some(()),
-                    Err(err) => {
-                        log::warn!("error announcing to peer {}: {}", peer_id, err);
-                        None
+                    match outcome {
+                        Ok(_) => Some(()),
+                        Err(err) => {
+                            log::warn!("error announcing to peer {}: {}", peer_id, err);
+                            None
+                        }
                     }
                 }
-            }
+            })
+            .await;
         })
-        .await;
+        .await
     }
 }
 

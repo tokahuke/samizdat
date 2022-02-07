@@ -7,9 +7,7 @@ use crate::access_token::access_token;
 pub struct ApiError(pub String);
 
 lazy_static! {
-    pub static ref CLIENT: reqwest::Client = {
-        reqwest::Client::new()
-    };
+    pub static ref CLIENT: reqwest::Client = { reqwest::Client::new() };
 }
 
 pub async fn validate_node_is_up() -> Result<(), crate::Error> {
