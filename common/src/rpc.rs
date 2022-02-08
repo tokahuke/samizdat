@@ -1,8 +1,9 @@
 use serde_derive::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::cipher::OpaqueEncrypted;
-use crate::{ChannelAddr, ContentRiddle, Hash, MessageRiddle};
+use crate::{ChannelAddr, Hash, MessageRiddle, Riddle};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
@@ -14,11 +15,14 @@ pub enum QueryKind {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
-    /// The riddle that will be sent to the other peers.
-    pub content_riddle: ContentRiddle,
+    /// The riddle for the content hash.
+    pub content_riddle: Riddle,
     /// The riddle that will be used by the peer that has the hash to find the IP of the client.
-    pub location_riddle: ContentRiddle,
-    /// The kind of query.
+    pub location_riddle: Riddle,
+    /// The riddle that will be used by the hub to validate if the node has *really* found the
+    /// hash.
+    pub validation_riddle: Riddle,
+    /// The kind of entity being requested.
     pub kind: QueryKind,
 }
 
@@ -34,7 +38,7 @@ pub enum QueryResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LatestRequest {
-    pub key_riddle: ContentRiddle,
+    pub key_riddle: Riddle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,7 +49,7 @@ pub struct LatestResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditionAnnouncement {
-    pub key_riddle: ContentRiddle,
+    pub key_riddle: Riddle,
     pub edition: OpaqueEncrypted,
     pub rand: Hash,
 }
@@ -62,34 +66,32 @@ pub trait Hub {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Resolution {
-    pub content_riddle: ContentRiddle,
+    /// The riddle for the requested hash.
+    pub content_riddle: Riddle,
+    /// The riddle for the client address.
     pub message_riddle: MessageRiddle,
+    /// The nonce which the node uses to prove to the hub that it know the correct hash.
+    pub validation_nonce: Hash,
+    /// The kind of entity being requested.
     pub kind: QueryKind,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ResolutionResponse {
-    pub status: ResolutionStatus,
-}
-
-impl ResolutionResponse {
-    pub const FOUND: ResolutionResponse = ResolutionResponse {
-        status: ResolutionStatus::Found,
-    };
-    pub const NOT_FOUND: ResolutionResponse = ResolutionResponse {
-        status: ResolutionStatus::NotFound,
-    };
+pub struct Candidate {
+    pub peer_addr: SocketAddr,
+    pub validation_riddle: Riddle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ResolutionStatus {
-    Found,
+pub enum ResolutionResponse {
+    Found(Riddle),
+    Redirect(Vec<Candidate>),
     NotFound,
 }
 
 #[tarpc::service]
 pub trait Node {
     async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
-    async fn resolve_latest(latest: Arc<LatestRequest>) -> Option<LatestResponse>;
+    async fn resolve_latest(latest_request: Arc<LatestRequest>) -> Vec<LatestResponse>;
     async fn announce_edition(announcement: Arc<EditionAnnouncement>);
 }

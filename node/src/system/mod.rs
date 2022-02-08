@@ -21,7 +21,7 @@ use tokio::time::Duration;
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::quic;
 use samizdat_common::rpc::*;
-use samizdat_common::{ContentRiddle, Hash};
+use samizdat_common::{Hash, Riddle};
 
 use crate::cli;
 use crate::models::{Edition, ObjectRef, SeriesRef};
@@ -147,8 +147,9 @@ impl HubConnection {
         content_hash: Hash,
         kind: QueryKind,
     ) -> Result<Option<ObjectRef>, crate::Error> {
-        let content_riddle = ContentRiddle::new(&content_hash);
-        let location_riddle = ContentRiddle::new(&content_hash);
+        let content_riddle = Riddle::new(&content_hash);
+        let location_riddle = Riddle::new(&content_hash);
+        let validation_riddle = Riddle::new(&content_hash);
 
         let inner = self.inner.get().await;
 
@@ -159,6 +160,7 @@ impl HubConnection {
                 Query {
                     content_riddle,
                     location_riddle,
+                    validation_riddle,
                     kind,
                 },
             )
@@ -216,7 +218,7 @@ impl HubConnection {
 
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
-        let key_riddle = ContentRiddle::new(&series.public_key.hash());
+        let key_riddle = Riddle::new(&series.public_key.hash());
         let inner = self.inner.get().await;
 
         let response = inner

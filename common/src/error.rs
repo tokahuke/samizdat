@@ -73,3 +73,9 @@ impl From<quinn::ConnectionError> for Error {
         Error::QuicConnectionError(e)
     }
 }
+
+impl From<Error> for io::Error {
+    fn from(e: Error) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, e.to_string())
+    }
+}

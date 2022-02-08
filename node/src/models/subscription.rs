@@ -5,7 +5,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 use samizdat_common::rpc::QueryKind;
-use samizdat_common::{ContentRiddle, Key};
+use samizdat_common::{Key, Riddle};
 
 use crate::db;
 use crate::db::Table;
@@ -92,7 +92,7 @@ impl SubscriptionRef {
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
-    pub fn find(riddle: &ContentRiddle) -> Option<SubscriptionRef> {
+    pub fn find(riddle: &Riddle) -> Option<SubscriptionRef> {
         let it = db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start);
 
         for (key, value) in it {

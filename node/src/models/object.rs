@@ -4,7 +4,7 @@ use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-use samizdat_common::{ContentRiddle, Hash, MerkleTree};
+use samizdat_common::{Hash, MerkleTree, Riddle};
 
 use crate::db::{db, Table};
 
@@ -300,7 +300,7 @@ impl ObjectRef {
     }
 
     /// Tries to resolve a content riddle against all objects currently in the database.
-    pub fn find(content_riddle: &ContentRiddle) -> Option<ObjectRef> {
+    pub fn find(content_riddle: &Riddle) -> Option<ObjectRef> {
         let iter = db().iterator_cf(Table::Objects.get(), IteratorMode::Start);
 
         for (key, _) in iter {

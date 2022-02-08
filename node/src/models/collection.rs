@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
-use samizdat_common::{ContentRiddle, Hash, PatriciaMap, PatriciaProof};
+use samizdat_common::{Hash, PatriciaMap, PatriciaProof, Riddle};
 
 use crate::db::{db, Table};
 
@@ -177,7 +177,7 @@ impl CollectionItem {
         }
     }
 
-    pub fn find(content_riddle: &ContentRiddle) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn find(content_riddle: &Riddle) -> Result<Option<CollectionItem>, crate::Error> {
         let iter = db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start);
 
         for (key, value) in iter {

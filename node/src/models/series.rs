@@ -6,7 +6,7 @@ use std::fmt::{self, Display};
 use std::time::Duration;
 
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
-use samizdat_common::{rpc::EditionAnnouncement, ContentRiddle, Hash, Key, PrivateKey, Signed};
+use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
 use crate::db;
 use crate::db::Table;
@@ -201,7 +201,7 @@ impl SeriesRef {
         self.public_key.as_bytes()
     }
 
-    pub fn find(riddle: &ContentRiddle) -> Option<SeriesRef> {
+    pub fn find(riddle: &Riddle) -> Option<SeriesRef> {
         let it = db().iterator_cf(Table::Series.get(), IteratorMode::Start);
 
         for (key, value) in it {
@@ -362,7 +362,7 @@ impl Edition {
     pub fn announcement(&self) -> EditionAnnouncement {
         let rand = Hash::rand();
         let content_hash = self.public_key.hash();
-        let key_riddle = ContentRiddle::new(&content_hash);
+        let key_riddle = Riddle::new(&content_hash);
         let cipher = TransferCipher::new(&content_hash, &rand);
         let edition = OpaqueEncrypted::new(&self, &cipher);
 

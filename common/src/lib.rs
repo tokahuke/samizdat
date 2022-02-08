@@ -17,7 +17,7 @@ pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
-pub use riddles::{ContentRiddle, MessageRiddle};
+pub use riddles::{MessageRiddle, Riddle};
 pub use transport::BincodeOverQuic;
 
 use rand::{CryptoRng, RngCore, SeedableRng};

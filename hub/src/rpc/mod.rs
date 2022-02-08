@@ -106,7 +106,7 @@ async fn candidates_for_resolution(
     ctx: context::Context,
     client_addr: SocketAddr,
     resolution: Arc<Resolution>,
-) -> Vec<SocketAddr> {
+) -> Vec<Candidate> {
     ROOM.with_peers(client_addr, move |peer_id, peer| {
         let resolution = resolution.clone();
         async move {
@@ -132,15 +132,74 @@ async fn candidates_for_resolution(
 
             log::debug!("resolve done for {}", peer_id);
 
-            if let ResolutionStatus::Found = response.status {
-                peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
-                Some(peer.addr)
-            } else {
-                None
+            match response {
+                ResolutionResponse::Found(validation_riddle) => {
+                    peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
+                    Some(vec![Candidate {
+                        peer_addr: peer.addr,
+                        validation_riddle,
+                    }])
+                }
+                ResolutionResponse::Redirect(candidates) => {
+                    peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
+                    Some(candidates)
+                }
+                ResolutionResponse::NotFound => None,
             }
         }
     })
     .await
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+}
+
+async fn latest_for_request(
+    ctx: context::Context,
+    client_addr: SocketAddr,
+    latest: Arc<LatestRequest>,
+) -> Vec<LatestResponse> {
+    ROOM.with_peers(client_addr, |peer_id, peer| {
+        let latest = latest.clone();
+        async move {
+            let outcome = peer.client.resolve_latest(ctx, latest).await;
+            let response = match outcome {
+                Ok(response) => response,
+                Err(err) => {
+                    log::warn!("error asking {} for latest: {}", peer_id, err);
+                    return None;
+                }
+            };
+
+            Some(response)
+        }
+    })
+    .await
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+}
+
+async fn announce_edition(
+    ctx: context::Context,
+    client_addr: SocketAddr,
+    announcement: Arc<EditionAnnouncement>,
+) {
+    ROOM.with_peers(client_addr, |peer_id, peer| {
+        let announcement = announcement.clone();
+        async move {
+            let outcome = peer.client.announce_edition(ctx, announcement).await;
+
+            match outcome {
+                Ok(_) => Some(()),
+                Err(err) => {
+                    log::warn!("error announcing to peer {}: {}", peer_id, err);
+                    None
+                }
+            }
+        }
+    })
+    .await;
 }
 
 #[tarpc::server]
@@ -169,6 +228,7 @@ impl Hub for HubServer {
             let resolution = Arc::new(Resolution {
                 content_riddle: query.content_riddle,
                 message_riddle,
+                validation_nonce: query.validation_riddle.rand,
                 kind: query.kind,
             });
 
@@ -180,65 +240,52 @@ impl Hub for HubServer {
             QueryResponse::Resolved {
                 candidates: candidates
                     .into_iter()
-                    .map(|candidate_addr| ChannelAddr::new(candidate_addr, channel))
+                    .filter(|candidate| candidate.validation_riddle == query.validation_riddle)
+                    .map(|candidate| ChannelAddr::new(candidate.peer_addr, channel))
                     .collect(),
             }
         })
         .await
     }
 
-    async fn get_latest(self, ctx: context::Context, latest: LatestRequest) -> Vec<LatestResponse> {
+    async fn get_latest(
+        self,
+        ctx: context::Context,
+        latest_request: LatestRequest,
+    ) -> Vec<LatestResponse> {
         let client_addr = self.0.addr;
-
         self.throttle(|_| async move {
+            // Se if you are not being replayed:
+            match REPLAY_RESISTANCE.lock().await.check(&latest_request) {
+                Ok(false) => return vec![],
+                Err(err) => {
+                    log::error!("error while checking for replay: {}", err);
+                    return vec![];
+                }
+                _ => {}
+            }
+
             // Now broadcast the request:
-            let latest = Arc::new(latest);
-
-            let responses = ROOM
-                .with_peers(client_addr, |peer_id, peer| {
-                    let latest = latest.clone();
-                    async move {
-                        let outcome = peer.client.resolve_latest(ctx, latest).await;
-                        let response = match outcome {
-                            Ok(response) => response,
-                            Err(err) => {
-                                log::warn!("error asking {} for latest: {}", peer_id, err);
-                                return None;
-                            }
-                        };
-
-                        response
-                    }
-                })
-                .await;
-
-            responses
+            latest_for_request(ctx, client_addr, Arc::new(latest_request)).await
         })
         .await
     }
 
     async fn announce_edition(self, ctx: context::Context, announcement: EditionAnnouncement) {
         let client_addr = self.0.addr;
-
         self.throttle(|_| async move {
-            // Now, broadcast the announcement:
-            let announcement = Arc::new(announcement);
-
-            ROOM.with_peers(client_addr, |peer_id, peer| {
-                let announcement = announcement.clone();
-                async move {
-                    let outcome = peer.client.announce_edition(ctx, announcement).await;
-
-                    match outcome {
-                        Ok(_) => Some(()),
-                        Err(err) => {
-                            log::warn!("error announcing to peer {}: {}", peer_id, err);
-                            None
-                        }
-                    }
+            // Se if you are not being replayed:
+            match REPLAY_RESISTANCE.lock().await.check(&announcement) {
+                Ok(false) => return,
+                Err(err) => {
+                    log::error!("error while checking for replay: {}", err);
+                    return;
                 }
-            })
-            .await;
+                _ => {}
+            }
+
+            // Now, broadcast the announcement:
+            announce_edition(ctx, client_addr, Arc::new(announcement)).await
         })
         .await
     }
@@ -344,6 +391,20 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             .await;
         })
         .await;
+
+    Ok(())
+}
+
+pub async fn run_hub_as_node() -> Result<(), io::Error> {
+    // Resolve partner addresses:
+    stream::iter(CLI.partners)
+        .then(|partner| partner.resolve())
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+
+    log::info!("Hub-as-node server started at {}", endpoint.local_addr()?);
 
     Ok(())
 }

@@ -1,4 +1,6 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::num::ParseIntError;
+use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
@@ -30,4 +32,57 @@ pub struct Cli {
     /// The maximum number of candidates to return to the client.
     #[structopt(env, long, default_value = "1")]
     pub max_candidates: usize,
+    /// Other servers to which to listen to.
+    #[structopt(env, long, default_value = "")]
+    pub partners: Vec<AddrToResolve>,
+}
+
+/// A flexible representation of an address in the internet.
+#[derive(Debug)]
+pub enum AddrToResolve {
+    /// A raw `ip:port` address.
+    SocketAddr(SocketAddr),
+    /// A `domain:port` (or `domain`, only) address.
+    DomainAndPort(String, u16),
+}
+
+impl FromStr for AddrToResolve {
+    type Err = ParseIntError;
+    fn from_str(s: &str) -> Result<Self, ParseIntError> {
+        if let Ok(socket_addr) = s.parse::<SocketAddr>() {
+            Ok(AddrToResolve::SocketAddr(socket_addr))
+        } else if let Some(pos) = s.find(':') {
+            Ok(AddrToResolve::DomainAndPort(
+                s[0..pos].to_owned(),
+                s[pos + 1..].parse::<u16>()?,
+            ))
+        } else {
+            Ok(AddrToResolve::DomainAndPort(s.to_owned(), 4511))
+        }
+    }
+}
+
+impl AddrToResolve {
+    fn name(&self) -> String {
+        match self {
+            AddrToResolve::SocketAddr(addr) => addr.to_string(),
+            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => domain.to_owned(),
+            AddrToResolve::DomainAndPort(domain, port) => format!("{}:{}", domain, port),
+        }
+    }
+
+    pub async fn resolve(&self) -> Result<(&'static str, SocketAddr), crate::Error> {
+        let name = Box::leak(self.name().into_boxed_str());
+        let addr = match self {
+            AddrToResolve::SocketAddr(addr) => *addr,
+            AddrToResolve::DomainAndPort(domain, port) => {
+                tokio::net::lookup_host((&**domain, *port))
+                    .await?
+                    .next()
+                    .ok_or_else(|| format!("no such host {}", domain))?
+            }
+        };
+
+        Ok((name, addr))
+    }
 }

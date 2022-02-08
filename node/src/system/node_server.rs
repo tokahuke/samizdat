@@ -6,8 +6,7 @@ use tarpc::context;
 
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::rpc::*;
-use samizdat_common::ChannelAddr;
-use samizdat_common::Hash;
+use samizdat_common::{ChannelAddr, Hash, Riddle};
 
 use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
 
@@ -27,11 +26,11 @@ impl NodeServer {
             Some(object) if !object.is_draft().unwrap_or(true) => object,
             Some(_) => {
                 log::info!("Hash found but object is draft");
-                return ResolutionResponse::NOT_FOUND;
+                return ResolutionResponse::NotFound;
             }
             None => {
                 log::info!("Hash not found for resolution");
-                return ResolutionResponse::NOT_FOUND;
+                return ResolutionResponse::NotFound;
             }
         };
 
@@ -42,7 +41,7 @@ impl NodeServer {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("Failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::FOUND;
+                return ResolutionResponse::NotFound;
             }
         };
 
@@ -60,7 +59,7 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::FOUND
+        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
     }
 
     async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
@@ -70,15 +69,15 @@ impl NodeServer {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
                 log::info!("hash found, but item is draft");
-                return ResolutionResponse::NOT_FOUND;
+                return ResolutionResponse::NotFound;
             }
             Ok(None) => {
                 log::info!("hash not found for resolution");
-                return ResolutionResponse::NOT_FOUND;
+                return ResolutionResponse::NotFound;
             }
             Err(e) => {
                 log::error!("error looking for hash: {}", e);
-                return ResolutionResponse::NOT_FOUND;
+                return ResolutionResponse::NotFound;
             }
         };
 
@@ -90,7 +89,7 @@ impl NodeServer {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::FOUND;
+                return ResolutionResponse::NotFound;
             }
         };
 
@@ -107,7 +106,7 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::FOUND
+        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
     }
 }
 
@@ -124,8 +123,8 @@ impl Node for NodeServer {
         self,
         _: context::Context,
         latest: Arc<LatestRequest>,
-    ) -> Option<LatestResponse> {
-        if let Some(series) = SeriesRef::find(&latest.key_riddle) {
+    ) -> Vec<LatestResponse> {
+        let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle) {
             let editions = series.get_editions();
             match editions.as_ref().map(|editions| editions.first()) {
                 Ok(None) => None,
@@ -147,7 +146,9 @@ impl Node for NodeServer {
             }
         } else {
             None
-        }
+        };
+
+        maybe_response.into_iter().collect()
     }
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
