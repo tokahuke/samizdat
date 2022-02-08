@@ -1,4 +1,5 @@
 mod hub_as_node;
+mod peer_sampler;
 mod room;
 
 use futures::prelude::*;
@@ -7,7 +8,6 @@ use quinn::Endpoint;
 use rand_distr::Distribution;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tarpc::context;
@@ -22,6 +22,7 @@ use samizdat_common::{BincodeOverQuic, ChannelAddr};
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
+use self::peer_sampler::Statistics;
 use self::room::Room;
 
 const MAX_LENGTH: usize = 2_048;
@@ -29,25 +30,6 @@ const MAX_LENGTH: usize = 2_048;
 lazy_static! {
     static ref ROOM: Room = Room::new();
     static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
-}
-
-#[derive(Debug, Default)]
-struct Statistics {
-    requests: AtomicUsize,
-    successes: AtomicUsize,
-    errors: AtomicUsize,
-    total_latency: AtomicUsize,
-}
-
-impl Statistics {
-    fn rand_priority(&self) -> f64 {
-        let requests = self.requests.load(Ordering::Relaxed) as f64;
-        let successes = self.successes.load(Ordering::Relaxed) as f64;
-        let beta =
-            rand_distr::Beta::new(successes + 1., requests + 1.).expect("valid beta distribution");
-
-        beta.sample(&mut rand::thread_rng())
-    }
 }
 
 #[derive(Debug)]
@@ -113,20 +95,17 @@ async fn candidates_for_resolution(
         async move {
             log::debug!("starting resolve for {}", peer_id);
 
-            peer.statistics.requests.fetch_add(1, Ordering::Relaxed);
+            peer.statistics.start_request();
 
             let start = Instant::now();
             let outcome = peer.client.resolve(ctx, resolution).await;
-            let elapsed = start.elapsed().as_millis() as usize;
-            peer.statistics
-                .total_latency
-                .fetch_add(elapsed, Ordering::Relaxed);
+            let elapsed = start.elapsed();
 
             let response = match outcome {
                 Ok(response) => response,
                 Err(err) => {
                     log::warn!("error asking {} to resolve: {}", peer_id, err);
-                    peer.statistics.errors.fetch_add(1, Ordering::Relaxed);
+                    peer.statistics.end_request_with_error(elapsed);
                     return None;
                 }
             };
@@ -135,14 +114,14 @@ async fn candidates_for_resolution(
 
             match response {
                 ResolutionResponse::Found(validation_riddle) => {
-                    peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
+                    peer.statistics.end_request_with_success(elapsed);
                     Some(vec![Candidate {
                         peer_addr: peer.addr,
                         validation_riddle,
                     }])
                 }
                 ResolutionResponse::Redirect(candidates) => {
-                    peer.statistics.successes.fetch_add(1, Ordering::Relaxed);
+                    peer.statistics.end_request_with_success(elapsed);
                     Some(candidates)
                 }
                 ResolutionResponse::NotFound => None,

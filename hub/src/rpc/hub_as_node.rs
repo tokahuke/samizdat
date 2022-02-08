@@ -33,7 +33,7 @@ impl Node for HubAsNodeServer {
         ctx: context::Context,
         resolution: Arc<Resolution>,
     ) -> ResolutionResponse {
-        log::debug!("got {:?}", resolution);
+        log::info!("got {:?}", resolution);
 
         // Se if you are not being replayed:
         match REPLAY_RESISTANCE.lock().await.check(&*resolution) {
