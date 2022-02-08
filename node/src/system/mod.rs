@@ -16,6 +16,7 @@ use tarpc::client::NewClient;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tokio::time::Duration;
 
 use samizdat_common::cipher::TransferCipher;
@@ -64,9 +65,7 @@ impl HubConnectionInner {
     async fn connect_reverse(
         reverse_addr: SocketAddr,
         connection_manager: Arc<ConnectionManager>,
-    ) -> Result<oneshot::Receiver<()>, crate::Error> {
-        let (server_reset_trigger, server_reset_recv) = oneshot::channel();
-
+    ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
         let transport = connection_manager
             .transport(&reverse_addr, "localhost")
@@ -77,12 +76,9 @@ impl HubConnectionInner {
             }
             .serve(),
         );
-        tokio::spawn(async move {
-            server_task.await;
-            server_reset_trigger.send(()).ok();
-        });
+        let handler = tokio::spawn(server_task);
 
-        Ok(server_reset_recv)
+        Ok(handler)
     }
 
     /// Creates the two connections between hub and node: RPC from node to hub and RPC from
