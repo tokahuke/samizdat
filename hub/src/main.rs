@@ -38,12 +38,12 @@ async fn main() -> Result<(), crate::Error> {
     // Spawn services:
     let direct_rpc_server = tokio::spawn(crate::rpc::run_direct((CLI.address, CLI.direct_port)));
     let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse((CLI.address, CLI.reverse_port)));
-    let hub_as_node = tokio::spawn(crate::rpc::run_hub_as_node());
+    let partners = tokio::spawn(crate::rpc::run_partners());
 
     // Await for services to end:
     maybe_resume_panic(direct_rpc_server.await);
     maybe_resume_panic(reverse_rpc_server.await);
-    maybe_resume_panic(hub_as_node.await);
+    maybe_resume_panic(partners.await);
 
     // Exit:
     Ok(())

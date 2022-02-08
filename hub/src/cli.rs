@@ -1,3 +1,4 @@
+use std::fmt::{self, Display};
 use std::net::{IpAddr, SocketAddr};
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -33,12 +34,12 @@ pub struct Cli {
     #[structopt(env, long, default_value = "1")]
     pub max_candidates: usize,
     /// Other servers to which to listen to.
-    #[structopt(env, long, default_value = "")]
-    pub partners: Vec<AddrToResolve>,
+    #[structopt(env, long)]
+    pub partners: Option<Vec<AddrToResolve>>,
 }
 
 /// A flexible representation of an address in the internet.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AddrToResolve {
     /// A raw `ip:port` address.
     SocketAddr(SocketAddr),
@@ -62,17 +63,19 @@ impl FromStr for AddrToResolve {
     }
 }
 
-impl AddrToResolve {
-    fn name(&self) -> String {
+impl Display for AddrToResolve {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AddrToResolve::SocketAddr(addr) => addr.to_string(),
-            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => domain.to_owned(),
-            AddrToResolve::DomainAndPort(domain, port) => format!("{}:{}", domain, port),
+            AddrToResolve::SocketAddr(addr) => write!(f, "{addr}"),
+            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => write!(f, "{domain}"),
+            AddrToResolve::DomainAndPort(domain, port) => write!(f, "{}:{}", domain, port),
         }
     }
+}
 
+impl AddrToResolve {
     pub async fn resolve(&self) -> Result<(&'static str, SocketAddr), crate::Error> {
-        let name = Box::leak(self.name().into_boxed_str());
+        let name = Box::leak(self.to_string().into_boxed_str());
         let addr = match self {
             AddrToResolve::SocketAddr(addr) => *addr,
             AddrToResolve::DomainAndPort(domain, port) => {

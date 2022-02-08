@@ -2,6 +2,7 @@ use aes_gcm_siv::aead::{AeadInPlace, NewAead};
 use aes_gcm_siv::{Aes256GcmSiv, Key, Nonce};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use crate::Hash;
@@ -88,9 +89,15 @@ where
     }
 }
 
-#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+#[derive(Clone, SerdeSerialize, SerdeDeserialize)]
 pub struct OpaqueEncrypted {
     data: Vec<u8>,
+}
+
+impl Debug for OpaqueEncrypted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", base64_url::encode(&self.data))
+    }
 }
 
 impl OpaqueEncrypted {

@@ -15,13 +15,14 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
+use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::{BincodeOverQuic, ChannelAddr};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
-use room::Room;
+use self::room::Room;
 
 const MAX_LENGTH: usize = 2_048;
 
@@ -395,16 +396,21 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
     Ok(())
 }
 
-pub async fn run_hub_as_node() -> Result<(), io::Error> {
-    // Resolve partner addresses:
-    stream::iter(CLI.partners)
-        .then(|partner| partner.resolve())
+pub async fn run_partners() {
+    let (endpoint, _incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
+
+    log::info!(
+        "Hub-as-node server started at {}",
+        endpoint.local_addr().expect("local address exists")
+    );
+
+    // Resolve partner addresses (`CLI.partners` is an `Option`. Therefore, we flatten it!):
+    let partners = stream::iter(CLI.partners.iter().flatten())
+        .map(|partner| hub_as_node::run(partner, &endpoint))
         .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+        .await;
 
-    log::info!("Hub-as-node server started at {}", endpoint.local_addr()?);
-
-    Ok(())
+    for partner in partners {
+        partner.await;
+    }
 }
