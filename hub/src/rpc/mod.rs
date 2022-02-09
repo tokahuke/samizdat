@@ -1,27 +1,27 @@
 mod hub_as_node;
+mod hub_server;
 mod peer_sampler;
 mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
 use quinn::Endpoint;
-use rand_distr::Distribution;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tarpc::context;
 use tarpc::server::{self, Channel};
-use tokio::sync::{Mutex, Semaphore};
-use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
+use tokio::sync::Mutex;
 
 use samizdat_common::quic;
 use samizdat_common::rpc::*;
-use samizdat_common::{BincodeOverQuic, ChannelAddr};
+use samizdat_common::BincodeOverQuic;
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
+use self::hub_server::HubServer;
 use self::peer_sampler::Statistics;
 use self::room::Room;
 
@@ -37,52 +37,6 @@ struct Node {
     statistics: Statistics,
     client: NodeClient,
     addr: SocketAddr,
-}
-
-struct HubServerInner {
-    call_semaphore: Semaphore,
-    call_throttle: Mutex<Interval>,
-    addr: SocketAddr,
-}
-
-#[derive(Clone)]
-struct HubServer(Arc<HubServerInner>);
-
-impl HubServer {
-    fn new(addr: SocketAddr) -> HubServer {
-        let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
-        call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        HubServer(Arc::new(HubServerInner {
-            call_semaphore: Semaphore::new(CLI.max_queries_per_node),
-            call_throttle: Mutex::new(interval(Duration::from_secs_f64(
-                1. / CLI.max_query_rate_per_node,
-            ))),
-            addr,
-        }))
-    }
-
-    /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
-    /// client. This may mitigate DoS.
-    async fn throttle<'a, F, Fut, T>(&'a self, f: F) -> T
-    where
-        F: 'a + Send + FnOnce(&'a Self) -> Fut,
-        Fut: 'a + Future<Output = T>,
-    {
-        // First, make sure we are not being trolled:
-        self.0.call_throttle.lock().await.tick().await;
-        let permit = self
-            .0
-            .call_semaphore
-            .acquire()
-            .await
-            .expect("semaphore never closed");
-
-        let outcome = f(self).await;
-
-        drop(permit);
-        outcome
-    }
 }
 
 async fn candidates_for_resolution(
@@ -105,7 +59,7 @@ async fn candidates_for_resolution(
                 Ok(response) => response,
                 Err(err) => {
                     log::warn!("error asking {} to resolve: {}", peer_id, err);
-                    peer.statistics.end_request_with_error(elapsed);
+                    peer.statistics.end_request_with_error();
                     return None;
                 }
             };
@@ -180,95 +134,6 @@ async fn announce_edition(
         }
     })
     .await;
-}
-
-#[tarpc::server]
-impl Hub for HubServer {
-    async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
-        let client_addr = self.0.addr;
-        self.throttle(|server| async move {
-            log::debug!("got {:?}", query);
-
-            // Create a channel address from peer address:
-            let channel = rand::random();
-            let channel_addr = ChannelAddr::new(server.0.addr, channel);
-
-            // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&query) {
-                Ok(false) => return QueryResponse::Replayed,
-                Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
-                    return QueryResponse::InternalError;
-                }
-                _ => {}
-            }
-
-            // Now, prepare resolution request:
-            let message_riddle = query.content_riddle.riddle_for(channel_addr);
-            let resolution = Arc::new(Resolution {
-                content_riddle: query.content_riddle,
-                message_riddle,
-                validation_nonce: query.validation_riddle.rand,
-                kind: query.kind,
-            });
-
-            // And then send the request to the peers:
-            let candidates = candidates_for_resolution(ctx, client_addr, resolution).await;
-
-            log::debug!("query done");
-
-            QueryResponse::Resolved {
-                candidates: candidates
-                    .into_iter()
-                    .filter(|candidate| candidate.validation_riddle == query.validation_riddle)
-                    .map(|candidate| ChannelAddr::new(candidate.peer_addr, channel))
-                    .collect(),
-            }
-        })
-        .await
-    }
-
-    async fn get_latest(
-        self,
-        ctx: context::Context,
-        latest_request: LatestRequest,
-    ) -> Vec<LatestResponse> {
-        let client_addr = self.0.addr;
-        self.throttle(|_| async move {
-            // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&latest_request) {
-                Ok(false) => return vec![],
-                Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
-                    return vec![];
-                }
-                _ => {}
-            }
-
-            // Now broadcast the request:
-            latest_for_request(ctx, client_addr, Arc::new(latest_request)).await
-        })
-        .await
-    }
-
-    async fn announce_edition(self, ctx: context::Context, announcement: EditionAnnouncement) {
-        let client_addr = self.0.addr;
-        self.throttle(|_| async move {
-            // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&announcement) {
-                Ok(false) => return,
-                Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
-                    return;
-                }
-                _ => {}
-            }
-
-            // Now, broadcast the announcement:
-            announce_edition(ctx, client_addr, Arc::new(announcement)).await
-        })
-        .await
-    }
 }
 
 pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {

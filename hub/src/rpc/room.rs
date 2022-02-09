@@ -1,14 +1,13 @@
 use futures::prelude::*;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use samizdat_common::heap_entry::HeapEntry;
-
 use crate::CLI;
 
+use super::peer_sampler;
 use super::Node;
 
 #[derive(Debug)]
@@ -34,29 +33,15 @@ impl Room {
         self.participants.write().await.remove(&addr);
     }
 
-    async fn stream_peers(
-        &self,
+    async fn stream_peers<'a>(
+        &'a self,
         current: SocketAddr,
-    ) -> impl Stream<Item = (SocketAddr, Arc<Node>)> {
-        let mut queue = BinaryHeap::new();
+    ) -> impl 'a + Stream<Item = (SocketAddr, Arc<Node>)> {
+        let peers = self.participants.read().await;
+        let sampler =
+            peer_sampler::sample(&peers).filter(move |(_, peer)| peer.addr.ip() != current.ip());
 
-        // Thompson sampling solution to find the most successful peers.
-        for (&peer_addr, peer) in self.participants.read().await.iter() {
-            let priority = if current.ip() != peer_addr.ip() {
-                (peer.statistics.rand_priority() * 1e6) as i64
-            } else {
-                0
-            };
-
-            queue.push(HeapEntry {
-                priority,
-                content: (peer_addr, peer.clone()),
-            });
-        }
-
-        futures::stream::iter(std::iter::from_fn(move || {
-            queue.pop().map(|entry| entry.content)
-        }))
+        futures::stream::iter(sampler)
     }
 
     pub(super) fn with_peers<'a, F, FFut, U>(
