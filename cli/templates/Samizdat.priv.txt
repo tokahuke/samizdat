@@ -1,6 +1,6 @@
-private-key = {% match private_key -%}
-    {%- when Some with (key) -%} "{{ key }}"
-    {%- when None -%} null
+{% match private_key -%}
+    {%- when Some with (key) -%} private_key = "{{ key }}"
+    {%- when None -%} # private_key = "series private key here"
 {%- endmatch %}
 private-key-debug = "{{ private_key_debug }}"
 public-key-debug = "{{ public_key_debug }}"

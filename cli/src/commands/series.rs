@@ -44,6 +44,7 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), anyhow::Error
         struct SeriesOwner {
             name: String,
             keypair: ed25519_dalek::Keypair,
+            #[serde(with = "humantime_serde")]
             default_ttl: std::time::Duration,
         }
 

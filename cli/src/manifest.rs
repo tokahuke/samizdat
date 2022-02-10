@@ -170,15 +170,16 @@ pub struct PrivateManifest {
     pub public_key_debug: Option<String>,
 }
 
+const FILENAME_HIERARCHY: [&str; 1] = ["./.Samizdat.priv"];
+
 impl PrivateManifest {
     /// Find the private manifest, if one exists.
     pub fn find_opt() -> Result<Option<PrivateManifest>, anyhow::Error> {
-        let filename_hierarchy = ["./.Samizdat.priv"];
         let mut last_error = None;
 
-        for filename in filename_hierarchy {
+        for filename in FILENAME_HIERARCHY {
             match fs::read(filename) {
-                Ok(contents) => return Ok(toml::from_slice(&contents)?),
+                Ok(contents) => return Ok(Some(toml::from_slice(&contents)?)),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => last_error = Some(err),
                 Err(err) => return Err(err.into()),
             }

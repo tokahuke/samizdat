@@ -51,8 +51,14 @@ where
 
     log::info!("{} GET {} {}", status, url, text);
 
-    Ok(serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from GET {}: {text}", route.as_ref()))?)
+    let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "error deserializing response from GET {}: {text}",
+            route.as_ref()
+        )
+    })?;
+
+    Ok(content?)
 }
 
 pub async fn post<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
@@ -64,7 +70,7 @@ where
     let url = format!("{}{}", crate::server(), route.as_ref());
     let response = CLIENT
         .post(&url)
-        .header("Authorization", dbg!(format!("Bearer {}", access_token())))
+        .header("Authorization", format!("Bearer {}", access_token()))
         .json(&payload)
         .send()
         .await
@@ -77,8 +83,14 @@ where
 
     log::info!("{} POST {} {}", status, url, text);
 
-    Ok(serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from POST {}: {text}", route.as_ref()))?)
+    let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "error deserializing response from POST {}: {text}",
+            route.as_ref()
+        )
+    })?;
+
+    Ok(content?)
 }
 
 pub async fn patch<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
@@ -103,8 +115,14 @@ where
 
     log::info!("{} PATCH {} {}", status, url, text);
 
-    Ok(serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from PATCH {}: {text}", route.as_ref()))?)
+    let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "error deserializing response from PATCH {}: {text}",
+            route.as_ref()
+        )
+    })?;
+
+    Ok(content?)
 }
 
 pub async fn delete<R, Q>(route: R) -> Result<Q, anyhow::Error>
@@ -127,10 +145,12 @@ where
 
     log::info!("{} GET {} {}", status, url, text);
 
-    Ok(serde_json::from_str(&text).with_context(|| {
+    let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
             "error deserializing response from DELETE {}: {text}",
             route.as_ref()
         )
-    })?)
+    })?;
+
+    Ok(content?)
 }

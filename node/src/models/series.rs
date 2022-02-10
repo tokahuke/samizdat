@@ -17,6 +17,7 @@ use super::{BookmarkType, CollectionRef, Dropable};
 pub struct SeriesOwner {
     name: String,
     keypair: Keypair,
+    #[serde(with = "humantime_serde")]
     default_ttl: Duration,
     #[serde(default)]
     is_draft: bool,
