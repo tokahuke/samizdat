@@ -7,8 +7,8 @@ use crate::api;
 
 use super::show_table;
 
-pub async fn new(series_name: String) -> Result<(), crate::Error> {
-    #[derive(Serialize)]
+pub async fn new(series_name: String) -> Result<(), anyhow::Error> {
+    #[derive(Debug, Serialize)]
     struct Request<'a> {
         series_owner_name: &'a str,
     }
@@ -19,27 +19,27 @@ pub async fn new(series_name: String) -> Result<(), crate::Error> {
             series_owner_name: &*series_name,
         },
     )
-    .await??;
+    .await?;
 
     Ok(())
 }
 
-pub async fn rm(series_name: String) -> Result<(), crate::Error> {
-    api::delete(format!("/_seriesowners/{}", series_name)).await??;
+pub async fn rm(series_name: String) -> Result<(), anyhow::Error> {
+    api::delete(format!("/_seriesowners/{}", series_name)).await?;
     Ok(())
 }
 
-pub async fn show(series_name: String) -> Result<(), crate::Error> {
-    api::get(format!("/_seriesowners/{}", series_name)).await??;
+pub async fn show(series_name: String) -> Result<(), anyhow::Error> {
+    api::get(format!("/_seriesowners/{}", series_name)).await?;
     Ok(())
 }
 
-pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error> {
-    pub async fn series_list_series(_series_owner_name: String) -> Result<(), crate::Error> {
+pub async fn list(series_owner_name: Option<String>) -> Result<(), anyhow::Error> {
+    pub async fn series_list_series(_series_owner_name: String) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub async fn series_list_all() -> Result<(), crate::Error> {
+    pub async fn series_list_all() -> Result<(), anyhow::Error> {
         #[derive(Debug, Deserialize)]
         struct SeriesOwner {
             name: String,
@@ -47,7 +47,7 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), crate::Error>
             default_ttl: std::time::Duration,
         }
 
-        let response: Vec<SeriesOwner> = api::get("/_seriesowners").await??;
+        let response: Vec<SeriesOwner> = api::get("/_seriesowners").await?;
 
         #[derive(Tabled)]
         struct Row {

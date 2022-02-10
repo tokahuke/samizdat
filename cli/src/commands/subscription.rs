@@ -7,8 +7,8 @@ use crate::api;
 
 use super::show_table;
 
-pub async fn new(public_key: String) -> Result<(), crate::Error> {
-    #[derive(Serialize)]
+pub async fn new(public_key: String) -> Result<(), anyhow::Error> {
+    #[derive(Debug, Serialize)]
     struct Request<'a> {
         public_key: &'a str,
     }
@@ -19,30 +19,30 @@ pub async fn new(public_key: String) -> Result<(), crate::Error> {
             public_key: &public_key,
         },
     )
-    .await??;
+    .await?;
 
     Ok(())
 }
 
-pub async fn rm(public_key: String) -> Result<(), crate::Error> {
-    api::delete(format!("/_subscriptions/{}", public_key)).await??;
+pub async fn rm(public_key: String) -> Result<(), anyhow::Error> {
+    api::delete(format!("/_subscriptions/{}", public_key)).await?;
 
     Ok(())
 }
 
-pub async fn ls(public_key: Option<String>) -> Result<(), crate::Error> {
-    pub async fn list_subscription(_public_key: String) -> Result<(), crate::Error> {
+pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
+    pub async fn list_subscription(_public_key: String) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub async fn list_all() -> Result<(), crate::Error> {
+    pub async fn list_all() -> Result<(), anyhow::Error> {
         #[derive(Debug, Deserialize)]
         struct Subscription {
             public_key: Key,
             kind: String,
         }
 
-        let response: Vec<Subscription> = api::get("/_subscriptions").await??;
+        let response: Vec<Subscription> = api::get("/_subscriptions").await?;
 
         #[derive(Tabled)]
         struct Row {

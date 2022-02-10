@@ -11,7 +11,7 @@ pub fn access_token<'a>() -> &'a str {
 
 /// Initializes access token. The access token is a file in the local
 /// filesystem that grants access to protected routes in the Samizdat HTTP API.
-pub fn init_access_token() -> Result<(), crate::Error> {
+pub fn init_access_token() -> Result<(), anyhow::Error> {
     let path = format!(
         "{}/access-token",
         cli().data.to_str().expect("path is not a string")
