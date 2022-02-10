@@ -3,7 +3,7 @@ pub mod collection;
 pub mod series;
 pub mod subscription;
 
-use askama::Template;
+use anyhow::Context;
 use futures::prelude::*;
 use futures::stream;
 use notify::{RecursiveMode, Watcher};
@@ -15,7 +15,7 @@ use std::{env, fs, io};
 use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 
-use samizdat_common::{Hash, Key, PrivateKey, Signed};
+use samizdat_common::{Hash, Signed};
 
 use crate::api::ApiError;
 use crate::html::maybe_proxy_page;
@@ -31,7 +31,7 @@ pub async fn upload(
     content_type: String,
     bookmark: bool,
     is_draft: bool,
-) -> Result<(), crate::Error> {
+) -> Result<(), anyhow::Error> {
     let response = api::CLIENT
         .post(format!(
             "{}/_objects?bookmark={}&is-draft={}",
@@ -52,59 +52,61 @@ pub async fn upload(
     Ok(())
 }
 
-pub async fn init() -> Result<(), crate::Error> {
+pub async fn init() -> Result<(), anyhow::Error> {
     let pwd = env::current_dir()?;
     let name = pwd.iter().last().expect("not empty").to_string_lossy();
-    let debug_name = format!("{}-debug", name);
 
-    #[derive(Serialize)]
-    struct Request<'a> {
-        series_owner_name: &'a str,
+    let (manifest, private_key) = Manifest::create(&name)
+        .await
+        .context("failed to create `Manifest.toml`")?;
+    PrivateManifest::create(&manifest.debug.name, Some(&private_key))
+        .await
+        .context("failed to create `.Samizdat.priv`")?;
+
+    Ok(())
+}
+
+pub async fn import() -> Result<(), anyhow::Error> {
+    let manifest = Manifest::find().context("failed to find `Samizdat.toml`")?;
+    let private_manifest_opt =
+        PrivateManifest::find_opt().context("failed to find `.Samizdat.priv`")?;
+    let private_manifest = if let Some(private_manifest) = private_manifest_opt {
+        private_manifest
+    } else {
+        PrivateManifest::create(&manifest.debug.name, None)
+            .await
+            .context("failed to create `.Samizdat.priv`")?
+    };
+
+    // Import series owners if it private key present in the private manifest.
+    if let Some(private_key) = private_manifest.private_key {
+        #[derive(Debug, Serialize)]
+        struct Keypair {
+            public_key: String,
+            private_key: String,
+        }
+
+        #[derive(Debug, Serialize)]
+        struct Request {
+            series_owner_name: String,
+            keypair: Keypair,
+            is_draft: bool,
+        }
+
+        api::post(
+            "/_seriesowners",
+            Request {
+                series_owner_name: manifest.series.name,
+                keypair: Keypair {
+                    private_key,
+                    public_key: manifest.series.public_key,
+                },
+                is_draft: false,
+            },
+        )
+        .await
+        .context("failed to import series keypair")?;
     }
-
-    #[derive(Deserialize)]
-    struct Payoad {
-        //name: String,
-        keypair: ed25519_dalek::Keypair,
-        #[serde(with = "humantime_serde")]
-        default_ttl: Duration,
-    }
-
-    let payload: Payoad = api::post(
-        "/_seriesowners",
-        Request {
-            series_owner_name: &name,
-        },
-    )
-    .await??;
-
-    let payload_debug: Payoad = api::post(
-        "/_seriesowners",
-        Request {
-            series_owner_name: &debug_name,
-        },
-    )
-    .await??;
-
-    let rendered = crate::manifest::ManifestTemplate {
-        name: &name,
-        public_key: &Key::from(payload.keypair.public).to_string(),
-        ttl: &humantime::format_duration(payload.default_ttl).to_string(),
-        debug_name: &debug_name,
-        public_key_debug: &Key::from(payload_debug.keypair.public).to_string(),
-    }
-    .render()
-    .expect("can render");
-
-    let rendered_private = crate::manifest::PrivateManifestTemplate {
-        private_key: &PrivateKey::from(payload.keypair.secret).to_string(),
-        private_key_debug: &PrivateKey::from(payload_debug.keypair.secret).to_string(),
-    }
-    .render()
-    .expect("can render");
-
-    fs::write("./Samizdat.toml", rendered)?;
-    fs::write("./.Samizdat.priv", rendered_private)?;
 
     Ok(())
 }
@@ -113,7 +115,7 @@ pub async fn commit(
     ttl: &Option<String>,
     is_release: bool,
     no_annouce: bool,
-) -> Result<(), crate::Error> {
+) -> Result<(), anyhow::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
@@ -150,7 +152,7 @@ pub async fn commit(
 
     let manifest = Manifest::find()?;
     let base = &manifest.build.base;
-    manifest.run(is_release)?;
+    manifest.run_build(is_release)?;
 
     let mut all_files = vec![];
     walk(base, &mut all_files)?;
@@ -181,7 +183,7 @@ pub async fn commit(
             let hash = if response.status().is_success() {
                 response.json::<Result<String, ApiError>>().await??
             } else {
-                return Err("??".into()) as Result<_, crate::Error>;
+                return Err(anyhow::anyhow!("??")) as Result<_, anyhow::Error>;
             };
             let names = names_from_path(path, base);
 
@@ -196,7 +198,7 @@ pub async fn commit(
 
     log::debug!("hashes: {:#?}", hashes);
 
-    #[derive(Serialize)]
+    #[derive(Debug, Serialize)]
     struct Request {
         hashes: Vec<(String, String)>,
         is_draft: bool,
@@ -209,7 +211,7 @@ pub async fn commit(
             is_draft: !is_release,
         },
     )
-    .await??;
+    .await?;
 
     let series = if is_release {
         manifest.series.name
@@ -219,10 +221,10 @@ pub async fn commit(
     let ttl = ttl.clone().or(if is_release {
         manifest.series.ttl
     } else {
-        manifest.debug.ttl
+        None
     });
 
-    #[derive(Serialize)]
+    #[derive(Debug, Serialize)]
     struct CollectionRequest {
         collection: String,
         ttl: Option<String>,
@@ -279,14 +281,11 @@ pub async fn commit(
 
         Ok(())
     } else {
-        Err(crate::Error::Message(format!(
-            "series {} does not exist",
-            series
-        )))
+        Err(anyhow::anyhow!("series {} does not exist", series))
     }
 }
 
-pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
+pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     /// Minimum time you ave to wait to trigger rebuild.
     const MIN_WAIT: Duration = Duration::from_secs(1);
 
@@ -342,52 +341,6 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), crate::Error> {
             last_exec = Instant::now();
         }
     }
-
-    Ok(())
-}
-
-pub async fn import() -> Result<(), crate::Error> {
-    let manifest = Manifest::find()?;
-    let private_manifest = PrivateManifest::find()?;
-
-    #[derive(Serialize)]
-    struct KeyPair<'a> {
-        public_key: &'a str,
-        private_key: &'a str,
-    }
-
-    #[derive(Serialize)]
-    struct Request<'a> {
-        series_owner_name: &'a str,
-        keypair: KeyPair<'a>,
-    }
-
-    let _response: serde_json::Value = api::post(
-        "/_seriesowners",
-        Request {
-            series_owner_name: &manifest.series.name,
-            keypair: KeyPair {
-                public_key: &manifest.series.public_key,
-                private_key: &private_manifest.private_key,
-            },
-        },
-    )
-    .await??;
-
-    let _debug_response: serde_json::Value = api::post(
-        "/_seriesowners",
-        Request {
-            series_owner_name: &manifest.debug.name,
-            keypair: KeyPair {
-                public_key: &manifest.debug.public_key,
-                private_key: &private_manifest.private_key_debug,
-            },
-        },
-    )
-    .await??;
-
-    // println!("Status: {}", response.status());
-    // println!("Response: {}", response.text().await?);
 
     Ok(())
 }

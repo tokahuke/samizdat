@@ -5,7 +5,7 @@ use crate::commands;
 
 static mut CLI: Option<Cli> = None;
 
-pub fn init_cli() -> Result<(), crate::Error> {
+pub fn init_cli() -> Result<(), anyhow::Error> {
     let cli = Cli::from_args();
 
     log::debug!("Arguments from command line: {:#?}", cli);
@@ -96,7 +96,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub async fn execute(self) -> Result<(), crate::Error> {
+    pub async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             Command::Init => commands::init().await,
             Command::Import => commands::import().await,
@@ -134,7 +134,7 @@ pub enum CollectionCommand {
 }
 
 impl CollectionCommand {
-    async fn execute(self) -> Result<(), crate::Error> {
+    async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             CollectionCommand::Ls { collection } => commands::collection::ls(collection).await,
         }
@@ -154,7 +154,7 @@ pub enum SeriesCommand {
 }
 
 impl SeriesCommand {
-    async fn execute(self) -> Result<(), crate::Error> {
+    async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             SeriesCommand::New { series_owner_name } => {
                 commands::series::new(series_owner_name).await
@@ -186,7 +186,7 @@ pub enum SubscriptionCommand {
 }
 
 impl SubscriptionCommand {
-    async fn execute(self) -> Result<(), crate::Error> {
+    async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             SubscriptionCommand::New { public_key } => {
                 commands::subscription::new(public_key).await
@@ -210,7 +210,7 @@ pub enum AuthCommand {
 }
 
 impl AuthCommand {
-    async fn execute(self) -> Result<(), crate::Error> {
+    async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             AuthCommand::Grant {
                 scope,

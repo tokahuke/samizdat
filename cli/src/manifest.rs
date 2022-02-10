@@ -1,31 +1,49 @@
 //! The `Samizdat.toml` manifest format.
 //!
 
-use serde_derive::Deserialize;
+use askama::Template;
+use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 use std::{fs, io};
+
+use samizdat_common::{Key, PrivateKey};
+
+use crate::api;
 
 #[derive(askama::Template)]
 #[template(path = "Samizdat.toml.txt")]
 pub struct ManifestTemplate<'a> {
     pub name: &'a str,
-    pub public_key: &'a str,
+    pub public_key: &'a Key,
     pub ttl: &'a str,
     pub debug_name: &'a str,
-    pub public_key_debug: &'a str,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Manifest {
     pub series: Series,
-    pub debug: Series,
+    pub debug: Debug,
     pub build: Build,
 }
 
+#[derive(Debug, Serialize)]
+struct PostSeriesOwnerRequest<'a> {
+    series_owner_name: &'a str,
+}
+
+#[derive(Deserialize)]
+struct PostSeriesOwnerResponse {
+    //name: String,
+    keypair: ed25519_dalek::Keypair,
+    #[serde(with = "humantime_serde")]
+    default_ttl: Duration,
+}
+
 impl Manifest {
-    pub fn find() -> Result<Manifest, crate::Error> {
+    pub fn find() -> Result<Manifest, anyhow::Error> {
         let filename_hierarchy = [
             "./Samizdat.toml",
             "./Samizdat.tml",
@@ -45,7 +63,35 @@ impl Manifest {
         Err(last_error.expect("filename hierarchy not empty").into())
     }
 
-    pub fn run(&self, is_release: bool) -> Result<(), crate::Error> {
+    /// Creates a new manifest and associated debug keypair, given debug series owner name and
+    /// optionally production private key.
+    pub async fn create(name: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
+        let debug_name = format!("{}-debug", name);
+
+        let response: PostSeriesOwnerResponse = api::post(
+            "/_seriesowners",
+            PostSeriesOwnerRequest {
+                series_owner_name: &name,
+            },
+        )
+        .await?;
+
+        let rendered = crate::manifest::ManifestTemplate {
+            name,
+            public_key: &Key::from(response.keypair.public),
+            ttl: &humantime::format_duration(response.default_ttl).to_string(),
+            debug_name: &debug_name,
+        }
+        .render()
+        .expect("can render");
+
+        fs::write("./Samizdat.toml", rendered)?;
+        let manifest = toml::from_str(&fs::read_to_string("./Samizdat.toml")?)?;
+
+        Ok((manifest, PrivateKey::from(response.keypair.secret)))
+    }
+
+    pub fn run_build(&self, is_release: bool) -> Result<(), anyhow::Error> {
         self.build.run(&self.series.public_key, is_release)
     }
 }
@@ -56,6 +102,12 @@ pub struct Series {
     pub name: String,
     pub public_key: String,
     pub ttl: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Debug {
+    pub name: String,
 }
 
 fn default_shell() -> String {
@@ -73,7 +125,7 @@ pub struct Build {
 }
 
 impl Build {
-    pub fn run(&self, public_key: &str, is_release: bool) -> Result<(), crate::Error> {
+    pub fn run(&self, public_key: &str, is_release: bool) -> Result<(), anyhow::Error> {
         let script = if is_release {
             self.run.as_ref()
         } else {
@@ -93,10 +145,10 @@ impl Build {
         if status.success() {
             Ok(())
         } else {
-            Err(crate::Error::Message(format!(
+            Err(anyhow::anyhow!(
                 "bad exit status for run command: {}",
                 status
-            )))
+            ))
         }
     }
 }
@@ -104,19 +156,23 @@ impl Build {
 #[derive(askama::Template)]
 #[template(path = "Samizdat.priv.txt")]
 pub struct PrivateManifestTemplate<'a> {
-    pub private_key: &'a str,
-    pub private_key_debug: &'a str,
+    pub private_key: Option<&'a PrivateKey>,
+    pub private_key_debug: &'a PrivateKey,
+    pub public_key_debug: &'a Key,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PrivateManifest {
-    pub private_key: String,
-    pub private_key_debug: String,
+    pub private_key: Option<String>,
+    pub private_key_debug: Option<String>,
+    /// If `private_key_debug` is set, then also is this field.
+    pub public_key_debug: Option<String>,
 }
 
 impl PrivateManifest {
-    pub fn find() -> Result<PrivateManifest, crate::Error> {
+    /// Find the private manifest, if one exists.
+    pub fn find_opt() -> Result<Option<PrivateManifest>, anyhow::Error> {
         let filename_hierarchy = ["./.Samizdat.priv"];
         let mut last_error = None;
 
@@ -128,6 +184,40 @@ impl PrivateManifest {
             }
         }
 
-        Err(last_error.expect("filename hierarchy not empty").into())
+        let last_error = last_error.expect("filename hierarchy not empty");
+
+        if last_error.kind() == io::ErrorKind::NotFound {
+            Ok(None)
+        } else {
+            Err(last_error.into())
+        }
+    }
+
+    /// Creates a new manifest and associated debug keypair, given debug series owner name and
+    /// optionally production private key.
+    pub async fn create(
+        debug_name: &str,
+        private_key: Option<&PrivateKey>,
+    ) -> Result<PrivateManifest, anyhow::Error> {
+        let response: PostSeriesOwnerResponse = api::post(
+            "/_seriesowners",
+            PostSeriesOwnerRequest {
+                series_owner_name: &debug_name,
+            },
+        )
+        .await?;
+
+        let rendered_private = crate::manifest::PrivateManifestTemplate {
+            private_key,
+            private_key_debug: &PrivateKey::from(response.keypair.secret),
+            public_key_debug: &Key::from(response.keypair.public),
+        }
+        .render()
+        .expect("can render");
+
+        fs::write("./.Samizdat.priv", rendered_private)?;
+        let manifest = toml::from_str(&fs::read_to_string("./.Samizdat.priv")?)?;
+
+        Ok(manifest)
     }
 }

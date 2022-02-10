@@ -37,6 +37,7 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
     #[derive(Deserialize)]
     struct Request {
         series_owner_name: String,
+        #[serde(default)]
         keypair: Option<Keypair>,
         #[serde(default)]
         is_draft: bool,
