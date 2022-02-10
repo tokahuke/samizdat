@@ -258,44 +258,56 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
 pub fn authenticate<const N: usize>(
     required_rights: [AccessRight; N],
 ) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
-    warp::header::optional("Authorization")
-        .and_then(|maybe_authorization: Option<String>| async move {
-            if let Some(authorization) = maybe_authorization {
-                let token = authorization
-                    .trim_start_matches("Bearer ")
-                    .trim_start_matches("bearer ");
+    let authorization_access = warp::header("Authorization")
+        .or_else(|_| async { Err(warp::reject::custom(Unauthorized::Unauthorized)) })
+        .map(|authorization: String| {
+            let token = authorization
+                .trim_start_matches("Bearer ")
+                .trim_start_matches("bearer ");
 
-                if token == access_token() {
-                    Ok(())
-                } else {
-                    Err(warp::reject::custom(Forbidden::BadToken(token.to_owned())))
-                }
+            if token == access_token() {
+                None
             } else {
-                Err(warp::reject::custom(Unauthorized::Unauthorized))
+                Some(Forbidden::BadToken(token.to_owned()))
+            }
+        });
+
+    let secure_scope_access = security_scope().map(move |entity: Entity| {
+        // Get rights from db:
+        let serialized_opt = db()
+            .get_cf(
+                Table::AccessRights.get(),
+                bincode::serialize(&entity).expect("can serialize"),
+            )
+            .unwrap();
+        let serialized = if let Some(serialized) = serialized_opt {
+            serialized
+        } else {
+            return Some(Forbidden::InsuficientPrivilege);
+        };
+
+        let granted_rights: Vec<AccessRight> = bincode::deserialize(&serialized).unwrap();
+
+        // See if rights correspond to what is needed:
+        if granted_rights
+            .iter()
+            .any(|right| required_rights.contains(right))
+        {
+            None
+        } else {
+            Some(Forbidden::InsuficientPrivilege)
+        }
+    });
+
+    authorization_access
+        .or(secure_scope_access)
+        .unify()
+        .and_then(|outcome| async move {
+            match outcome {
+                None => Ok(()),
+                Some(forbidden) => Err(warp::reject::custom(forbidden)),
             }
         })
-        .or(security_scope().and_then(move |entity: Entity| async move {
-            // Get rights from db:
-            let serialized = db()
-                .get_cf(
-                    Table::AccessRights.get(),
-                    bincode::serialize(&entity).expect("can serialize"),
-                )
-                .unwrap()
-                .ok_or_else(|| warp::reject::custom(Forbidden::InsuficientPrivilege))?;
-            let granted_rights: Vec<AccessRight> = bincode::deserialize(&serialized).unwrap();
-
-            // See if rights correspond to what is needed:
-            if granted_rights
-                .iter()
-                .any(|right| required_rights.contains(right))
-            {
-                Ok(())
-            } else {
-                Err(warp::reject::custom(Forbidden::InsuficientPrivilege))
-            }
-        }))
-        .map(|_| ())
         .untuple_one()
 }
 

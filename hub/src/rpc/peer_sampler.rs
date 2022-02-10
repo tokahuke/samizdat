@@ -53,8 +53,8 @@ impl Statistics {
         drop(lock); // used!
 
         // Sample a success probability:
-        let beta = rand_distr::Beta::new(successes + 1., requests + 1.)
-            .expect("valid beta distribution");
+        let beta =
+            rand_distr::Beta::new(successes + 1., requests + 1.).expect("valid beta distribution");
 
         let success_prob = beta.sample(&mut rand::thread_rng());
 

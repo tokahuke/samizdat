@@ -152,15 +152,15 @@ pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection>
         post_vacuum(),
     )
     .recover(|rejection: warp::Rejection| async move {
-        if let Some(unauthorized) = rejection.find::<auth::Unauthorized>() {
-            Ok(warp::reply::with_status(
-                unauthorized.to_string(),
-                http::StatusCode::UNAUTHORIZED,
-            ))
-        } else if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
+        if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
             Ok(warp::reply::with_status(
                 forbidden.to_string(),
                 http::StatusCode::FORBIDDEN,
+            ))
+        } else if let Some(unauthorized) = rejection.find::<auth::Unauthorized>() {
+            Ok(warp::reply::with_status(
+                unauthorized.to_string(),
+                http::StatusCode::UNAUTHORIZED,
             ))
         } else if let Some(error) = rejection.find::<crate::Error>() {
             Ok(warp::reply::with_status(
