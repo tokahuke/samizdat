@@ -144,7 +144,11 @@ impl CollectionCommand {
 #[derive(Clone, Debug, StructOpt)]
 pub enum SeriesCommand {
     /// Creates a new locally owned series.
-    New { series_owner_name: String },
+    New {
+        series_owner_name: String,
+        #[structopt(long)]
+        is_draft: bool,
+    },
     /// Removes an existing locally owned series.
     Rm { series_owner_name: String },
     /// Shows details on a particular locally owned series.
@@ -156,9 +160,10 @@ pub enum SeriesCommand {
 impl SeriesCommand {
     async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            SeriesCommand::New { series_owner_name } => {
-                commands::series::new(series_owner_name).await
-            }
+            SeriesCommand::New {
+                series_owner_name,
+                is_draft,
+            } => commands::series::new(series_owner_name, is_draft).await,
             SeriesCommand::Rm { series_owner_name } => {
                 commands::series::rm(series_owner_name).await
             }

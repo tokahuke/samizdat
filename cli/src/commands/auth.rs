@@ -8,16 +8,21 @@ pub async fn grant(scope: String, granted_rights: Vec<String>) -> Result<(), any
         granted_rights: Vec<String>,
     }
 
-    let response: bool =
-        api::patch(format!("/_auth/{}", scope), Request { granted_rights }).await?;
-    println!("Status: {}", response);
+    let granted = api::patch_auth(&scope, api::PatchAuthRequest { granted_rights }).await?;
+
+    if !granted {
+        println!("NOTE: scope {scope} already has granted rights. Revoke them to grant new rights");
+    }
 
     Ok(())
 }
 
 pub async fn revoke(scope: String) -> Result<(), anyhow::Error> {
-    let response: bool = api::delete(format!("/_auth/{}", scope)).await?;
-    println!("Status: {}", response);
+    let revoked = api::delete_auth(&scope).await?;
+
+    if !revoked {
+        println!("NOTE: scope {scope} had no granted rights");
+    }
 
     Ok(())
 }

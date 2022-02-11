@@ -7,7 +7,6 @@ use anyhow::Context;
 use futures::prelude::*;
 use futures::stream;
 use notify::{RecursiveMode, Watcher};
-use serde_derive::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -15,7 +14,7 @@ use std::{env, fs, io};
 use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 
-use samizdat_common::{Hash, Signed};
+use samizdat_common::Hash;
 
 use crate::api;
 use crate::html::maybe_proxy_page;
@@ -65,33 +64,14 @@ pub async fn import() -> Result<(), anyhow::Error> {
 
     // Import series owners if it private key present in the private manifest.
     if let Some(private_key) = private_manifest.private_key {
-        #[derive(Debug, Serialize)]
-        struct Keypair {
-            public_key: String,
-            private_key: String,
-        }
-
-        #[derive(Debug, Serialize)]
-        struct Request {
-            series_owner_name: String,
-            keypair: Keypair,
-            is_draft: bool,
-        }
-
-        #[derive(Deserialize)]
-        struct Response {}
-
-        let _: Response = api::post(
-            "/_seriesowners",
-            Request {
-                series_owner_name: manifest.series.name,
-                keypair: Keypair {
-                    private_key,
-                    public_key: manifest.series.public_key,
-                },
-                is_draft: false,
-            },
-        )
+        api::post_series_owner(api::PostSeriesOwnerRequest {
+            series_owner_name: &manifest.series.name,
+            keypair: Some(api::Keypair {
+                private_key,
+                public_key: manifest.series.public_key,
+            }),
+            is_draft: false,
+        })
         .await
         .context("failed to import series keypair")?;
     }
@@ -132,7 +112,7 @@ pub async fn commit(
         let without_slash = without_index.trim_end_matches('/').to_owned();
 
         let mut names = vec![suffixed, without_index, without_slash];
-        names.sort();
+        names.sort_unstable();
         names.dedup();
 
         names
@@ -186,22 +166,13 @@ pub async fn commit(
 
     log::debug!("hashes: {:#?}", hashes);
 
-    #[derive(Debug, Serialize)]
-    struct Request {
-        hashes: Vec<(String, String)>,
-        is_draft: bool,
-    }
-
-    let collection = api::post(
-        "/_collections",
-        Request {
-            hashes,
-            is_draft: !is_release,
-        },
-    )
+    let collection = api::post_collection(api::PostCollectionRequest {
+        hashes: &hashes,
+        is_draft: !is_release,
+    })
     .await?;
 
-    let series = if is_release {
+    let series_name = if is_release {
         manifest.series.name
     } else {
         manifest.debug.name
@@ -212,30 +183,15 @@ pub async fn commit(
         None
     });
 
-    #[derive(Debug, Serialize)]
-    struct CollectionRequest {
-        collection: String,
-        ttl: Option<String>,
-        no_annouce: bool,
-    }
-
-    #[derive(Debug, Clone, Deserialize)]
-    pub struct CollectionRef {
-        pub hash: Hash,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct EditionContent {
-        collection: CollectionRef,
-        timestamp: chrono::DateTime<chrono::Utc>,
-        #[serde(with = "humantime_serde")]
-        ttl: Duration,
-    }
-
-    #[derive(Debug, Deserialize)]
-    pub struct Edition {
-        signed: Signed<EditionContent>,
-    }
+    let edition = api::post_edition(
+        &series_name,
+        api::PostEditionRequest {
+            collection: &collection,
+            ttl: ttl.as_deref(),
+            no_annouce,
+        },
+    )
+    .await?;
 
     #[derive(Tabled)]
     struct Row {
@@ -246,18 +202,8 @@ pub async fn commit(
         ttl: String,
     }
 
-    let edition: Edition = api::post(
-        format!("/_seriesowners/{}/editions", series,),
-        CollectionRequest {
-            collection,
-            ttl,
-            no_annouce,
-        },
-    )
-    .await?;
-
     show_table([Row {
-        series: series.to_owned(),
+        series: series_name.to_owned(),
         // public_key: item.public_key,
         collection: edition.signed.collection.hash,
         timestamp: edition.signed.timestamp,

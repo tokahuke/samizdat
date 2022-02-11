@@ -1,4 +1,3 @@
-use serde_derive::{Deserialize, Serialize};
 use tabled::Tabled;
 
 use samizdat_common::Key;
@@ -8,24 +7,20 @@ use crate::api;
 use super::show_table;
 
 pub async fn new(public_key: String) -> Result<(), anyhow::Error> {
-    #[derive(Debug, Serialize)]
-    struct Request<'a> {
-        public_key: &'a str,
-    }
-
-    api::post(
-        "/_subscriptions",
-        Request {
-            public_key: &public_key,
-        },
-    )
+    api::post_subscription(api::PostSubscriptionRequest {
+        public_key: &public_key,
+    })
     .await?;
 
     Ok(())
 }
 
 pub async fn rm(public_key: String) -> Result<(), anyhow::Error> {
-    api::delete(format!("/_subscriptions/{}", public_key)).await?;
+    let removed = api::delete_subscription(&public_key).await?;
+
+    if !removed {
+        println!("NOTE: subscription to {public_key} does not exist.");
+    }
 
     Ok(())
 }
@@ -36,13 +31,7 @@ pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
     }
 
     pub async fn list_all() -> Result<(), anyhow::Error> {
-        #[derive(Debug, Deserialize)]
-        struct Subscription {
-            public_key: Key,
-            kind: String,
-        }
-
-        let response: Vec<Subscription> = api::get("/_subscriptions").await?;
+        let response = api::get_all_subscriptions().await?;
 
         #[derive(Tabled)]
         struct Row {

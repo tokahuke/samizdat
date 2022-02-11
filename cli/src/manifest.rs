@@ -2,10 +2,9 @@
 //!
 
 use askama::Template;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
 use std::{fs, io};
 
 use samizdat_common::{Key, PrivateKey};
@@ -27,19 +26,6 @@ pub struct Manifest {
     pub series: Series,
     pub debug: Debug,
     pub build: Build,
-}
-
-#[derive(Debug, Serialize)]
-struct PostSeriesOwnerRequest<'a> {
-    series_owner_name: &'a str,
-}
-
-#[derive(Deserialize)]
-struct PostSeriesOwnerResponse {
-    //name: String,
-    keypair: ed25519_dalek::Keypair,
-    #[serde(with = "humantime_serde")]
-    default_ttl: Duration,
 }
 
 impl Manifest {
@@ -68,12 +54,11 @@ impl Manifest {
     pub async fn create(name: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
         let debug_name = format!("{}-debug", name);
 
-        let response: PostSeriesOwnerResponse = api::post(
-            "/_seriesowners",
-            PostSeriesOwnerRequest {
-                series_owner_name: &name,
-            },
-        )
+        let response = api::post_series_owner(api::PostSeriesOwnerRequest {
+            series_owner_name: &name,
+            keypair: None,
+            is_draft: false,
+        })
         .await?;
 
         let rendered = crate::manifest::ManifestTemplate {
@@ -200,12 +185,11 @@ impl PrivateManifest {
         debug_name: &str,
         private_key: Option<&PrivateKey>,
     ) -> Result<PrivateManifest, anyhow::Error> {
-        let response: PostSeriesOwnerResponse = api::post(
-            "/_seriesowners",
-            PostSeriesOwnerRequest {
-                series_owner_name: &debug_name,
-            },
-        )
+        let response = api::post_series_owner(api::PostSeriesOwnerRequest {
+            series_owner_name: &debug_name,
+            keypair: None,
+            is_draft: true,
+        })
         .await?;
 
         let rendered_private = crate::manifest::PrivateManifestTemplate {

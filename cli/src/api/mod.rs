@@ -1,3 +1,7 @@
+mod calls;
+
+pub use calls::*;
+
 use anyhow::Context;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -16,7 +20,7 @@ impl From<ApiError> for anyhow::Error {
 }
 
 lazy_static! {
-    pub static ref CLIENT: reqwest::Client = reqwest::Client::new();
+    static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
 
 pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
@@ -33,41 +37,7 @@ pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub async fn post_object(
-    content: Vec<u8>,
-    content_type: &str,
-    bookmark: bool,
-    is_draft: bool,
-) -> Result<String, anyhow::Error> {
-    let url = format!("{}/_objects", crate::server());
-    let response = CLIENT
-        .post(&format!(
-            "{}/_objects?bookmark={}&is-draft={}",
-            crate::server(),
-            bookmark,
-            is_draft,
-        ))
-        .header("Content-Type", content_type)
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .body(content)
-        .send()
-        .await
-        .with_context(|| format!("error from samizdat-node request POST /_objects"))?;
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .with_context(|| format!("error from samizdat-node response POST /_objects"))?;
-
-    log::info!("{} GET {} {}", status, url, text);
-
-    let content: Result<String, ApiError> = serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
-
-    Ok(content?)
-}
-
-pub async fn get<R, Q>(route: R) -> Result<Q, anyhow::Error>
+async fn get<R, Q>(route: R) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
     Q: for<'a> Deserialize<'a>,
@@ -97,7 +67,7 @@ where
     Ok(content?)
 }
 
-pub async fn post<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
+async fn post<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
     P: Serialize + std::fmt::Debug,
@@ -129,7 +99,7 @@ where
     Ok(content?)
 }
 
-pub async fn patch<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
+async fn patch<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
     P: Serialize,
@@ -161,7 +131,7 @@ where
     Ok(content?)
 }
 
-pub async fn delete<R, Q>(route: R) -> Result<Q, anyhow::Error>
+async fn delete<R, Q>(route: R) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
     Q: for<'a> Deserialize<'a>,

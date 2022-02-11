@@ -1,4 +1,3 @@
-use serde_derive::{Deserialize, Serialize};
 use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
@@ -7,30 +6,29 @@ use crate::api;
 
 use super::show_table;
 
-pub async fn new(series_name: String) -> Result<(), anyhow::Error> {
-    #[derive(Debug, Serialize)]
-    struct Request<'a> {
-        series_owner_name: &'a str,
-    }
-
-    api::post(
-        "/_seriesowners",
-        Request {
-            series_owner_name: &*series_name,
-        },
-    )
+pub async fn new(series_name: String, is_draft: bool) -> Result<(), anyhow::Error> {
+    api::post_series_owner(api::PostSeriesOwnerRequest {
+        series_owner_name: &*series_name,
+        keypair: None,
+        is_draft,
+    })
     .await?;
 
     Ok(())
 }
 
 pub async fn rm(series_name: String) -> Result<(), anyhow::Error> {
-    api::delete(format!("/_seriesowners/{}", series_name)).await?;
+    let removed = api::delete_series_owner(&series_name).await?;
+
+    if !removed {
+        println!("NOTE: series {series_name} does not exist.");
+    }
+
     Ok(())
 }
 
 pub async fn show(series_name: String) -> Result<(), anyhow::Error> {
-    api::get(format!("/_seriesowners/{}", series_name)).await?;
+    api::get_series_owner(&series_name).await?;
     Ok(())
 }
 
@@ -40,15 +38,7 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), anyhow::Error
     }
 
     pub async fn series_list_all() -> Result<(), anyhow::Error> {
-        #[derive(Debug, Deserialize)]
-        struct SeriesOwner {
-            name: String,
-            keypair: ed25519_dalek::Keypair,
-            #[serde(with = "humantime_serde")]
-            default_ttl: std::time::Duration,
-        }
-
-        let response: Vec<SeriesOwner> = api::get("/_seriesowners").await?;
+        let response = api::get_all_series_owners().await?;
 
         #[derive(Tabled)]
         struct Row {
