@@ -137,6 +137,17 @@ pub async fn commit(
     }
 
     let manifest = Manifest::find()?;
+    let private_manifest = PrivateManifest::find_opt()?.ok_or_else(|| {
+        anyhow::anyhow!("Private manifest `.Samizdat.priv` not found. Hint: run `samizdat import`.")
+    })?;
+
+    if is_release && private_manifest.private_key.is_none() {
+        anyhow::bail!(
+            "Cannot run release mode without a private key. Hint: put your private key \
+            in `.Samizdat.priv` and then run `samizdat import`."
+        )
+    }
+
     let base = &manifest.build.base;
     manifest.run_build(is_release)?;
 
@@ -169,7 +180,10 @@ pub async fn commit(
             let hash = if response.status().is_success() {
                 response.json::<Result<String, ApiError>>().await??
             } else {
-                return Err(anyhow::anyhow!("??")) as Result<_, anyhow::Error>;
+                return Err(anyhow::anyhow!(
+                    "Received error from api: {}",
+                    response.text().await?
+                )) as Result<_, anyhow::Error>;
             };
             let names = names_from_path(path, base);
 
@@ -246,7 +260,7 @@ pub async fn commit(
         ttl: String,
     }
 
-    let edition: Result<Edition, ApiError> = api::post(
+    let edition: Edition = api::post(
         format!("/_seriesowners/{}/editions", series,),
         CollectionRequest {
             collection,
@@ -256,19 +270,15 @@ pub async fn commit(
     )
     .await?;
 
-    if let Ok(edition) = edition {
-        show_table([Row {
-            series: series.to_owned(),
-            // public_key: item.public_key,
-            collection: edition.signed.collection.hash,
-            timestamp: edition.signed.timestamp,
-            ttl: format!("{:?}", edition.signed.ttl),
-        }]);
+    show_table([Row {
+        series: series.to_owned(),
+        // public_key: item.public_key,
+        collection: edition.signed.collection.hash,
+        timestamp: edition.signed.timestamp,
+        ttl: format!("{:?}", edition.signed.ttl),
+    }]);
 
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("series {} does not exist", series))
-    }
+    Ok(())
 }
 
 pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
@@ -294,7 +304,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
                 send.send(event).ok();
             }
             Err(err) => {
-                log::error!("Notify error: {}", err);
+                log::error!("Notify error: {err}");
             }
         }
     })?;
@@ -307,7 +317,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
 
     // Run the commit for the first time.
     if let Err(err) = commit(ttl, false, true).await {
-        println!("Error while rebuilding: {}", err);
+        println!("Error while rebuilding: {err:?}");
     }
 
     // Last time the commit was triggered.
@@ -321,7 +331,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
         if watched_files_changed && now > last_exec + MIN_WAIT {
             log::info!("Rebuild triggered");
             if let Err(err) = commit(ttl, false, true).await {
-                println!("Error while rebuilding: {}", err);
+                println!("Error while rebuilding: {err:?}");
             }
 
             last_exec = Instant::now();
