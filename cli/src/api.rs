@@ -2,6 +2,8 @@ use anyhow::Context;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
+use samizdat_common::Hash;
+
 use crate::access_token::access_token;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -29,6 +31,38 @@ pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+pub async fn post_object(
+    content: Vec<u8>,
+    content_type: &str,
+    bookmark: bool,
+    is_draft: bool,
+) -> Result<Hash, anyhow::Error> {
+    let url = format!("{}/_objects", crate::server());
+    let response = CLIENT
+        .post(&format!(
+            "{}/_objects?bookmark={}&is-draft={}",
+            crate::server(),
+            bookmark,
+            is_draft,
+        ))
+        .header("Content-Type", content_type)
+        .header("Authorization", format!("Bearer {}", access_token()))
+        .body(content)
+        .send()
+        .await
+        .with_context(|| format!("error from samizdat-node request POST /_objects"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .with_context(|| format!("error from samizdat-node response POST /_objects"))?;
+
+    log::info!("{} POST {} {}", status, url, text);
+
+    Ok(serde_json::from_str(&text)
+        .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?)
 }
 
 pub async fn get<R, Q>(route: R) -> Result<Q, anyhow::Error>

@@ -32,22 +32,8 @@ pub async fn upload(
     bookmark: bool,
     is_draft: bool,
 ) -> Result<(), anyhow::Error> {
-    let response = api::CLIENT
-        .post(format!(
-            "{}/_objects?bookmark={}&is-draft={}",
-            crate::server(),
-            bookmark,
-            is_draft,
-        ))
-        .header("Content-Type", content_type)
-        .header("Authorization", format!("Bearer {}", access_token()))
-        .body(fs::read(path)?)
-        .send()
-        .await?;
-
-    log::info!("Status: {}", response.status());
-    let returned: Result<String, ApiError> = response.json().await?;
-    println!("Object hash: {}", returned?);
+    let hash = api::post_object(fs::read(path)?, &content_type, bookmark, is_draft).await?;
+    println!("Object hash: {hash}");
 
     Ok(())
 }
