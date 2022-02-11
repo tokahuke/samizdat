@@ -2,7 +2,7 @@ use anyhow::Context;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
-use samizdat_common::Hash;
+//use samizdat_common::Hash;
 
 use crate::access_token::access_token;
 
@@ -38,7 +38,7 @@ pub async fn post_object(
     content_type: &str,
     bookmark: bool,
     is_draft: bool,
-) -> Result<Hash, anyhow::Error> {
+) -> Result<String, anyhow::Error> {
     let url = format!("{}/_objects", crate::server());
     let response = CLIENT
         .post(&format!(
@@ -59,10 +59,12 @@ pub async fn post_object(
         .await
         .with_context(|| format!("error from samizdat-node response POST /_objects"))?;
 
-    log::info!("{} POST {} {}", status, url, text);
+    log::info!("{} GET {} {}", status, url, text);
 
-    Ok(serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?)
+    let content: Result<String, ApiError> = serde_json::from_str(&text)
+        .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
+
+    Ok(content?)
 }
 
 pub async fn get<R, Q>(route: R) -> Result<Q, anyhow::Error>

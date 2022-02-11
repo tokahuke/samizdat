@@ -17,9 +17,8 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Signed};
 
-use crate::api::ApiError;
+use crate::api;
 use crate::html::maybe_proxy_page;
-use crate::{access_token, api};
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
@@ -79,7 +78,10 @@ pub async fn import() -> Result<(), anyhow::Error> {
             is_draft: bool,
         }
 
-        api::post(
+        #[derive(Deserialize)]
+        struct Response {}
+
+        let _: Response = api::post(
             "/_seriesowners",
             Request {
                 series_owner_name: manifest.series.name,
@@ -156,38 +158,24 @@ pub async fn commit(
 
     log::debug!("committing: {:#?}", all_files);
 
-    let client = reqwest::Client::new();
-    let client = &client;
-
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
             log::info!("Creating object for {:?}", path);
             let content_type = mime_guess::from_path(&path)
                 .first_or_octet_stream()
                 .to_string();
-            let response = client
-                .post(format!(
-                    "{}/_objects?is_draft={}",
-                    crate::server(),
-                    !is_release,
-                    //fs::metadata(&path)?.created().expect("created time exists"),
-                ))
-                .header("Content-Type", content_type)
-                .header("Authorization", format!("Bearer {}", access_token()))
-                .body(maybe_proxy_page(path, &fs::read(&path)?).into_owned())
-                .send()
-                .await?;
-            let hash = if response.status().is_success() {
-                response.json::<Result<String, ApiError>>().await??
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Received error from api: {}",
-                    response.text().await?
-                )) as Result<_, anyhow::Error>;
-            };
+
+            let hash = api::post_object(
+                maybe_proxy_page(path, &fs::read(&path)?).into_owned(),
+                &content_type,
+                is_release,
+                !is_release,
+            )
+            .await?;
+
             let names = names_from_path(path, base);
 
-            Ok((names, hash))
+            Ok((names, hash)) as Result<(Vec<String>, String), anyhow::Error>
         })
         .buffer_unordered(all_files.len())
         .try_collect::<Vec<_>>()
@@ -247,8 +235,6 @@ pub async fn commit(
     #[derive(Debug, Deserialize)]
     pub struct Edition {
         signed: Signed<EditionContent>,
-        //public_key: Key,
-        //freshness: chrono::DateTime<chrono::Utc>,
     }
 
     #[derive(Tabled)]
@@ -282,7 +268,7 @@ pub async fn commit(
 }
 
 pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
-    /// Minimum time you ave to wait to trigger rebuild.
+    /// Minimum time you have to wait to trigger rebuild.
     const MIN_WAIT: Duration = Duration::from_secs(1);
 
     // Ignore the output folder.
