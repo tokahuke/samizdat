@@ -10,25 +10,25 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Path to the locally stored program data.
-    #[structopt(env, long, default_value = "data")]
+    #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data")]
     pub data: PathBuf,
     /// The port on which to sever the local HTTP proxy. This is the port you will use to access in
     ///  your browser.
-    #[structopt(env, long, default_value = "4510")]
+    #[structopt(env = "SAMIZDAT_PORT", long, default_value = "4510")]
     pub port: u16,
     /// (MB) The maximum size in bytes of the content that can be sent from a peer to this machine.
-    #[structopt(env, long, default_value = "1000")]
+    #[structopt(env = "SAMIZDAT_MAX_CONTENT_SIZE", long, default_value = "1000")]
     pub max_content_size: usize,
     /// A list of hubs to which to connect.
-    #[structopt(env, long, default_value = "[::1]:4511")]
+    #[structopt(env = "SAMIZDAT_HUBS", long, default_value = "[::1]:4511")]
     pub hubs: Vec<AddrToResolve>,
     /// The maximum number of hubs to be queried simultaneously per query.
-    #[structopt(env, long, default_value = "3")]
+    #[structopt(env = "SAMIZDAT_MAX_PARALLEL_HUBS", long, default_value = "3")]
     pub max_parallel_hubs: usize,
     /// (MB) The maximum total size of all cached files and _disposable_ files. Note that the total
     /// size may still exceed this value, since some of the allocated space is used to store
     /// data that is valuable to you.
-    #[structopt(env, long, default_value = "1000")]
+    #[structopt(env = "SAMIZDAT_MAX_STORAGE", long, default_value = "1000")]
     pub max_storage: usize,
 }
 

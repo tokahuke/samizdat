@@ -38,3 +38,4 @@ rand = "^0.7"
 rand_chacha = "0.2.2"
 ed25519-dalek = { version = "1.0.1", features = ["serde"] }
 aes-gcm-siv = "0.10.3"
+anyhow = "1.0.53"

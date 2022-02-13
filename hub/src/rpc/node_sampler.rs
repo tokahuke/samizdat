@@ -9,11 +9,22 @@ use samizdat_common::heap_entry::HeapEntry;
 
 use super::Node;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct Normal {
     n: usize,
     x: f64,
     x2: f64,
+}
+
+impl Default for Normal {
+    fn default() -> Normal {
+        // Two pesudo-observations: one of 0.5s and another of 2s.
+        Normal {
+            n: 2,
+            x: 0.0,
+            x2: 2f64.ln().powi(2) / 2.0,
+        }
+    }
 }
 
 impl Normal {
@@ -32,12 +43,24 @@ impl Normal {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct StatisticsInner {
     requests: f64,
     successes: f64,
-    errors: f64,
-    total_latency_success_log: Normal,
+    failures: f64,
+    latency_success_log: Normal,
+}
+
+impl Default for StatisticsInner {
+    fn default() -> Self {
+        // Ten pseudo-observations: 1 success and 9 failures.
+        StatisticsInner {
+            requests: 10.0,
+            successes: 1.0,
+            failures: 9.0,
+            latency_success_log: Normal::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -45,11 +68,11 @@ pub struct Statistics(RwLock<StatisticsInner>);
 
 impl Statistics {
     pub fn rand_priority(&self) -> f64 {
-        // Use stuff from lock and get rid of it:
+        // Use stuff from lock and get rid of it as fast as you can:
         let lock = self.0.read().expect("poisoned");
         let requests = lock.requests;
         let successes = lock.successes;
-        let log_normal = lock.total_latency_success_log.clone();
+        let log_normal = lock.latency_success_log.clone();
         drop(lock); // used!
 
         // Sample a success probability:
@@ -86,30 +109,62 @@ impl Statistics {
     pub fn end_request_with_success(&self, latency: Duration) {
         let mut lock = self.0.write().expect("poisoned");
         lock.successes += 1.0;
-        lock.total_latency_success_log
+        lock.latency_success_log
             .observe((latency.as_millis() as f64).max(1.0).ln());
     }
 
-    pub fn end_request_with_error(&self) {
+    pub fn end_request_with_failure(&self) {
         let mut lock = self.0.write().expect("poisoned");
-        lock.errors += 1.0;
+        lock.failures += 1.0;
     }
 }
 
 pub(super) fn sample(
-    peers: &BTreeMap<SocketAddr, Arc<Node>>,
+    sampler: impl PrioritySampler,
+    nodes: &BTreeMap<SocketAddr, Arc<Node>>,
 ) -> impl Iterator<Item = (SocketAddr, Arc<Node>)> {
     let mut queue = BinaryHeap::new();
 
     // Thompson sampling solution to find the most successful peers.
-    for (&peer_addr, peer) in peers {
-        let priority = (peer.statistics.rand_priority() * 1e6) as i64;
+    for (&node_addr, node) in nodes {
+        let priority = (sampler.sample_priority(&node) * 1e6) as i64;
 
         queue.push(HeapEntry {
             priority,
-            content: (peer_addr, peer.clone()),
+            content: (node_addr, node.clone()),
         });
     }
 
     std::iter::from_fn(move || queue.pop().map(|entry| entry.content))
+}
+
+pub(super) trait PrioritySampler {
+    fn sample_priority(&self, node: &Node) -> f64;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UniformSampler;
+
+impl PrioritySampler for UniformSampler {
+    fn sample_priority(&self, _node: &Node) -> f64 {
+        1.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct QuerySampler;
+
+impl PrioritySampler for QuerySampler {
+    fn sample_priority(&self, node: &Node) -> f64 {
+        node.query_statistics.rand_priority()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EditionSampler;
+
+impl PrioritySampler for EditionSampler{
+    fn sample_priority(&self, node: &Node) -> f64 {
+        node.edition_statistics.rand_priority()
+    }
 }

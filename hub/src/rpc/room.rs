@@ -7,8 +7,9 @@ use tokio::sync::RwLock;
 
 use crate::CLI;
 
-use super::peer_sampler;
+use super::node_sampler;
 use super::Node;
+use super::node_sampler::PrioritySampler;
 
 #[derive(Debug)]
 pub struct Room {
@@ -35,17 +36,19 @@ impl Room {
 
     async fn stream_peers<'a>(
         &'a self,
+        sampler: impl 'a + PrioritySampler, 
         current: SocketAddr,
     ) -> impl 'a + Stream<Item = (SocketAddr, Arc<Node>)> {
         let peers = self.participants.read().await;
         let sampler =
-            peer_sampler::sample(&peers).filter(move |(_, peer)| peer.addr.ip() != current.ip());
+            node_sampler::sample(sampler, &peers).filter(move |(_, peer)| peer.addr.ip() != current.ip());
 
         futures::stream::iter(sampler)
     }
 
     pub(super) fn with_peers<'a, F, FFut, U>(
         &'a self,
+        sampler: impl 'a + PrioritySampler, 
         current: SocketAddr,
         map: F,
     ) -> impl 'a + Future<Output = Vec<U>>
@@ -54,7 +57,7 @@ impl Room {
         FFut: 'a + Future<Output = Option<U>>,
         U: 'a,
     {
-        self.stream_peers(current)
+        self.stream_peers(sampler, current)
             .into_stream()
             .flatten()
             .filter_map(move |(peer_id, peer)| map(peer_id, peer))

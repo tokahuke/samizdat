@@ -244,7 +244,7 @@ impl SeriesRef {
     /// Set this series as just recently refresh.
     pub fn refresh(&self) -> Result<(), crate::Error> {
         db().put_cf(
-            Table::SeresFreshnesses.get(),
+            Table::SeriesFreshnesses.get(),
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
         )?;
@@ -255,7 +255,7 @@ impl SeriesRef {
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh(&self) -> Result<bool, crate::Error> {
         let is_fresh = if let Some(latest) = self.get_editions()?.first() {
-            if let Some(freshness) = db().get_cf(Table::SeresFreshnesses.get(), self.key())? {
+            if let Some(freshness) = db().get_cf(Table::SeriesFreshnesses.get(), self.key())? {
                 let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
                 let ttl =
                     chrono::Duration::from_std(latest.signed.ttl).expect("can convert duration");

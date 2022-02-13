@@ -1,6 +1,6 @@
 mod hub_as_node;
 mod hub_server;
-mod peer_sampler;
+mod node_sampler;
 mod room;
 
 use futures::prelude::*;
@@ -22,7 +22,7 @@ use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
 use self::hub_server::HubServer;
-use self::peer_sampler::Statistics;
+use self::node_sampler::{Statistics, QuerySampler, EditionSampler, UniformSampler};
 use self::room::Room;
 
 const MAX_LENGTH: usize = 2_048;
@@ -34,9 +34,21 @@ lazy_static! {
 
 #[derive(Debug)]
 struct Node {
-    statistics: Statistics,
+    query_statistics: Statistics,
+    edition_statistics: Statistics,
     client: NodeClient,
     addr: SocketAddr,
+}
+
+impl Node {
+    fn new(client_addr: SocketAddr, client: NodeClient) -> Node {
+        Node {
+            query_statistics: Statistics::default(),
+            edition_statistics: Statistics::default(),
+            client,
+            addr: client_addr,
+        }
+    }
 }
 
 async fn candidates_for_resolution(
@@ -44,12 +56,12 @@ async fn candidates_for_resolution(
     client_addr: SocketAddr,
     resolution: Arc<Resolution>,
 ) -> Vec<Candidate> {
-    ROOM.with_peers(client_addr, move |peer_id, peer| {
+    ROOM.with_peers(QuerySampler, client_addr, move |peer_id, peer| {
         let resolution = resolution.clone();
         async move {
-            log::debug!("starting resolve for {}", peer_id);
+            log::debug!("starting resolve for {peer_id}");
 
-            peer.statistics.start_request();
+            peer.query_statistics.start_request();
 
             let start = Instant::now();
             let outcome = peer.client.resolve(ctx, resolution).await;
@@ -58,27 +70,30 @@ async fn candidates_for_resolution(
             let response = match outcome {
                 Ok(response) => response,
                 Err(err) => {
-                    log::warn!("error asking {} to resolve: {}", peer_id, err);
-                    peer.statistics.end_request_with_error();
+                    log::warn!("error asking {peer_id} to resolve: {err}");
+                    peer.query_statistics.end_request_with_failure();
                     return None;
                 }
             };
 
-            log::debug!("resolve done for {}", peer_id);
+            log::debug!("resolve done for {peer_id}");
 
             match response {
                 ResolutionResponse::Found(validation_riddle) => {
-                    peer.statistics.end_request_with_success(elapsed);
+                    peer.query_statistics.end_request_with_success(elapsed);
                     Some(vec![Candidate {
                         peer_addr: peer.addr,
                         validation_riddle,
                     }])
                 }
                 ResolutionResponse::Redirect(candidates) => {
-                    peer.statistics.end_request_with_success(elapsed);
+                    peer.query_statistics.end_request_with_success(elapsed);
                     Some(candidates)
                 }
-                ResolutionResponse::NotFound => None,
+                ResolutionResponse::NotFound => {
+                    peer.query_statistics.end_request_with_failure();
+                    None
+                },
             }
         }
     })
@@ -93,14 +108,25 @@ async fn latest_for_request(
     client_addr: SocketAddr,
     latest: Arc<LatestRequest>,
 ) -> Vec<LatestResponse> {
-    ROOM.with_peers(client_addr, |peer_id, peer| {
+    ROOM.with_peers(EditionSampler,client_addr, |peer_id, peer| {
         let latest = latest.clone();
         async move {
+            log::debug!("starting resolve latest edition for {peer_id}");
+
+            peer.edition_statistics.start_request();
+
+            let start = Instant::now();
             let outcome = peer.client.resolve_latest(ctx, latest).await;
+            let elapsed = start.elapsed();
+
             let response = match outcome {
-                Ok(response) => response,
+                Ok(response) => {
+                    peer.edition_statistics.end_request_with_success(elapsed);
+                    response
+                },
                 Err(err) => {
-                    log::warn!("error asking {} for latest: {}", peer_id, err);
+                    log::warn!("error asking {peer_id} for latest: {err}");
+                    peer.edition_statistics.end_request_with_failure();
                     return None;
                 }
             };
@@ -119,7 +145,7 @@ async fn announce_edition(
     client_addr: SocketAddr,
     announcement: Arc<EditionAnnouncement>,
 ) {
-    ROOM.with_peers(client_addr, |peer_id, peer| {
+    ROOM.with_peers(UniformSampler, client_addr, |peer_id, peer| {
         let announcement = announcement.clone();
         async move {
             let outcome = peer.client.announce_edition(ctx, announcement).await;
@@ -156,7 +182,7 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             // Get peer address:
             let client_addr = new_connection.connection.remote_address();
 
-            log::debug!("Incoming connection from {}", client_addr);
+            log::debug!("Incoming connection from {client_addr}");
 
             let transport = BincodeOverQuic::new(
                 new_connection.connection,
@@ -168,7 +194,7 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             let server = HubServer::new(client_addr);
             let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
 
-            log::info!("Connection from node (as server) {} accepted", client_addr);
+            log::info!("Connection from node (as server) {client_addr} accepted");
 
             Some(server_task)
         })
@@ -194,14 +220,14 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
         .filter_map(|connecting| async move {
             connecting
                 .await
-                .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
+                .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
                 .ok()
         })
         .for_each_concurrent(Some(CLI.max_connections), |new_connection| async move {
             // Get peer address:
             let client_addr = new_connection.connection.remote_address();
 
-            log::debug!("Incoming connection from {}", client_addr);
+            log::debug!("Incoming connection from {client_addr}");
 
             let transport = BincodeOverQuic::new(
                 new_connection.connection,
@@ -223,15 +249,11 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
             }
             .spawn();
 
-            log::info!("Connection from node (as client) {} accepted", client_addr);
+            log::info!("Connection from node (as client) {client_addr} accepted");
 
             ROOM.insert(
                 client_addr,
-                Node {
-                    statistics: Statistics::default(),
-                    client,
-                    addr: client_addr,
-                },
+                Node::new(client_addr, client),
             )
             .await;
         })

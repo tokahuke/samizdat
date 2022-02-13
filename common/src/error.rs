@@ -79,3 +79,9 @@ impl From<Error> for io::Error {
         io::Error::new(io::ErrorKind::Other, e.to_string())
     }
 }
+
+impl From<Error> for anyhow::Error {
+    fn from(e: Error) -> anyhow::Error {
+        anyhow::anyhow!("{e}")
+    }
+}

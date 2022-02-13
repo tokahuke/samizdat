@@ -29,29 +29,32 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn find() -> Result<Manifest, anyhow::Error> {
-        let filename_hierarchy = [
-            "./Samizdat.toml",
-            "./Samizdat.tml",
-            "./samizdat.toml",
-            "./samizdat.tml",
-        ];
-        let mut last_error = None;
+    const FILENAME_HIERARCHY: [&'static str; 4] = [
+        "./Samizdat.toml",
+        "./Samizdat.tml",
+        "./samizdat.toml",
+        "./samizdat.tml",
+    ];
 
-        for filename in filename_hierarchy {
+    pub fn find_opt() -> Result<Option<Manifest>, anyhow::Error> {
+        for filename in Manifest::FILENAME_HIERARCHY {
             match fs::read(filename) {
-                Ok(contents) => return Ok(toml::from_slice(&contents)?),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => last_error = Some(err),
+                Ok(contents) => return Ok(Some(toml::from_slice(&contents)?)),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
         }
 
-        Err(last_error.expect("filename hierarchy not empty").into())
+        Ok(None)
     }
 
     /// Creates a new manifest and associated debug keypair, given debug series owner name and
     /// optionally production private key.
     pub async fn create(name: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
+        if Manifest::find_opt()?.is_some() {
+            anyhow::bail!("`Samizdat.toml` already exists.");
+        }
+
         let debug_name = format!("{}-debug", name);
 
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
@@ -155,28 +158,20 @@ pub struct PrivateManifest {
     pub public_key_debug: Option<String>,
 }
 
-const FILENAME_HIERARCHY: [&str; 1] = ["./.Samizdat.priv"];
-
 impl PrivateManifest {
+    const FILENAME_HIERARCHY: [&'static str; 1] = ["./.Samizdat.priv"];
+
     /// Find the private manifest, if one exists.
     pub fn find_opt() -> Result<Option<PrivateManifest>, anyhow::Error> {
-        let mut last_error = None;
-
-        for filename in FILENAME_HIERARCHY {
+        for filename in PrivateManifest::FILENAME_HIERARCHY {
             match fs::read(filename) {
                 Ok(contents) => return Ok(Some(toml::from_slice(&contents)?)),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => last_error = Some(err),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
         }
 
-        let last_error = last_error.expect("filename hierarchy not empty");
-
-        if last_error.kind() == io::ErrorKind::NotFound {
-            Ok(None)
-        } else {
-            Err(last_error.into())
-        }
+        Ok(None)
     }
 
     /// Creates a new manifest and associated debug keypair, given debug series owner name and
@@ -185,6 +180,10 @@ impl PrivateManifest {
         debug_name: &str,
         private_key: Option<&PrivateKey>,
     ) -> Result<PrivateManifest, anyhow::Error> {
+        if PrivateManifest::find_opt()?.is_some() {
+            anyhow::bail!("`.Samizdat.priv` already exists.");
+        }
+
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
             series_owner_name: &debug_name,
             keypair: None,

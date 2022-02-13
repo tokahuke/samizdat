@@ -2210,6 +2210,7 @@ name = "samizdat-common"
 version = "0.1.0"
 dependencies = [
  "aes-gcm-siv",
+ "anyhow",
  "base64-url",
  "bincode",
  "bytes",

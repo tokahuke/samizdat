@@ -13,7 +13,7 @@ pub fn init_db() -> Result<(), crate::Error> {
 
     let db = rocksdb::DB::open_cf(
         &db_opts,
-        &CLI.db_path,
+        &format!("{}/db", CLI.data),
         &vec![Table::RecentNonces]
             .into_iter()
             .map(Table::name)

@@ -27,9 +27,9 @@ pub fn server() -> String {
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Cli {
-    #[structopt(long, short, env, default_value = "/var/lib/samizdat/node")]
+    #[structopt(long, short, env = "SAMIZDAT_DATA", default_value = "/var/lib/samizdat/node")]
     pub data: PathBuf,
-    #[structopt(long, short, env, default_value = "4510")]
+    #[structopt(long, short, env = "SAMIZDAT_PORT", default_value = "4510")]
     pub port: u16,
     #[structopt(subcommand)]
     pub command: Command,
@@ -40,7 +40,11 @@ pub enum Command {
     /// Starts a new collection in this folder.
     Init,
     /// Imports a series from a `Samizdat.toml` in the current directory.
-    Import,
+    Import {
+        /// The private key of the series.
+        #[structopt(long)]
+        private_key: Option<String>,
+    },
     /// Creates a new version (collection) of the content in this folder.
     Commit {
         /// Set a custom time-to-leave for this commit.
@@ -99,7 +103,7 @@ impl Command {
     pub async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             Command::Init => commands::init().await,
-            Command::Import => commands::import().await,
+            Command::Import { private_key } => commands::import(private_key).await,
             Command::Commit {
                 ttl,
                 release,

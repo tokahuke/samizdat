@@ -14,7 +14,7 @@ use std::{env, fs, io};
 use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 
-use samizdat_common::Hash;
+use samizdat_common::{Hash, PrivateKey};
 
 use crate::api;
 use crate::html::maybe_proxy_page;
@@ -47,19 +47,30 @@ pub async fn init() -> Result<(), anyhow::Error> {
         .await
         .context("failed to create `.Samizdat.priv`")?;
 
+    println!(
+        "NOTE: Your private key for this project is \n\n\t{}
+        \n\nStore it somewhere safe! (you were warned)",
+        private_key
+    );
+
     Ok(())
 }
 
-pub async fn import() -> Result<(), anyhow::Error> {
-    let manifest = Manifest::find().context("failed to find `Samizdat.toml`")?;
+pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
+    let manifest = Manifest::find_opt()
+        .context("failed to find `Samizdat.toml`")?
+        .ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exist"))?;
     let private_manifest_opt =
         PrivateManifest::find_opt().context("failed to find `.Samizdat.priv`")?;
     let private_manifest = if let Some(private_manifest) = private_manifest_opt {
         private_manifest
     } else {
-        PrivateManifest::create(&manifest.debug.name, None)
-            .await
-            .context("failed to create `.Samizdat.priv`")?
+        PrivateManifest::create(
+            &manifest.debug.name,
+            private_key.map(|pk| pk.parse::<PrivateKey>()).transpose()?.as_ref(),
+        )
+        .await
+        .context("failed to create `.Samizdat.priv`")?
     };
 
     // Import series owners if it private key present in the private manifest.
@@ -118,7 +129,8 @@ pub async fn commit(
         names
     }
 
-    let manifest = Manifest::find()?;
+    let manifest =
+        Manifest::find_opt()?.ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exst"))?;
     let private_manifest = PrivateManifest::find_opt()?.ok_or_else(|| {
         anyhow::anyhow!("Private manifest `.Samizdat.priv` not found. Hint: run `samizdat import`.")
     })?;
@@ -218,7 +230,8 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     const MIN_WAIT: Duration = Duration::from_secs(1);
 
     // Ignore the output folder.
-    let manifest = Manifest::find()?;
+    let manifest =
+        Manifest::find_opt()?.ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exist"))?;
     let base = if manifest.build.base.is_absolute() {
         manifest.build.base.clone()
     } else {
