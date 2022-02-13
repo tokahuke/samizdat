@@ -73,7 +73,19 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
         .context("failed to create `.Samizdat.priv`")?
     };
 
-    // Import series owners if it private key present in the private manifest.
+    // Import debug series owner.
+    api::post_series_owner(api::PostSeriesOwnerRequest {
+        series_owner_name: &manifest.debug.name,
+        keypair: Some(api::Keypair {
+            private_key: private_manifest.private_key_debug,
+            public_key: private_manifest.public_key_debug,
+        }),
+        is_draft: false,
+    })
+    .await
+    .context("failed to import series keypair")?;
+
+    // Import series owners if its private key present in the private manifest.
     if let Some(private_key) = private_manifest.private_key {
         api::post_series_owner(api::PostSeriesOwnerRequest {
             series_owner_name: &manifest.series.name,

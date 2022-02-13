@@ -9,23 +9,23 @@ edition = "2021"
 ed25519-dalek = { version = "1.0.1", features = ["serde"] }
 failure = "0.1.8"
 failure_derive = "0.1.8"
-futures = "0.3.17"
+futures = "0.3.21"
 log = "0.4.14"
 log4rs = "1.0.0"
 mime_guess = "2.0.3"
-reqwest = { version = "0.11.4", default-features = false, features = ["rustls-tls", "json"] }
-serde = "1.0.130"
-serde_derive = "1.0.130"
-structopt = "0.3.23"
+reqwest = { version = "0.11.9", default-features = false, features = ["rustls-tls", "json"] }
+serde = "1.0.136"
+serde_derive = "1.0.136"
+structopt = "0.3.26"
 table = "0.4.0"
-tabled = "0.3.0"
-tokio = { version = "1.11.0", features = ["macros", "rt-multi-thread"] }
+tabled = "0.5.0"
+tokio = { version = "1.16.1", features = ["macros", "rt-multi-thread"] }
 samizdat-common = { path = "../common" }
 chrono = "0.4.19"
-serde_json = "1.0.67"
+serde_json = "1.0.79"
 toml = "0.5.8"
 humantime-serde = "1.0.1"
-askama = "0.10.5"
+askama = "0.11.0"
 humantime = "2.1.0"
 notify = "5.0.0-pre.13"
 regex = "1.5.4"

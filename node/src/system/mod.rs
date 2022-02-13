@@ -47,7 +47,7 @@ impl HubConnectionInner {
 
         // Create transport for client and create client:
         let transport = connection_manager
-            .transport(&direct_addr, "localhost")
+            .transport(direct_addr)
             .await?;
         let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
         let client = NewClient {
@@ -68,7 +68,7 @@ impl HubConnectionInner {
     ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
         let transport = connection_manager
-            .transport(&reverse_addr, "localhost")
+            .transport(reverse_addr)
             .await?;
         let server_task = server::BaseChannel::with_defaults(transport).execute(
             NodeServer {

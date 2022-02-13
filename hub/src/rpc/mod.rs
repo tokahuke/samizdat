@@ -5,7 +5,6 @@ mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
-use quinn::Endpoint;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -163,12 +162,8 @@ async fn announce_edition(
 }
 
 pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
-    let mut endpoint_builder = Endpoint::builder();
-    endpoint_builder.listen(samizdat_common::quic::server_config());
-    endpoint_builder.default_client_config(samizdat_common::quic::insecure());
-
-    let (endpoint, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
-
+    let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+    
     log::info!("Direct server started at {}", endpoint.local_addr()?);
 
     incoming
@@ -208,11 +203,7 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 }
 
 pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
-    let mut endpoint_builder = Endpoint::builder();
-    endpoint_builder.listen(samizdat_common::quic::server_config());
-    endpoint_builder.default_client_config(samizdat_common::quic::insecure());
-
-    let (endpoint, incoming) = endpoint_builder.bind(&addr.into()).expect("failed to bind");
+    let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
 
     log::info!("Reverse server started at {}", endpoint.local_addr()?);
 

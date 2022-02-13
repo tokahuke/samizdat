@@ -7,7 +7,6 @@ use tarpc::server::{self, Channel};
 use tokio::task::JoinHandle;
 use tokio::time;
 
-use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 
@@ -89,7 +88,7 @@ async fn connect(
     endpoint: &Endpoint,
 ) -> Result<JoinHandle<()>, crate::Error> {
     let (_, partner) = partner.resolve().await?;
-    let new_connection = quic::connect(endpoint, &partner, "localhost").await?;
+    let new_connection = samizdat_common::quic::connect(endpoint, partner).await?;
 
     log::info!(
         "hub-as-node connected to hub at {}",

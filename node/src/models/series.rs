@@ -55,7 +55,7 @@ impl SeriesOwner {
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
             name: name.to_owned(),
-            keypair: Keypair::generate(&mut samizdat_common::csprng()),
+            keypair: Keypair::generate(&mut rand::rngs::OsRng {}),
             default_ttl,
             is_draft,
         };

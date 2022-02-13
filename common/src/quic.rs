@@ -1,90 +1,65 @@
-use quinn::{ClientConfig, Endpoint, Incoming, NewConnection, ServerConfig};
-use rustls::ServerCertVerified;
-use std::fs;
+use quinn::{Endpoint, Incoming, NewConnection, ServerConfig};
+// use rustls::client::{ServerCertVerified, ServerCertVerifier, ServerName};
 use std::net::SocketAddr;
-use std::sync::Arc;
+// use std::time::SystemTime;
 
-// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
-struct SkipCertificationVerification;
+/// Everybody is spartacus.
+const DEFAULT_SERVER_NAME: &str = "spartacus";
 
-impl rustls::ServerCertVerifier for SkipCertificationVerification {
-    fn verify_server_cert(
-        &self,
-        _: &rustls::RootCertStore,
-        _: &[rustls::Certificate],
-        _: webpki::DNSNameRef,
-        _: &[u8],
-    ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
-        Ok(ServerCertVerified::assertion())
-    }
-}
+// // Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
+// struct SkipCertificationVerification;
 
-pub fn insecure() -> ClientConfig {
-    let mut cfg = quinn::ClientConfigBuilder::default().build();
-
-    // Allow idle connections:
-    std::sync::Arc::get_mut(&mut cfg.transport)
-        .unwrap()
-        .keep_alive_interval(Some(std::time::Duration::from_millis(5_000)));
-
-    // Get a mutable reference to the 'crypto' config in the 'client config'.
-    let tls_cfg: &mut rustls::ClientConfig = std::sync::Arc::get_mut(&mut cfg.crypto).unwrap();
-
-    // Change the certification verifier.
-    // This is only available when compiled with the 'dangerous_configuration' feature.
-    tls_cfg
-        .dangerous()
-        .set_certificate_verifier(Arc::new(SkipCertificationVerification));
-    cfg
-}
+// impl ServerCertVerifier for SkipCertificationVerification {
+//     fn verify_server_cert(
+//         &self,
+//         _: &rustls::Certificate,
+//         _: &[rustls::Certificate],
+//         _: &ServerName,
+//         _: &mut dyn Iterator<Item = &[u8]>,
+//         _: &[u8],
+//         _: SystemTime,
+//     ) -> Result<ServerCertVerified, rustls::Error> {
+//         Ok(ServerCertVerified::assertion())
+//     }
+// }
 
 pub fn server_config() -> ServerConfig {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let key = quinn::PrivateKey::from_der(&cert.serialize_private_key_der()).unwrap();
-    let cert = quinn::Certificate::from_der(&cert.serialize_der().unwrap()).unwrap();
+    let cert = rcgen::generate_simple_self_signed(vec![DEFAULT_SERVER_NAME.into()]).unwrap();
+    let key = rustls::PrivateKey(cert.serialize_private_key_der());
+    let cert = rustls::Certificate(cert.serialize_der().unwrap());
 
-    let mut server_config = quinn::ServerConfigBuilder::default();
-    server_config
-        .certificate(quinn::CertificateChain::from_certs(vec![cert]), key)
-        .unwrap();
-
-    server_config.build()
+    quinn::ServerConfig::with_single_cert(vec![cert], key).expect("can build server config")
 }
 
-pub fn generate_self_signed_cert(
-    cert_path: &str,
-    key_path: &str,
-) -> (quinn::Certificate, quinn::PrivateKey) {
-    // Generate dummy certificate.
-    let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let serialized_key = certificate.serialize_private_key_der();
-    let serialized_certificate = certificate.serialize_der().unwrap();
+// fn generate_self_signed_cert(
+//     cert_path: &str,
+//     key_path: &str,
+// ) -> (rustls::Certificate, rustls::PrivateKey) {
+//     // Generate dummy certificate.
+//     let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+//     let serialized_key = certificate.serialize_private_key_der();
+//     let serialized_certificate = certificate.serialize_der().unwrap();
 
-    // Write to files.
-    fs::write(&cert_path, &serialized_certificate).expect("failed to write certificate");
-    fs::write(&key_path, &serialized_key).expect("failed to write private key");
+//     // Write to files.
+//     fs::write(&cert_path, &serialized_certificate).expect("failed to write certificate");
+//     fs::write(&key_path, &serialized_key).expect("failed to write private key");
 
-    let cert = quinn::Certificate::from_der(&serialized_certificate).expect("failed to load cert");
-    let key = quinn::PrivateKey::from_der(&serialized_key).expect("failed to load key");
+//     let cert = rustls::Certificate(serialized_certificate);
+//     let key = rustls::PrivateKey(serialized_key);
 
-    (cert, key)
-}
+//     (cert, key)
+// }
 
 pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
-    let mut endpoint_builder = Endpoint::builder();
-    endpoint_builder.listen(server_config());
-    endpoint_builder.default_client_config(insecure());
-
-    endpoint_builder.bind(&bind_addr).expect("failed to bind")
+    Endpoint::server(server_config(), bind_addr).expect("can bind endpoint")
 }
 
 pub async fn connect(
     endpoint: &Endpoint,
-    remote_addr: &SocketAddr,
-    server_name: &str,
+    remote_addr: SocketAddr,
 ) -> Result<NewConnection, crate::Error> {
     Ok(endpoint
-        .connect(remote_addr, server_name)
+        .connect(remote_addr, DEFAULT_SERVER_NAME)
         .expect("failed to start connecting")
         .await?)
 }

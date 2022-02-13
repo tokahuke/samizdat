@@ -1,11 +1,14 @@
 use base64_url::base64;
 use failure_derive::Fail;
+use tarpc::client::RpcError;
 use std::io;
 
 #[derive(Debug, Fail)]
 pub enum Error {
     #[fail(display = "message: {}", _0)]
     Message(String),
+    #[fail(display = "RPC error: {}", _0)]
+    Rpc(RpcError),
     #[fail(display = "base64 decode error: {}", _0)]
     Base64(base64::DecodeError),
     #[fail(display = "db error: {}", _0)]
@@ -31,6 +34,12 @@ pub enum Error {
 }
 
 impl warp::reject::Reject for crate::Error {}
+
+impl From<RpcError> for Error {
+    fn from(e: RpcError) -> Error {
+        Error::Rpc(e)
+    }
+}
 
 impl From<base64::DecodeError> for Error {
     fn from(e: base64::DecodeError) -> Error {

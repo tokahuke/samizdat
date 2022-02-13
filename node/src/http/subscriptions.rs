@@ -51,7 +51,9 @@ fn delete_subscription(
         .and(authenticate([AccessRight::ManageSubscriptions]))
         .map(|public_key: Key| {
             let subscription = SubscriptionRef::new(public_key);
-            subscription.drop_if_exists()
+            let existed = subscription.get()?.is_some();
+            subscription.drop_if_exists()?;
+            Ok(existed)
         })
         .map(api_reply)
 }

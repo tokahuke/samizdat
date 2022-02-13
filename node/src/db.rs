@@ -145,7 +145,7 @@ pub enum Table {
 }
 
 /// An aliase fot the merge function pointer.
-type MergeFunction = fn(&[u8], Option<&[u8]>, &mut rocksdb::MergeOperands) -> Option<Vec<u8>>;
+type MergeFunction = fn(&[u8], Option<&[u8]>, &rocksdb::MergeOperands) -> Option<Vec<u8>>;
 
 impl Table {
     /// Name of the corresponding column family.
@@ -222,7 +222,7 @@ impl MergeOperation {
     fn try_full_merge(
         _new_key: &[u8],
         existing_val: Option<&[u8]>,
-        operands: &mut rocksdb::MergeOperands,
+        operands: &rocksdb::MergeOperands,
     ) -> Result<Option<Vec<u8>>, crate::Error> {
         let mut current: MergeOperation = existing_val
             .map(bincode::deserialize)
@@ -240,7 +240,7 @@ impl MergeOperation {
     fn full_merge(
         new_key: &[u8],
         existing_val: Option<&[u8]>,
-        operands: &mut rocksdb::MergeOperands,
+        operands: &rocksdb::MergeOperands,
     ) -> Option<Vec<u8>> {
         match MergeOperation::try_full_merge(new_key, existing_val, operands) {
             Ok(val) => val,

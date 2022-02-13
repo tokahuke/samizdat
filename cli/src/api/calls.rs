@@ -65,6 +65,8 @@ pub struct PostSeriesOwnerResponse {
     pub default_ttl: Duration,
 }
 
+type GetSeriesOwnerResponse = PostSeriesOwnerResponse;
+
 pub async fn post_series_owner(
     request: PostSeriesOwnerRequest<'_>,
 ) -> Result<PostSeriesOwnerResponse, anyhow::Error> {
@@ -75,11 +77,11 @@ pub async fn delete_series_owner(series_name: &str) -> Result<bool, anyhow::Erro
     delete(format!("/_seriesowners/{series_name}")).await
 }
 
-pub async fn get_series_owner(series_name: &str) -> Result<(), anyhow::Error> {
+pub async fn get_series_owner(series_name: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
     get(format!("/_seriesowners/{series_name}")).await
 }
 
-pub async fn get_all_series_owners() -> Result<Vec<PostSeriesOwnerResponse>, anyhow::Error> {
+pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyhow::Error> {
     get("/_seriesowners").await
 }
 
@@ -122,14 +124,14 @@ pub struct PostSubscriptionRequest<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PostSubscriptionResponse {
+pub struct GetSubscriptionResponse {
     pub public_key: Key,
     pub kind: String,
 }
 
 pub async fn post_subscription(
     request: PostSubscriptionRequest<'_>,
-) -> Result<PostSubscriptionResponse, anyhow::Error> {
+) -> Result<String, anyhow::Error> {
     post("/_subscriptions", request).await
 }
 
@@ -137,8 +139,8 @@ pub async fn delete_subscription(public_key: &str) -> Result<bool, anyhow::Error
     delete(format!("/_subscriptions/{public_key}")).await
 }
 
-pub async fn get_all_subscriptions() -> Result<Vec<PostSubscriptionResponse>, anyhow::Error> {
-    get("/subscriptions").await
+pub async fn get_all_subscriptions() -> Result<Vec<GetSubscriptionResponse>, anyhow::Error> {
+    get("/_subscriptions").await
 }
 
 // Editions:

@@ -36,10 +36,9 @@ impl ConnectionManager {
 
     pub async fn connect(
         &self,
-        remote_addr: &SocketAddr,
-        server_name: &str,
+        remote_addr: SocketAddr,
     ) -> Result<NewConnection, crate::Error> {
-        let new_connection = quic::connect(&self.endpoint, remote_addr, server_name).await?;
+        let new_connection = quic::connect(&self.endpoint, remote_addr).await?;
         log::info!(
             "client connected to server at {}",
             new_connection.connection.remote_address()
@@ -50,14 +49,13 @@ impl ConnectionManager {
 
     pub async fn transport<S, R>(
         &self,
-        remote_addr: &SocketAddr,
-        server_name: &str,
+        remote_addr: SocketAddr,
     ) -> Result<BincodeOverQuic<S, R>, crate::Error>
     where
         S: 'static + Send + serde::Serialize,
         R: 'static + Send + for<'a> serde::Deserialize<'a>,
     {
-        let new_connection = self.connect(remote_addr, server_name).await?;
+        let new_connection = self.connect(remote_addr).await?;
 
         Ok(BincodeOverQuic::new(
             new_connection.connection.clone(),
@@ -78,7 +76,7 @@ impl ConnectionManager {
 
         let incoming = self
             .endpoint
-            .connect(&peer_addr, "localhost")
+            .connect(peer_addr, "localhost")
             .expect("failed to start connecting");
 
         let outgoing = async move {

@@ -153,9 +153,9 @@ pub struct PrivateManifestTemplate<'a> {
 #[serde(rename_all = "kebab-case")]
 pub struct PrivateManifest {
     pub private_key: Option<String>,
-    pub private_key_debug: Option<String>,
+    pub private_key_debug: String,
     /// If `private_key_debug` is set, then also is this field.
-    pub public_key_debug: Option<String>,
+    pub public_key_debug: String,
 }
 
 impl PrivateManifest {
