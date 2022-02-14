@@ -67,7 +67,10 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
     } else {
         PrivateManifest::create(
             &manifest.debug.name,
-            private_key.map(|pk| pk.parse::<PrivateKey>()).transpose()?.as_ref(),
+            private_key
+                .map(|pk| pk.parse::<PrivateKey>())
+                .transpose()?
+                .as_ref(),
         )
         .await
         .context("failed to create `.Samizdat.priv`")?

@@ -163,7 +163,7 @@ impl PrioritySampler for QuerySampler {
 #[derive(Debug, Clone, Copy)]
 pub struct EditionSampler;
 
-impl PrioritySampler for EditionSampler{
+impl PrioritySampler for EditionSampler {
     fn sample_priority(&self, node: &Node) -> f64 {
         node.edition_statistics.rand_priority()
     }

@@ -1,7 +1,7 @@
 use base64_url::base64;
 use failure_derive::Fail;
-use tarpc::client::RpcError;
 use std::io;
+use tarpc::client::RpcError;
 
 #[derive(Debug, Fail)]
 pub enum Error {

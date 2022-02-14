@@ -34,10 +34,7 @@ impl ConnectionManager {
         ConnectionManager { endpoint, matcher }
     }
 
-    pub async fn connect(
-        &self,
-        remote_addr: SocketAddr,
-    ) -> Result<NewConnection, crate::Error> {
+    pub async fn connect(&self, remote_addr: SocketAddr) -> Result<NewConnection, crate::Error> {
         let new_connection = quic::connect(&self.endpoint, remote_addr).await?;
         log::info!(
             "client connected to server at {}",

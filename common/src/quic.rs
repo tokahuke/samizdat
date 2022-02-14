@@ -1,57 +1,81 @@
-use quinn::{Endpoint, Incoming, NewConnection, ServerConfig};
+use quinn::{
+    ClientConfig, Endpoint, IdleTimeout, Incoming, NewConnection, ServerConfig, TransportConfig,
+    VarInt,
+};
 // use rustls::client::{ServerCertVerified, ServerCertVerifier, ServerName};
 use std::net::SocketAddr;
-// use std::time::SystemTime;
+use std::sync::Arc;
+use std::time::Duration;
 
-/// Everybody is spartacus.
+/// "I am Spartacus!"
 const DEFAULT_SERVER_NAME: &str = "spartacus";
 
-// // Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
-// struct SkipCertificationVerification;
+// We don't need all trust buit into QUIC. Using "dangerous configuration", which is simpler.
+// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
 
-// impl ServerCertVerifier for SkipCertificationVerification {
-//     fn verify_server_cert(
-//         &self,
-//         _: &rustls::Certificate,
-//         _: &[rustls::Certificate],
-//         _: &ServerName,
-//         _: &mut dyn Iterator<Item = &[u8]>,
-//         _: &[u8],
-//         _: SystemTime,
-//     ) -> Result<ServerCertVerified, rustls::Error> {
-//         Ok(ServerCertVerified::assertion())
-//     }
-// }
+// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
+struct SkipServerVerification;
 
-pub fn server_config() -> ServerConfig {
+impl SkipServerVerification {
+    fn new() -> Arc<Self> {
+        Arc::new(Self)
+    }
+}
+
+impl rustls::client::ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::Certificate,
+        _intermediates: &[rustls::Certificate],
+        _server_name: &rustls::ServerName,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _ocsp_response: &[u8],
+        _now: std::time::SystemTime,
+    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::ServerCertVerified::assertion())
+    }
+}
+
+fn transport_config() -> TransportConfig {
+    const IDLE_TIMEOUT_MS: u32 = 2 * 60 * 1_000;
+
+    let mut transport = TransportConfig::default();
+    transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));
+    transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 2)));
+
+    transport
+}
+
+fn client_config() -> ClientConfig {
+    let crypto = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_custom_certificate_verifier(SkipServerVerification::new())
+        .with_no_client_auth();
+
+    let mut client_config = ClientConfig::new(Arc::new(crypto));
+    client_config.transport = Arc::new(transport_config());
+
+    client_config
+}
+
+fn server_config() -> ServerConfig {
     let cert = rcgen::generate_simple_self_signed(vec![DEFAULT_SERVER_NAME.into()]).unwrap();
     let key = rustls::PrivateKey(cert.serialize_private_key_der());
     let cert = rustls::Certificate(cert.serialize_der().unwrap());
 
-    quinn::ServerConfig::with_single_cert(vec![cert], key).expect("can build server config")
+    let mut server_config =
+        quinn::ServerConfig::with_single_cert(vec![cert], key).expect("can build server config");
+    server_config.transport = Arc::new(transport_config());
+
+    server_config
 }
 
-// fn generate_self_signed_cert(
-//     cert_path: &str,
-//     key_path: &str,
-// ) -> (rustls::Certificate, rustls::PrivateKey) {
-//     // Generate dummy certificate.
-//     let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-//     let serialized_key = certificate.serialize_private_key_der();
-//     let serialized_certificate = certificate.serialize_der().unwrap();
-
-//     // Write to files.
-//     fs::write(&cert_path, &serialized_certificate).expect("failed to write certificate");
-//     fs::write(&key_path, &serialized_key).expect("failed to write private key");
-
-//     let cert = rustls::Certificate(serialized_certificate);
-//     let key = rustls::PrivateKey(serialized_key);
-
-//     (cert, key)
-// }
-
 pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
-    Endpoint::server(server_config(), bind_addr).expect("can bind endpoint")
+    let (mut endpoint, incoming) =
+        Endpoint::server(server_config(), bind_addr).expect("can bind endpoint");
+    endpoint.set_default_client_config(client_config());
+
+    (endpoint, incoming)
 }
 
 pub async fn connect(

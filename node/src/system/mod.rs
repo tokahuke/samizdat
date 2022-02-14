@@ -46,9 +46,7 @@ impl HubConnectionInner {
         let (client_reset_trigger, client_reset_recv) = oneshot::channel();
 
         // Create transport for client and create client:
-        let transport = connection_manager
-            .transport(direct_addr)
-            .await?;
+        let transport = connection_manager.transport(direct_addr).await?;
         let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
         let client = NewClient {
             client: uninstrumented_client.client,
@@ -67,9 +65,7 @@ impl HubConnectionInner {
         connection_manager: Arc<ConnectionManager>,
     ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
-        let transport = connection_manager
-            .transport(reverse_addr)
-            .await?;
+        let transport = connection_manager.transport(reverse_addr).await?;
         let server_task = server::BaseChannel::with_defaults(transport).execute(
             NodeServer {
                 channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),

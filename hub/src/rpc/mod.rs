@@ -21,7 +21,7 @@ use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
 
 use self::hub_server::HubServer;
-use self::node_sampler::{Statistics, QuerySampler, EditionSampler, UniformSampler};
+use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
 use self::room::Room;
 
 const MAX_LENGTH: usize = 2_048;
@@ -92,7 +92,7 @@ async fn candidates_for_resolution(
                 ResolutionResponse::NotFound => {
                     peer.query_statistics.end_request_with_failure();
                     None
-                },
+                }
             }
         }
     })
@@ -107,7 +107,7 @@ async fn latest_for_request(
     client_addr: SocketAddr,
     latest: Arc<LatestRequest>,
 ) -> Vec<LatestResponse> {
-    ROOM.with_peers(EditionSampler,client_addr, |peer_id, peer| {
+    ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
         let latest = latest.clone();
         async move {
             log::debug!("starting resolve latest edition for {peer_id}");
@@ -122,7 +122,7 @@ async fn latest_for_request(
                 Ok(response) => {
                     peer.edition_statistics.end_request_with_success(elapsed);
                     response
-                },
+                }
                 Err(err) => {
                     log::warn!("error asking {peer_id} for latest: {err}");
                     peer.edition_statistics.end_request_with_failure();
@@ -163,7 +163,7 @@ async fn announce_edition(
 
 pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
     let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
-    
+
     log::info!("Direct server started at {}", endpoint.local_addr()?);
 
     incoming
@@ -242,11 +242,8 @@ pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
 
             log::info!("Connection from node (as client) {client_addr} accepted");
 
-            ROOM.insert(
-                client_addr,
-                Node::new(client_addr, client),
-            )
-            .await;
+            ROOM.insert(client_addr, Node::new(client_addr, client))
+                .await;
         })
         .await;
 
