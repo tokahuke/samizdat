@@ -62,6 +62,9 @@ pub trait Hub {
     async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
     /// Announces a new edition of a series to the network.
     async fn announce_edition(announcement: EditionAnnouncement);
+
+    // async fn get_series(identity: String) -> Vec<SeriesResponse>;
+    // async fn annouce_identity(announcement: IdentityAnnouncement);
 }
 
 #[derive(Debug, Serialize, Deserialize)]

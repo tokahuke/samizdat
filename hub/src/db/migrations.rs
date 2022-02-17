@@ -13,7 +13,7 @@ trait Migration: Debug {
 
     fn is_up(&self, db: &rocksdb::DB) -> Result<bool, crate::Error> {
         let migration_key = format!("{self:?}");
-        let value = db.get_cf(Table::Migration.get(), migration_key.as_bytes())?;
+        let value = db.get_cf(Table::Migrations.get(), migration_key.as_bytes())?;
         Ok(value.is_some())
     }
 
