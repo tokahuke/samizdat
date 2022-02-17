@@ -1,112 +1,74 @@
 //! Application-specific management of the RocksDB database.
 
-use semver::{Comparator, Op, Version, VersionReq};
+mod migrations;
+
 use serde_derive::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::fmt::Display;
+use strum::IntoEnumIterator;
+use strum_macros::{EnumIter, IntoStaticStr};
 
 use crate::cli;
 
 /// The handle to the RocksDB database.
 static mut DB: Option<rocksdb::DB> = None;
 
-/// Sets the version of the DB or panics if the version is incompatible.
-fn configure_version() {
-    let current_version = env!("CARGO_PKG_VERSION")
-        .parse::<Version>()
-        .expect("bad crate version from env");
-    let requirement = VersionReq {
-        comparators: vec![Comparator {
-            op: Op::Caret,
-            major: current_version.major,
-            minor: Some(current_version.minor),
-            patch: Some(current_version.patch),
-            pre: current_version.pre,
-        }],
-    };
-    log::info!("Checking db version (expecting {})", requirement);
-
-    if let Some(version) = db()
-        .get_cf(Table::Global.get(), b"version")
-        .expect("db error")
-    {
-        let db_version = String::from_utf8_lossy(&version)
-            .parse::<Version>()
-            .expect("bad db version");
-        assert!(
-            requirement.matches(&db_version),
-            "DB version is {}; required {}",
-            db_version,
-            requirement
-        );
-    } else {
-        db().put_cf(
-            Table::Global.get(),
-            b"version",
-            env!("CARGO_PKG_VERSION").as_bytes(),
-        )
-        .expect("db error");
-    }
-}
-
 /// Retrieives a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
 }
 
-/// Initializes the RocksDB for use by the Samizdat hub.
+/// Initializes the RocksDB for use by the Samizdat node.
 pub fn init_db() -> Result<(), crate::Error> {
+    log::info!("Starting RocksDB");
+
+    let db_path = format!("{}/db", cli().data.to_str().expect("path is not a string"));
+
+    // Make sure all column families are initialized;
+    let existing_cf_names = rocksdb::DB::list_cf(&rocksdb::Options::default(), &db_path)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let needed_cf_names = Table::names().collect::<BTreeSet<_>>();
+    let useless_cfs = existing_cf_names
+        .difference(&needed_cf_names)
+        .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, rocksdb::Options::default()));
+
     // Database options:
     let mut db_opts = rocksdb::Options::default();
     db_opts.create_missing_column_families(true);
     db_opts.create_if_missing(true);
 
-    // Open with column families:
-    let mut db = rocksdb::DB::open_cf_descriptors(
+    // Open with _all_ column families (otherwise RocksDB will complain. Yes, that is the
+    // default behavior. No, you can't change that):
+    let db = rocksdb::DB::open_cf_descriptors(
         &db_opts,
-        &format!("{}/db", cli().data.to_str().expect("path is not a string")),
-        vec![
-            Table::Global,
-            Table::Objects,
-            Table::ObjectMetadata,
-            Table::ObjectChunks,
-            Table::ObjectStatistics,
-            Table::Bookmarks,
-            Table::Collections,
-            Table::CollectionMetadata,
-            Table::CollectionItems,
-            Table::CollectionItemLocators,
-            Table::Series,
-            Table::Editions,
-            Table::SeriesFreshnesses,
-            Table::SeriesOwners,
-            Table::Subscriptions,
-            Table::RecentNonces,
-            Table::AccessRights,
-            Table::KVStore,
-        ]
-        .into_iter()
-        .map(Table::descriptor),
+        &db_path,
+        Table::descriptors().chain(useless_cfs),
     )?;
 
-    // Run possible migrations:
-    migrate(&mut db)?;
-
     // Set static:
+    // SAFETY: this is the only write to this variable an this happens before any reads are done.
+    // This is a single-threaded initialization function.
     unsafe {
         DB = Some(db);
-    }
 
-    // Configure version:
-    configure_version();
+        // Run possible migrations (needs DB set, but still requires exclusive access):
+        log::info!("RocksDB up. Running migrations...");
+        migrations::migrate(DB.as_mut().expect("option was just set"))?;
+        log::info!("... done running all migrations.");
+    }
 
     Ok(())
 }
 
 /// All column families in the RocksDB database.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, EnumIter, IntoStaticStr)]
 #[non_exhaustive]
 pub enum Table {
     /// Global, singleton information.
     Global,
+    /// The list of applied migrations.
+    Migrations,
     /// The list of all inscribed hashes.
     Objects,
     /// The map of all object (out-of-band) metadata, indexed by object hash.
@@ -117,10 +79,6 @@ pub enum Table {
     ObjectStatistics,
     /// List of dependencies on objects, which prevent automatic deletion.
     Bookmarks,
-    /// The list of all known collections.
-    Collections, // DEPRECATED
-    /// The list of all collection metadata.
-    CollectionMetadata, // DEPRECATED
     /// The list of all collection items, indexed by item hash.
     CollectionItems,
     /// The lit of all collection item hashes, indexed by locator.
@@ -144,13 +102,22 @@ pub enum Table {
     KVStore,
 }
 
+impl Display for Table {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", <&'static str>::from(self))
+    }
+}
+
 /// An aliase fot the merge function pointer.
 type MergeFunction = fn(&[u8], Option<&[u8]>, &rocksdb::MergeOperands) -> Option<Vec<u8>>;
 
 impl Table {
-    /// Name of the corresponding column family.
-    fn name(self) -> String {
-        format!("{:?}", self)
+    fn descriptors() -> impl Iterator<Item = rocksdb::ColumnFamilyDescriptor> {
+        Table::iter().map(Table::descriptor)
+    }
+
+    fn names() -> impl Iterator<Item = String> {
+        Table::iter().map(|table| table.to_string())
     }
 
     /// Merge operator for the column family, if any.
@@ -164,20 +131,19 @@ impl Table {
     /// Descriptor for column family initialization.
     fn descriptor(self) -> rocksdb::ColumnFamilyDescriptor {
         let mut column_opts = rocksdb::Options::default();
-        let name = self.name();
+        let name = self.to_string();
 
         if let Some(operator) = self.merge_operator() {
             column_opts.set_merge_operator_associative(&name, operator);
         }
 
-        rocksdb::ColumnFamilyDescriptor::new(self.name(), column_opts)
+        rocksdb::ColumnFamilyDescriptor::new(name, column_opts)
     }
 
     /// Gets the underlying column family after database initialization.
     pub fn get<'a>(self) -> &'a rocksdb::ColumnFamily {
         let db = db();
-        db.cf_handle(&format!("{:?}", self))
-            .expect("column family exists")
+        db.cf_handle(self.into()).expect("column family exists")
     }
 }
 
@@ -258,18 +224,6 @@ impl MergeOperation {
             }
         }
     }
-}
-
-/// Runs database migration tasks.
-///
-/// # Note
-///
-/// By now, just reserved for future use.
-fn migrate(db: &mut rocksdb::DB) -> Result<(), crate::Error> {
-    //db.drop_cf(&Table::Dependencies.name())?;
-    let _ = db; // suppresses unused variable warning.
-
-    Ok(())
 }
 
 #[cfg(test)]

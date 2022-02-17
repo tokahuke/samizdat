@@ -42,3 +42,5 @@ semver = "1.0.5"
 rand = "0.7.3"
 url = "2.2.2"
 askama = { version = "0.11.0", features = ["serde-json"] }
+strum = "0.23.0"
+strum_macros = "0.23.1"

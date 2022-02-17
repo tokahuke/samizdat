@@ -2,7 +2,6 @@ use quinn::{
     ClientConfig, Endpoint, IdleTimeout, Incoming, NewConnection, ServerConfig, TransportConfig,
     VarInt,
 };
-// use rustls::client::{ServerCertVerified, ServerCertVerifier, ServerName};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,7 +40,7 @@ fn transport_config() -> TransportConfig {
 
     let mut transport = TransportConfig::default();
     transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));
-    transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 2)));
+    transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 4)));
 
     transport
 }
