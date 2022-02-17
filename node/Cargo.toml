@@ -17,7 +17,7 @@ http = "0.2.6"
 lazy_static = "1.4.0"
 log = "0.4.14"
 log4rs = "1.0.0"
-rocksdb = "0.18.0"
+rocksdb = { version = "0.18.0", default-features = false, features = [] }
 serde = "1.0.136"
 serde_derive = "1.0.136"
 sha3 = "0.10.0"
