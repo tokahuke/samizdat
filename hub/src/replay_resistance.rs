@@ -1,7 +1,9 @@
 use std::convert::TryInto;
 use tokio::time::{interval, Duration};
 
-use samizdat_common::rpc::{EditionAnnouncement, LatestRequest, Query, Resolution};
+use samizdat_common::rpc::{
+    EditionAnnouncement, EditionRequest, IdentityRequest, Query, Resolution,
+};
 use samizdat_common::Hash;
 
 use crate::db;
@@ -75,7 +77,7 @@ impl Nonce for Resolution {
     }
 }
 
-impl Nonce for LatestRequest {
+impl Nonce for EditionRequest {
     fn nonce(&self) -> Hash {
         self.key_riddle.rand
     }
@@ -84,5 +86,11 @@ impl Nonce for LatestRequest {
 impl Nonce for EditionAnnouncement {
     fn nonce(&self) -> Hash {
         self.key_riddle.rand
+    }
+}
+
+impl Nonce for IdentityRequest {
+    fn nonce(&self) -> Hash {
+        self.identity_riddle.rand
     }
 }

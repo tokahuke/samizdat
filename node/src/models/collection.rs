@@ -82,6 +82,12 @@ impl<'a> From<&'a str> for ItemPath<'a> {
     }
 }
 
+impl<'a> Display for ItemPath<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl<'a> ItemPath<'a> {
     /// Retrieves the string representation of this path, in its canonical form.
     pub fn as_str(&self) -> &str {

@@ -3,12 +3,13 @@
 use futures::stream;
 use http::Response;
 use hyper::Body;
+use rocksdb::WriteBatch;
 use std::convert::TryInto;
 
 use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
-use crate::models::{ItemPath, Locator, ObjectRef, SeriesRef};
+use crate::models::{IdentityRef, ItemPath, Locator, ObjectRef, SeriesRef};
 
 pub struct Resolved {
     body: Body,
@@ -140,7 +141,7 @@ pub async fn resolve_series(
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving series {}/{}", series, name.as_str());
+    log::info!("Resolving series {series}/{name}");
 
     log::info!("Ensuring series is fresh");
     if !series.is_fresh()? {
@@ -189,4 +190,34 @@ pub async fn resolve_series(
     };
 
     Ok(not_resolved.try_into())
+}
+
+pub async fn resolve_identity(
+    identity_ref: IdentityRef,
+    name: ItemPath<'_>,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    log::info!("Resolving identity {identity_ref}/{name}");
+
+    let identity = if let Some(identity) = identity_ref.get()? {
+        log::info!("found identity {identity_ref} locally. Resolving series.");
+        identity
+    } else {
+        log::info!("identity not found locally. Querying hubs.");
+        if let Some(identity) = hubs().get_identity(&identity_ref).await {
+            let mut batch = WriteBatch::default();
+            identity.insert(&mut batch);
+            crate::db().write(batch)?;
+
+            identity
+        } else {
+            let not_resolved = NotResolved {
+                message: format!("identity {identity_ref} not found"),
+            };
+
+            return Ok(not_resolved.try_into());
+        }
+    };
+
+    resolve_series(identity.series(), name, ext_headers).await
 }

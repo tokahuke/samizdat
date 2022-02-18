@@ -2,6 +2,7 @@
 
 mod auth;
 mod collections;
+mod identities;
 mod kvstore;
 mod objects;
 mod resolvers;
@@ -143,11 +144,12 @@ pub fn general_redirect(
 /// The entrypoint of the Samizdat node public HTTP API.
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(
-        kvstore::api(), // kvstore not subject to redirect rules.
-        general_redirect(),
+        kvstore::api(),     // kvstore not subject to redirect rules.
+        general_redirect(), // redirect rules here...
         objects::api(),
         collections::api(),
         series::api(),
+        identities::api(),
         subscriptions::api(),
         auth::api(),
         post_vacuum(),

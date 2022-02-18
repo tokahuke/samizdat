@@ -37,12 +37,12 @@ pub enum QueryResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LatestRequest {
+pub struct EditionRequest {
     pub key_riddle: Riddle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LatestResponse {
+pub struct EditionResponse {
     pub series: OpaqueEncrypted,
     pub rand: Hash,
 }
@@ -54,17 +54,34 @@ pub struct EditionAnnouncement {
     pub rand: Hash,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IdentityRequest {
+    pub identity_riddle: Riddle,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IdentityResponse {
+    pub identity: OpaqueEncrypted,
+    pub rand: Hash,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IdentityAnnouncement {}
+
 #[tarpc::service]
 pub trait Hub {
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
+
     /// Gets the latest version of a series.
-    async fn get_latest(latest: LatestRequest) -> Vec<LatestResponse>;
+    async fn get_edition(request: EditionRequest) -> Vec<EditionResponse>;
     /// Announces a new edition of a series to the network.
     async fn announce_edition(announcement: EditionAnnouncement);
 
-    // async fn get_series(identity: String) -> Vec<SeriesResponse>;
-    // async fn annouce_identity(announcement: IdentityAnnouncement);
+    /// Gets the series associated to a given identifier.
+    async fn get_identity(request: IdentityRequest) -> Vec<IdentityResponse>;
+    /// Announces a new identity to the network.
+    async fn announce_identity(announcement: IdentityAnnouncement);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,6 +112,10 @@ pub enum ResolutionResponse {
 #[tarpc::service]
 pub trait Node {
     async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
-    async fn resolve_latest(latest_request: Arc<LatestRequest>) -> Vec<LatestResponse>;
+
+    async fn get_edition(latest_request: Arc<EditionRequest>) -> Vec<EditionResponse>;
     async fn announce_edition(announcement: Arc<EditionAnnouncement>);
+
+    async fn get_identity(request: Arc<IdentityRequest>) -> Vec<IdentityResponse>;
+    async fn announce_identity(announcement: Arc<IdentityAnnouncement>);
 }

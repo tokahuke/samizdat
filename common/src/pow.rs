@@ -1,6 +1,8 @@
+use serde_derive::{Deserialize, Serialize};
+
 use crate::Hash;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofOfWork {
     pub information: Hash,
     pub solution: Hash,
