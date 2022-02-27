@@ -10,7 +10,10 @@ use tokio::time;
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 
-use super::{announce_edition, candidates_for_resolution, latest_for_request, REPLAY_RESISTANCE};
+use super::{
+    announce_edition, candidates_for_resolution, edition_for_request, get_identity,
+    REPLAY_RESISTANCE,
+};
 
 const MAX_TRANSFER_SIZE: usize = 2_048;
 
@@ -49,13 +52,13 @@ impl Node for HubAsNodeServer {
         ResolutionResponse::Redirect(candidates)
     }
 
-    async fn resolve_latest(
+    async fn get_edition(
         self,
         ctx: context::Context,
-        latest_request: Arc<LatestRequest>,
-    ) -> Vec<LatestResponse> {
+        request: Arc<EditionRequest>,
+    ) -> Vec<EditionResponse> {
         // Se if you are not being replayed:
-        match REPLAY_RESISTANCE.lock().await.check(&*latest_request) {
+        match REPLAY_RESISTANCE.lock().await.check(&*request) {
             Ok(true) => { /* valid */ }
             Ok(false) => return vec![],
             Err(err) => {
@@ -64,7 +67,7 @@ impl Node for HubAsNodeServer {
             }
         }
 
-        latest_for_request(ctx, self.partner, latest_request).await
+        edition_for_request(ctx, self.partner, request).await
     }
 
     async fn announce_edition(self, ctx: context::Context, announcement: Arc<EditionAnnouncement>) {
@@ -79,6 +82,32 @@ impl Node for HubAsNodeServer {
         }
 
         announce_edition(ctx, self.partner, announcement).await
+    }
+
+    async fn get_identity(
+        self,
+        ctx: context::Context,
+        request: Arc<IdentityRequest>,
+    ) -> Vec<IdentityResponse> {
+        // Se if you are not being replayed:
+        match REPLAY_RESISTANCE.lock().await.check(&*request) {
+            Ok(true) => { /* valid */ }
+            Ok(false) => return vec![],
+            Err(err) => {
+                log::error!("error while checking for replay: {}", err);
+                return vec![];
+            }
+        }
+
+        get_identity(ctx, self.partner, request).await
+    }
+
+    async fn announce_identity(
+        self,
+        _ctx: context::Context,
+        _announcement: Arc<IdentityAnnouncement>,
+    ) {
+        // TODO: this is a no-op by now.
     }
 }
 

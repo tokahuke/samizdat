@@ -25,6 +25,8 @@ use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
 
 use crate::cli;
+use crate::models::Identity;
+use crate::models::IdentityRef;
 use crate::models::{Edition, ObjectRef, SeriesRef};
 
 use node_server::NodeServer;
@@ -209,13 +211,13 @@ impl HubConnection {
     }
 
     /// Tries to resolve the latest edition of a given series.
-    pub async fn get_latest(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
+    pub async fn get_edition(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = Riddle::new(&series.public_key.hash());
         let inner = self.inner.get().await;
 
         let response = inner
             .client
-            .get_latest(context::current(), LatestRequest { key_riddle })
+            .get_edition(context::current(), EditionRequest { key_riddle })
             .await?;
 
         let mut most_recent: Option<Edition> = None;
@@ -225,10 +227,7 @@ impl HubConnection {
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
             if !candidate_edition.is_valid() {
-                log::warn!(
-                    "received invalid candidate edition: {:?}",
-                    candidate_edition
-                );
+                log::warn!("received invalid candidate edition: {candidate_edition:?}",);
                 continue;
             }
 
@@ -256,6 +255,41 @@ impl HubConnection {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_identity(
+        &self,
+        identity: &IdentityRef,
+    ) -> Result<Option<Identity>, crate::Error> {
+        let identity_riddle = Riddle::new(&identity.hash());
+        let inner = self.inner.get().await;
+
+        let candidates = inner
+            .client
+            .get_identity(context::current(), IdentityRequest { identity_riddle })
+            .await?;
+
+        let mut most_worked_on: Option<Identity> = None;
+
+        for candidate in candidates {
+            let cipher = TransferCipher::new(&identity.hash(), &candidate.rand);
+            let candidate_identity: Identity = candidate.identity.decrypt_with(&cipher)?;
+
+            if !candidate_identity.is_valid() || candidate_identity.identity() != identity {
+                log::warn!("received invalid candidate identity: {candidate_identity:?}",);
+                continue;
+            }
+
+            if let Some(most_worked_on) = most_worked_on.as_mut() {
+                if candidate_identity.work_done() > most_worked_on.work_done() {
+                    *most_worked_on = candidate_identity;
+                }
+            } else {
+                most_worked_on = Some(candidate_identity);
+            }
+        }
+
+        Ok(most_worked_on)
     }
 }
 
@@ -310,15 +344,18 @@ impl Hubs {
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Option<Edition> {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.get_latest(series).await) })
+            .map(|hub| async move { (hub.name, hub.get_edition(series).await) })
             .buffer_unordered(cli().max_parallel_hubs);
 
+        // Even though we aould have to go through *aaaaaaall* the hubs to get the best answer, we
+        // can wait for changes to propagate eventually.
+        // In other words, this might be inaccurate, but it is faster.
         while let Some((hub_name, result)) = results.next().await {
             match result {
                 Ok(Some(found)) => return Some(found),
                 Ok(None) => {}
                 Err(err) => {
-                    log::error!("Error while querying {}: {}", hub_name, err)
+                    log::error!("Error while querying {hub_name}: {err}")
                 }
             }
         }
@@ -335,9 +372,39 @@ impl Hubs {
             match result {
                 Ok(_) => {}
                 Err(err) => {
-                    log::error!("Error while querying {}: {}", hub_name, err)
+                    log::error!("Error while querying {hub_name}: {err}")
                 }
             }
         }
+    }
+
+    pub async fn get_identity(&self, identity: &IdentityRef) -> Option<Identity> {
+        let mut results = stream::iter(self.hubs.iter().cloned())
+            .map(|hub| async move { (hub.name, hub.get_identity(identity).await) })
+            .buffer_unordered(cli().max_parallel_hubs);
+
+        let mut most_worked_on: Option<Identity> = None;
+
+        // Here, we need to go through *aaaaaall* the hubs to find the best match.
+        // In other words, this *must* be correct. Let's not cut any corners here.
+        while let Some((hub_name, result)) = results.next().await {
+            match result {
+                Ok(Some(found)) => {
+                    if let Some(most_worked_on) = most_worked_on.as_mut() {
+                        if found.work_done() > most_worked_on.work_done() {
+                            *most_worked_on = found;
+                        }
+                    } else {
+                        most_worked_on = Some(found);
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    log::error!("Error while querying {hub_name}: {err}")
+                }
+            }
+        }
+
+        most_worked_on
     }
 }

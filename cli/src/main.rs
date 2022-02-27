@@ -17,9 +17,10 @@ pub use manifest::{Manifest, PrivateManifest};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let _ = logger::init_logger();
-
     cli::init_cli()?;
+
+    let _ = logger::init_logger(cli::cli().verbose);
+
     access_token::init_access_token()?;
 
     api::validate_node_is_up().await?;

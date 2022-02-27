@@ -68,7 +68,7 @@ impl ItemPathBuf {
     }
 
     fn hash(&self) -> Hash {
-        Hash::build(self.0.as_bytes())
+        Hash::hash(self.0.as_bytes())
     }
 }
 
@@ -79,6 +79,12 @@ pub struct ItemPath<'a>(Cow<'a, str>);
 impl<'a> From<&'a str> for ItemPath<'a> {
     fn from(name: &'a str) -> ItemPath<'a> {
         ItemPath(normalize(name))
+    }
+}
+
+impl<'a> Display for ItemPath<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -145,7 +151,7 @@ impl Dropable for CollectionItem {
 impl CollectionItem {
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
-        let key = Hash::build(self.name.0.as_bytes());
+        let key = Hash::hash(self.name.0.as_bytes());
 
         if !is_included {
             log::error!("Inclusion proof falied for {:?}", self);
@@ -369,7 +375,7 @@ impl<'a> Locator<'a> {
     pub fn hash(&self) -> Hash {
         self.collection
             .hash
-            .rehash(&Hash::build(self.name.0.as_ref()))
+            .rehash(&Hash::hash(self.name.0.as_ref()))
     }
 
     pub fn collection(&self) -> CollectionRef {

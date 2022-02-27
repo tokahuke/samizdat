@@ -102,11 +102,11 @@ async fn candidates_for_resolution(
     .collect::<Vec<_>>()
 }
 
-async fn latest_for_request(
+async fn edition_for_request(
     ctx: context::Context,
     client_addr: SocketAddr,
-    latest: Arc<LatestRequest>,
-) -> Vec<LatestResponse> {
+    latest: Arc<EditionRequest>,
+) -> Vec<EditionResponse> {
     ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
         let latest = latest.clone();
         async move {
@@ -115,7 +115,7 @@ async fn latest_for_request(
             peer.edition_statistics.start_request();
 
             let start = Instant::now();
-            let outcome = peer.client.resolve_latest(ctx, latest).await;
+            let outcome = peer.client.get_edition(ctx, latest).await;
             let elapsed = start.elapsed();
 
             let response = match outcome {
@@ -159,6 +159,42 @@ async fn announce_edition(
         }
     })
     .await;
+}
+
+async fn get_identity(
+    ctx: context::Context,
+    client_addr: SocketAddr,
+    request: Arc<IdentityRequest>,
+) -> Vec<IdentityResponse> {
+    // TODO: create didcated sampler....
+    ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
+        let request = request.clone();
+        async move {
+            peer.edition_statistics.start_request();
+
+            let start = Instant::now();
+            let outcome = peer.client.get_identity(ctx, request).await;
+            let elapsed = start.elapsed();
+
+            let response = match outcome {
+                Ok(response) => {
+                    peer.edition_statistics.end_request_with_success(elapsed);
+                    response
+                }
+                Err(err) => {
+                    log::warn!("error asking {peer_id} for latest: {err}");
+                    peer.edition_statistics.end_request_with_failure();
+                    return None;
+                }
+            };
+
+            Some(response)
+        }
+    })
+    .await
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
 }
 
 pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {

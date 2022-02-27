@@ -8,7 +8,7 @@ use samizdat_common::cipher::TransferCipher;
 use samizdat_common::rpc::*;
 use samizdat_common::{ChannelAddr, Hash, Riddle};
 
-use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
+use crate::models::{CollectionItem, Edition, Identity, ObjectRef, SeriesRef, SubscriptionRef};
 
 use super::file_transfer;
 use super::transport::ChannelManager;
@@ -119,11 +119,11 @@ impl Node for NodeServer {
         }
     }
 
-    async fn resolve_latest(
+    async fn get_edition(
         self,
         _: context::Context,
-        latest: Arc<LatestRequest>,
-    ) -> Vec<LatestResponse> {
+        latest: Arc<EditionRequest>,
+    ) -> Vec<EditionResponse> {
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle) {
             let editions = series.get_editions();
             match editions.as_ref().map(|editions| editions.first()) {
@@ -134,7 +134,7 @@ impl Node for NodeServer {
                     let rand = Hash::rand();
                     let cipher = TransferCipher::new(&cipher_key, &rand);
 
-                    Some(LatestResponse {
+                    Some(EditionResponse {
                         rand,
                         series: cipher.encrypt_opaque(latest),
                     })
@@ -180,5 +180,34 @@ impl Node for NodeServer {
                 }
             });
         }
+    }
+
+    async fn get_identity(
+        self,
+        _ctx: context::Context,
+        request: Arc<IdentityRequest>,
+    ) -> Vec<IdentityResponse> {
+        let maybe_response = if let Some(identity) = Identity::find(&request.identity_riddle) {
+            let cipher_key = identity.identity().hash();
+            let rand = Hash::rand();
+            let cipher = TransferCipher::new(&cipher_key, &rand);
+
+            Some(IdentityResponse {
+                rand,
+                identity: cipher.encrypt_opaque(&identity),
+            })
+        } else {
+            None
+        };
+
+        maybe_response.into_iter().collect()
+    }
+
+    async fn announce_identity(
+        self,
+        _ctx: context::Context,
+        _announcement: Arc<IdentityAnnouncement>,
+    ) {
+        // This is a no-op, by now.
     }
 }

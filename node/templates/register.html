@@ -24,6 +24,8 @@
               new editions.
             {% when AccessRight::ManageSubscriptions %}
               Manage your subscriptions to series.
+            {% when AccessRight::ManageIdentities %}
+              Manage your locally stored identities.
           {% endmatch %}
         </li>
       {% endfor %}

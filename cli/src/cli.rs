@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use structopt::StructOpt;
 
+use samizdat_common::{Hash, Key};
+
 use crate::commands;
 
 static mut CLI: Option<Cli> = None;
@@ -34,6 +36,8 @@ pub struct Cli {
         default_value = "/var/lib/samizdat/node"
     )]
     pub data: PathBuf,
+    #[structopt(long, short = "v", env = "SAMIZDAT_VERBOSE")]
+    pub verbose: bool,
     #[structopt(long, short, env = "SAMIZDAT_PORT", default_value = "4510")]
     pub port: u16,
     #[structopt(subcommand)]
@@ -97,6 +101,11 @@ pub enum Command {
         #[structopt(subcommand)]
         command: SubscriptionCommand,
     },
+    /// Commands for managing identities.
+    Identity {
+        #[structopt(subcommand)]
+        command: IdentityCommand,
+    },
     /// Commands for managing authentication of scopes.
     Auth {
         #[structopt(subcommand)]
@@ -131,6 +140,7 @@ impl Command {
             Command::Series { command } => command.execute().await,
             Command::Collection { command } => command.execute().await,
             Command::Subscription { command } => command.execute().await,
+            Command::Identity { command } => command.execute().await,
             Command::Auth { command } => command.execute().await,
         }
     }
@@ -180,7 +190,7 @@ impl SeriesCommand {
                 commands::series::show(series_owner_name).await
             }
             SeriesCommand::Ls { series_owner_name } => {
-                commands::series::list(series_owner_name).await
+                commands::series::ls(series_owner_name).await
             }
         }
     }
@@ -208,6 +218,57 @@ impl SubscriptionCommand {
             SubscriptionCommand::Rm { public_key } => commands::subscription::rm(public_key).await,
             // SubscriptionCommand::Show { public_key } => todo!(),
             SubscriptionCommand::Ls { public_key } => commands::subscription::ls(public_key).await,
+        }
+    }
+}
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum IdentityCommand {
+    /// Creates a new identity, putting the work to create a proof-of-work for it.
+    Forge {
+        /// Then handle (name) of the identity you want to forge.
+        identity_handle: String,
+        /// The name of the series owner for which you want to create an identity.
+        series_owner_name: String,
+        /// The number of iterations (per thread) to use to calculate proof-of-work.
+        #[structopt(long, default_value = "1000000000")]
+        n_iters: usize,
+    },
+    /// Imports an existing identity.
+    Import {
+        /// The handle (name) of the identity to be imported.
+        identity_handle: String,
+        /// The public key of the identity.
+        #[structopt(long)]
+        series: Key,
+        /// The solution to the proof-of-work for this identity.
+        #[structopt(long)]
+        solution: Hash,
+    },
+    /// Lists all locally stored identities.
+    Ls {
+        /// An optional specific identity to be listed. If none is given, will list all existing
+        /// identities.
+        identity_handle: Option<String>
+    },
+}
+
+impl IdentityCommand {
+    async fn execute(self) -> Result<(), anyhow::Error> {
+        match self {
+            IdentityCommand::Forge {
+                identity_handle,
+                series_owner_name,
+                n_iters,
+            } => commands::identity::forge(identity_handle, series_owner_name, n_iters).await,
+            IdentityCommand::Ls { identity_handle } => {
+                commands::identity::ls(identity_handle).await
+            }
+            IdentityCommand::Import {
+                identity_handle,
+                series,
+                solution,
+            } => commands::identity::import(identity_handle, series, solution).await,
         }
     }
 }

@@ -23,7 +23,7 @@ serde_derive = "1.0.136"
 sha3 = "0.10.0"
 structopt = "0.3.26"
 tarpc = { version = "0.27.2", features = ["tokio1", "serde-transport", "tcp"] }
-tokio = { version = "1.16.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1.17.0", features = ["rt-multi-thread", "macros", "net", "time"] }
 warp = { version = "0.3.2", default-features = false }
 samizdat-common = { path = "../common" }
 quinn = "0.8.0"
@@ -42,3 +42,5 @@ semver = "1.0.5"
 rand = "0.7.3"
 url = "2.2.2"
 askama = { version = "0.11.0", features = ["serde-json"] }
+strum = "0.23.0"
+strum_macros = "0.23.1"

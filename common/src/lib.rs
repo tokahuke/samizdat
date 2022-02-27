@@ -1,6 +1,7 @@
 pub mod cipher;
 pub mod heap_entry;
 pub mod logger;
+pub mod pow;
 pub mod quic;
 pub mod rpc;
 

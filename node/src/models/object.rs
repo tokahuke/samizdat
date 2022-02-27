@@ -343,7 +343,7 @@ impl ObjectRef {
 
             content_size += buffer.len();
 
-            let chunk_hash = Hash::build(&buffer);
+            let chunk_hash = Hash::hash(&buffer);
             db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
             hashes.push(chunk_hash);
 
@@ -414,7 +414,7 @@ impl ObjectRef {
                 }
             }
 
-            let chunk_hash = Hash::build(&buffer);
+            let chunk_hash = Hash::hash(&buffer);
             db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
             hashes.push(chunk_hash);
 
