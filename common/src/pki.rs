@@ -1,7 +1,7 @@
 use ed25519_dalek::{Keypair, PublicKey, Signature, Signer, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerialize};
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -43,7 +43,7 @@ impl<T> Deref for Signed<T> {
     }
 }
 
-#[derive(Debug, DeriveDeserialize, DeriveSerialize)]
+#[derive(DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct PrivateKey(ed25519_dalek::SecretKey);
 
@@ -58,6 +58,12 @@ impl FromStr for PrivateKey {
 }
 
 impl Display for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", base64_url::encode(&self.0))
+    }
+}
+
+impl Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", base64_url::encode(&self.0))
     }
@@ -81,7 +87,7 @@ impl PrivateKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
+#[derive(Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct Key(ed25519_dalek::PublicKey);
 
@@ -97,6 +103,12 @@ impl FromStr for Key {
 }
 
 impl Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", base64_url::encode(&self.0))
+    }
+}
+
+impl Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", base64_url::encode(&self.0))
     }
@@ -124,7 +136,7 @@ impl Key {
     }
 
     pub fn hash(&self) -> Hash {
-        Hash::build(self.0.as_bytes())
+        Hash::hash(self.0.as_bytes())
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Key, crate::Error> {

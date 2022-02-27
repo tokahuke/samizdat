@@ -2,7 +2,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use samizdat_common::{Hash, Key, Signed};
+use samizdat_common::{pow::ProofOfWork, Hash, Key, Signed};
 
 use super::{access_token, delete, get, patch, post, ApiError, CLIENT};
 
@@ -175,4 +175,36 @@ pub async fn post_edition(
     request: PostEditionRequest<'_>,
 ) -> Result<PostEditionResponse, anyhow::Error> {
     post(format!("/_seriesowners/{series_name}/editions",), request).await
+}
+
+#[derive(Debug, Serialize)]
+pub struct PostIdentityRequest<'a> {
+    pub identity: &'a str,
+    pub series: &'a str,
+    pub proof: ProofOfWork,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IdentityRef {
+    pub handle: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeriesRef {
+    pub public_key: Key,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetIdentityResponse {
+    pub identity: IdentityRef,
+    pub series: SeriesRef,
+    pub proof: ProofOfWork,
+}
+
+pub async fn post_identity(request: PostIdentityRequest<'_>) -> Result<bool, anyhow::Error> {
+    post("/_identities", request).await
+}
+
+pub async fn get_all_identities() -> Result<Vec<GetIdentityResponse>, anyhow::Error> {
+    get("/_identities").await
 }

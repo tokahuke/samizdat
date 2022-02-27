@@ -227,10 +227,7 @@ impl HubConnection {
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
             if !candidate_edition.is_valid() {
-                log::warn!(
-                    "received invalid candidate edition: {:?}",
-                    candidate_edition
-                );
+                log::warn!("received invalid candidate edition: {candidate_edition:?}",);
                 continue;
             }
 
@@ -278,11 +275,8 @@ impl HubConnection {
             let cipher = TransferCipher::new(&identity.hash(), &candidate.rand);
             let candidate_identity: Identity = candidate.identity.decrypt_with(&cipher)?;
 
-            if !candidate_identity.is_valid() {
-                log::warn!(
-                    "received invalid candidate edition: {:?}",
-                    candidate_identity
-                );
+            if !candidate_identity.is_valid() || candidate_identity.identity() != identity {
+                log::warn!("received invalid candidate identity: {candidate_identity:?}",);
                 continue;
             }
 

@@ -98,7 +98,7 @@ fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         .and(authenticate([AccessRight::ManageSeries]))
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            Ok(maybe_owner.map(|owner| owner.series().to_string()))
+            Ok(maybe_owner.map(|owner| owner))
         })
         .map(api_reply)
 }
@@ -109,10 +109,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
     warp::path!("_seriesowners")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageSeries]))
-        .map(|| {
-            let series = SeriesOwner::get_all()?;
-            Ok(series)
-        })
+        .map(|| SeriesOwner::get_all())
         .map(api_reply)
 }
 

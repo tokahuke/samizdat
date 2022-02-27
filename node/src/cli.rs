@@ -10,7 +10,7 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Path to the locally stored program data.
-    #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data")]
+    #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/node")]
     pub data: PathBuf,
     /// The port on which to sever the local HTTP proxy. This is the port you will use to access in
     ///  your browser.

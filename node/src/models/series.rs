@@ -3,6 +3,7 @@ use ed25519_dalek::Keypair;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::str::FromStr;
 use std::time::Duration;
 
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
@@ -177,6 +178,15 @@ pub struct SeriesRef {
 impl Display for SeriesRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", base64_url::encode(self.key()),)
+    }
+}
+
+impl FromStr for SeriesRef {
+    type Err = crate::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(SeriesRef {
+            public_key: s.parse()?,
+        })
     }
 }
 

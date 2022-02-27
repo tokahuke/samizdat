@@ -32,12 +32,12 @@ pub async fn show(series_name: String) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub async fn list(series_owner_name: Option<String>) -> Result<(), anyhow::Error> {
-    pub async fn series_list_series(_series_owner_name: String) -> Result<(), anyhow::Error> {
+pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> {
+    pub async fn ls_series(_series_owner_name: String) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub async fn series_list_all() -> Result<(), anyhow::Error> {
+    pub async fn ls_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_series_owners().await?;
 
         #[derive(Tabled)]
@@ -64,8 +64,8 @@ pub async fn list(series_owner_name: Option<String>) -> Result<(), anyhow::Error
     }
 
     if let Some(series_owner_name) = series_owner_name {
-        series_list_series(series_owner_name).await
+        ls_series(series_owner_name).await
     } else {
-        series_list_all().await
+        ls_all().await
     }
 }

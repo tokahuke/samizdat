@@ -71,7 +71,7 @@ impl Hash {
         Hash(x.as_ref().try_into().expect("bad hash value"))
     }
 
-    pub fn build(thing: impl AsRef<[u8]>) -> Hash {
+    pub fn hash(thing: impl AsRef<[u8]>) -> Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
     }
 
@@ -82,8 +82,19 @@ impl Hash {
         Hash(rand)
     }
 
+    /// Just like [`rand`], but allows for a local RNG (better throughput).
+    pub fn rand_with<R: rand::Rng>(rng: &mut R) -> Hash {
+        let mut rand = [0; 28];
+
+        for rand_i in &mut rand {
+            *rand_i = rng.gen();
+        }
+
+        Hash(rand)
+    }
+
     pub fn rehash(&self, rand: &Hash) -> Hash {
-        Hash::build([rand.0, self.0].concat())
+        Hash::hash([rand.0, self.0].concat())
     }
 
     pub fn is_proved_by(&self, root: &Hash, proof: &InclusionProof) -> bool {

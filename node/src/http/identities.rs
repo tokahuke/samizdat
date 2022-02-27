@@ -1,14 +1,14 @@
-use std::convert::identity;
-
 use serde_derive::Deserialize;
 use warp::path::Tail;
 use warp::Filter;
 
+use samizdat_common::pow::ProofOfWork;
 use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
-use crate::models::IdentityRef;
+use crate::db;
+use crate::models::{Identity, IdentityRef};
 
 use super::resolvers::resolve_identity;
 use super::{api_reply, authenticate, tuple};
@@ -18,7 +18,8 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     balanced_or_tree!(
         // // Identity CRUD
         // get_identity(),
-        // post_identity(),
+        get_identities(),
+        post_identity(),
         // delete_identity(),
         // Query item using identity
         get_item(),
@@ -35,4 +36,46 @@ fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
                 as Result<_, warp::Rejection>
         })
         .map(tuple)
+}
+
+fn post_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Deserialize)]
+    struct Request {
+        identity: String,
+        series: String,
+        proof: ProofOfWork,
+    }
+
+    warp::path!("_identities")
+        .and(warp::post())
+        .and(authenticate([AccessRight::ManageIdentities]))
+        .and(warp::body::json())
+        .map(|request: Request| {
+            let identity = Identity {
+                identity: request.identity.parse()?,
+                series: request.series.parse()?,
+                proof: request.proof,
+            };
+
+            if identity.is_valid() {
+                let mut batch = rocksdb::WriteBatch::default();
+                identity.insert(&mut batch);
+                db().write(batch)?;
+
+                Ok(true)
+            } else {
+                Err(crate::Error::Message(format!(
+                    "Invalid identity: {identity:?}"
+                )))
+            }
+        })
+        .map(api_reply)
+}
+
+fn get_identities() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_identities")
+        .and(warp::get())
+        .and(authenticate([AccessRight::ManageIdentities]))
+        .map(|| Identity::get_all())
+        .map(api_reply)
 }

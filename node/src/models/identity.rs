@@ -14,6 +14,12 @@ use super::{Dropable, SeriesRef};
 /// Minimum 1GHash for an identity to be valid.
 const MINIMUM_WORK_DONE: f64 = 1e9;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct IdentityRef {
+    /// A valid identity handle.
+    handle: String,
+}
+
 impl FromStr for IdentityRef {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -37,19 +43,13 @@ impl Display for IdentityRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct IdentityRef {
-    /// A valid identity handle.
-    handle: String,
-}
-
 impl IdentityRef {
     pub fn from_bytes(bytes: &[u8]) -> Result<IdentityRef, crate::Error> {
         String::from_utf8_lossy(bytes).parse()
     }
 
     pub fn hash(&self) -> Hash {
-        Hash::new(&self.handle)
+        Hash::hash(&self.handle)
     }
 
     pub fn handle(&self) -> &str {
@@ -68,9 +68,9 @@ impl IdentityRef {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Identity {
-    identity: IdentityRef,
-    series: SeriesRef,
-    proof: ProofOfWork,
+    pub identity: IdentityRef,
+    pub series: SeriesRef,
+    pub proof: ProofOfWork,
 }
 
 impl Dropable for Identity {
@@ -107,6 +107,12 @@ impl Identity {
         None
     }
 
+    pub fn get_all() -> Result<Vec<Identity>, crate::Error> {
+        db().iterator_cf(Table::Identities.get(), IteratorMode::Start)
+            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .collect::<Result<Vec<_>, crate::Error>>()
+    }
+
     pub fn insert(&self, batch: &mut WriteBatch) {
         batch.put_cf(
             Table::Identities.get(),
@@ -128,9 +134,10 @@ impl Identity {
             .identity()
             .hash()
             .rehash(&self.series.public_key().hash());
+        let valid_identity = self.identity().handle().parse::<IdentityRef>().is_ok();
         let correct_pow = self.proof.information == expected_information;
 
-        correct_pow && self.proof.work_done() > MINIMUM_WORK_DONE
+        correct_pow && valid_identity && self.proof.work_done() > MINIMUM_WORK_DONE
     }
 
     pub fn work_done(&self) -> f64 {

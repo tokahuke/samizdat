@@ -15,7 +15,7 @@ pub struct Cli {
     /// The port for nodes to connect as servers.
     #[structopt(env = "SAMIZDAT_REVERSE_PORT", long, default_value = "4512")]
     pub reverse_port: u16,
-    #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/db")]
+    #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
     /// Maximum number of simultaneous connections.
     #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS", long, default_value = "1024")]

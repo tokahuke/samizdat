@@ -22,7 +22,9 @@ pub fn init_db() -> Result<(), crate::Error> {
     let db_path = format!("{}/db", CLI.data.as_str());
 
     // Make sure all column families are initialized;
-    let existing_cf_names = rocksdb::DB::list_cf(&rocksdb::Options::default(), &db_path)?
+    // (ignore db error in this case because db may not exist; let it explode later...)
+    let existing_cf_names = rocksdb::DB::list_cf(&rocksdb::Options::default(), &db_path)
+        .unwrap_or_default()
         .into_iter()
         .collect::<BTreeSet<_>>();
     let needed_cf_names = Table::names().collect::<BTreeSet<_>>();

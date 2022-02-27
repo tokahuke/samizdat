@@ -55,6 +55,7 @@ pub enum AccessRight {
     ManageCollections,
     ManageSeries,
     ManageSubscriptions,
+    ManageIdentities,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

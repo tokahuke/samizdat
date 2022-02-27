@@ -10,7 +10,7 @@ edition = "2021"
 log = "0.4.14"
 log4rs = "1.0.0"
 structopt = "0.3.26"
-tokio = { version = "1.16.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1.17.0", features = ["rt-multi-thread", "macros", "net", "time"] }
 failure = "0.1.8"
 failure_derive = "0.1.8"
 rocksdb = { version = "0.18.0", default-features = false, features = [] }
