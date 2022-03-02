@@ -149,7 +149,7 @@ pub async fn get_all_subscriptions() -> Result<Vec<GetSubscriptionResponse>, any
 pub struct PostEditionRequest<'a> {
     pub collection: &'a str,
     pub ttl: Option<&'a str>,
-    pub no_annouce: bool,
+    pub no_announce: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

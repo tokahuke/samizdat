@@ -11,7 +11,7 @@ use crate::db;
 use crate::db::Table;
 use crate::hubs;
 
-use super::{Dropable, Edition, Inventory, SeriesRef};
+use super::{Droppable, Edition, Inventory, SeriesRef};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SubscriptionKind {
@@ -47,7 +47,7 @@ impl Display for SubscriptionRef {
     }
 }
 
-impl Dropable for SubscriptionRef {
+impl Droppable for SubscriptionRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         batch.delete_cf(Table::Subscriptions.get(), self.key());
         Ok(())

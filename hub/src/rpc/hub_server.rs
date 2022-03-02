@@ -10,7 +10,10 @@ use samizdat_common::ChannelAddr;
 
 use crate::CLI;
 
-use super::{announce_edition, candidates_for_resolution, edition_for_request, get_identity, REPLAY_RESISTANCE};
+use super::{
+    announce_edition, candidates_for_resolution, edition_for_request, get_identity,
+    REPLAY_RESISTANCE,
+};
 
 struct HubServerInner {
     call_semaphore: Semaphore,
@@ -145,7 +148,6 @@ impl Hub for HubServer {
         })
         .await
     }
-
 
     async fn get_identity(
         self,

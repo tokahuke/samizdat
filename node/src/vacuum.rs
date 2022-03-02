@@ -15,7 +15,7 @@ use samizdat_common::Hash;
 
 use crate::cli::cli;
 use crate::db::{db, Table};
-use crate::models::{CollectionItem, Dropable, ObjectRef, ObjectStatistics, UsePrior};
+use crate::models::{CollectionItem, Droppable, ObjectRef, ObjectStatistics, UsePrior};
 
 /// Status for a vacuum task.
 #[derive(Debug, Serialize, Deserialize)]

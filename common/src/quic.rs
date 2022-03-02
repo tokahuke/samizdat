@@ -9,7 +9,7 @@ use std::time::Duration;
 /// "I am Spartacus!"
 const DEFAULT_SERVER_NAME: &str = "spartacus";
 
-// We don't need all trust buit into QUIC. Using "dangerous configuration", which is simpler.
+// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
 // Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
 
 // Implementation of `ServerCertVerifier` that verifies everything as trustworthy.

@@ -86,7 +86,7 @@ impl ChannelManager {
         ))
     }
 
-    /// Initiates a guiven channel.
+    /// Initiates a given channel.
     pub async fn initiate(
         &self,
         channel_addr: ChannelAddr,

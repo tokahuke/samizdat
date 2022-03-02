@@ -184,19 +184,19 @@ export class Samizdat {
 
   async getSeriesOwner(seriesOwner: string) {
     await this._ensureRights([AccessRight.ManageSeries]);
-    const response = await call("GET", `/_seriesowner/${seriesOwner}`);
+    const response = await call("GET", `/_seriesowners/${seriesOwner}`);
     return (await response.json())["Ok"] as SeriesOwner | null;
   }
 
   async deleteSeriesOwner(seriesOwner: string) {
     await this._ensureRights([AccessRight.ManageSeries]);
-    const response = await call("DELETEs", `/_seriesowner/${seriesOwner}`);
+    const response = await call("DELETEs", `/_seriesowners/${seriesOwner}`);
     return (await response.json())["Ok"] as boolean;
   }
 
   async getSeriesOwners() {
     await this._ensureRights([AccessRight.ManageSeries]);
-    const response = await call("GET", `/_seriesowner`);
+    const response = await call("GET", `/_seriesowners`);
     return (await response.json())["Ok"] as Array<SeriesOwner>;
   }
 

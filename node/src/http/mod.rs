@@ -29,7 +29,7 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
         crate::Error::AllCandidatesFailed => http::StatusCode::BAD_GATEWAY,
         crate::Error::InvalidCollectionItem => http::StatusCode::BAD_REQUEST,
         crate::Error::InvalidEdition => http::StatusCode::BAD_REQUEST,
-        crate::Error::DifferentePublicKeys => http::StatusCode::BAD_REQUEST,
+        crate::Error::DifferentPublicKeys => http::StatusCode::BAD_REQUEST,
         crate::Error::NoHeaderRead => http::StatusCode::INTERNAL_SERVER_ERROR,
         //_ => http::StatusCode::INTERNAL_SERVER_ERROR,
     }

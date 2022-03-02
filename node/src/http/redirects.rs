@@ -2,7 +2,7 @@
 
 use warp::Filter;
 
-/// Optionaly implements the "tilde redirect". Similarly to Unix platforms, the `~`
+/// Optionally implements the "tilde redirect". Similarly to Unix platforms, the `~`
 /// represents the "home folder" of a collection or a series.
 fn maybe_redirect_tilde(path: &str) -> Option<String> {
     let mut split = path.split('/');
@@ -17,7 +17,7 @@ fn maybe_redirect_tilde(path: &str) -> Option<String> {
     // Find the last tilde and everything after it.
     let mut found_tilde = false;
     let mut after_tilde = vec![];
-    
+
     for item in split {
         if item == "~" {
             found_tilde = true;
@@ -35,7 +35,7 @@ fn maybe_redirect_tilde(path: &str) -> Option<String> {
     }
 }
 
-/// Optionaly implements the "tilde redirect" for identities. Similarly to Unix platforms,
+/// Optionally implements the "tilde redirect" for identities. Similarly to Unix platforms,
 /// the `~` represents the "home folder" of a collection or a series.
 fn maybe_redirect_tilde_identity(path: &str) -> Option<String> {
     let mut split = path.split('/');
@@ -49,7 +49,7 @@ fn maybe_redirect_tilde_identity(path: &str) -> Option<String> {
     // Find the last tilde and everything after it.
     let mut found_tilde = false;
     let mut after_tilde = vec![];
-    
+
     for item in split {
         if item == "~" {
             found_tilde = true;
@@ -83,7 +83,7 @@ fn maybe_redirect_base(path: &str) -> Option<String> {
 }
 
 /// Optionally redirects a "home path" for identities without trailing slash to the same path with
-/// trailing slash. 
+/// trailing slash.
 fn maybe_redirect_base_identity(path: &str) -> Option<String> {
     let mut split = path.split('/');
     let identity = split.next()?;
@@ -123,7 +123,7 @@ fn maybe_redirect(path: &str) -> Option<String> {
         .or_else(|| maybe_redirect_empty(path))
 }
 
-/// Does all the redirection dances and shenenigans.
+/// Does all the redirection dances and shenanigans.
 pub fn general_redirect(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::get()

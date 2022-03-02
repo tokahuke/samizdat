@@ -3,7 +3,6 @@ use warp::path::Tail;
 use warp::Filter;
 
 use samizdat_common::pow::ProofOfWork;
-use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
@@ -58,11 +57,22 @@ fn post_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
             };
 
             if identity.is_valid() {
-                let mut batch = rocksdb::WriteBatch::default();
-                identity.insert(&mut batch);
-                db().write(batch)?;
+                let existing_work_done = if let Some(existing) = Identity::get(&identity.identity)?
+                {
+                    existing.work_done()
+                } else {
+                    0.0
+                };
 
-                Ok(true)
+                if identity.work_done() > existing_work_done {
+                    let mut batch = rocksdb::WriteBatch::default();
+                    identity.insert(&mut batch);
+                    db().write(batch)?;
+
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
             } else {
                 Err(crate::Error::Message(format!(
                     "Invalid identity: {identity:?}"

@@ -27,7 +27,7 @@ async fn main() -> Result<(), io::Error> {
 
     // Run server:
     if cli().https {
-        // Run certobot:
+        // Run certbot:
         let status = std::process::Command::new("certbot")
             .arg("certonly")
             .arg("--standalone")

@@ -5,7 +5,7 @@ use samizdat_common::Key;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
-use crate::models::{Dropable, Subscription, SubscriptionKind, SubscriptionRef};
+use crate::models::{Droppable, Subscription, SubscriptionKind, SubscriptionRef};
 
 use super::{api_reply, authenticate};
 

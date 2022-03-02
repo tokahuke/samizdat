@@ -64,9 +64,9 @@ pub enum Command {
         release: bool,
         /// Whether to announce this new edition to he network or to keep quiet.
         #[structopt(long)]
-        no_annouce: bool,
+        no_announce: bool,
     },
-    /// Watches the current directory for changes, rebilding and commiting at
+    /// Watches the current directory for changes, rebuilding and committing at
     /// every change.
     Watch {
         /// Set a custom time-to-leave for the commits.
@@ -78,7 +78,7 @@ pub enum Command {
         /// The content-type of this file. Will be guessed if unspecified.
         #[structopt(long)]
         content_type: Option<String>,
-        /// Don't bookmark this object. This makes is ellegible for automatic deletion.
+        /// Don't bookmark this object. This makes is eligible for automatic deletion.
         #[structopt(long)]
         no_bookmark: bool,
         /// Sets this object as drafts. Drafts are not public to the network.
@@ -121,8 +121,8 @@ impl Command {
             Command::Commit {
                 ttl,
                 release,
-                no_annouce,
-            } => commands::commit(&ttl, release, no_annouce).await,
+                no_announce,
+            } => commands::commit(&ttl, release, no_announce).await,
             Command::Watch { ttl } => commands::watch(&ttl).await,
             Command::Upload {
                 file,
@@ -231,8 +231,8 @@ pub enum IdentityCommand {
         /// The name of the series owner for which you want to create an identity.
         series_owner_name: String,
         /// The number of iterations (per thread) to use to calculate proof-of-work.
-        #[structopt(long, default_value = "1000000000")]
-        n_iters: usize,
+        #[structopt(long)]
+        n_iters: Option<usize>,
     },
     /// Imports an existing identity.
     Import {
@@ -249,7 +249,7 @@ pub enum IdentityCommand {
     Ls {
         /// An optional specific identity to be listed. If none is given, will list all existing
         /// identities.
-        identity_handle: Option<String>
+        identity_handle: Option<String>,
     },
 }
 

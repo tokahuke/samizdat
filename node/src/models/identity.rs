@@ -9,7 +9,7 @@ use samizdat_common::{pow::ProofOfWork, Riddle};
 use crate::db;
 use crate::db::Table;
 
-use super::{Dropable, SeriesRef};
+use super::{Droppable, SeriesRef};
 
 /// Minimum 1GHash for an identity to be valid.
 const MINIMUM_WORK_DONE: f64 = 1e9;
@@ -73,7 +73,7 @@ pub struct Identity {
     pub proof: ProofOfWork,
 }
 
-impl Dropable for Identity {
+impl Droppable for Identity {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         batch.delete_cf(Table::Identities.get(), self.identity().hash());
         Ok(())
@@ -105,6 +105,13 @@ impl Identity {
         }
 
         None
+    }
+
+    pub fn get(identity: &IdentityRef) -> Result<Option<Identity>, crate::Error> {
+        Ok(db()
+            .get_cf(Table::Identities.get(), identity.hash())?
+            .map(|value| bincode::deserialize(&value))
+            .transpose()?)
     }
 
     pub fn get_all() -> Result<Vec<Identity>, crate::Error> {

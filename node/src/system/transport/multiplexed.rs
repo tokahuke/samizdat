@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, Mutex, MutexGuard};
 
 use super::matcher::Matcher;
 
-/// A multiplexer over a QUIC connection, capable of spliting its uni streams into channels.
+/// A multiplexer over a QUIC connection, capable of splitting its uni streams into channels.
 pub struct Multiplexed {
     connection: Connection,
     senders: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<RecvStream>>>>,

@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::thread;
 use tabled::Tabled;
+use tokio::sync::mpsc;
 
 use samizdat_common::{pow::ProofOfWork, Hash, Key};
 
@@ -9,6 +10,9 @@ use crate::api::{self, post_identity, PostIdentityRequest};
 use crate::util::{Metric, Unit};
 
 use super::show_table;
+
+/// Minimum 1GHash for an identity to be valid.
+const MINIMUM_WORK_DONE: f64 = 1e9;
 
 #[derive(Debug, Clone)]
 pub struct IdentityRef {
@@ -42,7 +46,7 @@ impl Display for IdentityRef {
 pub async fn forge(
     identity_handle: String,
     series_name: String,
-    n_iters: usize,
+    n_iters: Option<usize>,
 ) -> Result<(), anyhow::Error> {
     let identity: IdentityRef = identity_handle.parse()?;
     let series_owner = api::get_series_owner(&series_name).await?;
@@ -50,21 +54,49 @@ pub async fn forge(
 
     let information = Hash::hash(&identity.handle).rehash(&key.hash());
 
-    let handles = (0..num_cpus::get())
+    // Sender task to update Samizdat Node of the current best PoW:
+    let (send, mut recv) = mpsc::unbounded_channel();
+    let sender_identity_handle = identity_handle.clone();
+    let sender_series = key.clone();
+    tokio::spawn(async move {
+        while let Some(proof) = recv.recv().await {
+            let post_outcome = post_identity(PostIdentityRequest {
+                identity: &sender_identity_handle,
+                series: &sender_series.to_string(),
+                proof: ProofOfWork::clone(&proof),
+            })
+            .await;
+
+            if let Err(error) = post_outcome {
+                log::error!("Failed to send proof-of-work {proof:?}: {error}");
+            }
+        }
+    });
+
+    // Threads calculating PoWs:
+    let n_threads = (num_cpus::get() as f32 / 0.8).ceil() as usize;
+    let handles = (0..n_threads)
         .map(|thread_id| {
             let proof_of_work = ProofOfWork::new(information);
+            let send = send.clone();
 
             thread::spawn(move || {
                 let mut local_best = proof_of_work.clone();
                 let mut rng = samizdat_common::csprng();
 
-                for _ in 0..n_iters {
+                // TODO: Ooops! if 32-bit, this is a bit low...
+                for _ in 0..n_iters.unwrap_or(usize::MAX) {
                     let mut new_try = proof_of_work.clone();
                     new_try.solution = Hash::rand_with(&mut rng);
 
                     if new_try.work_done() > local_best.work_done() {
                         local_best = new_try;
                         log::debug!("New best @ {thread_id}: {local_best:#?}");
+
+                        if local_best.work_done() > MINIMUM_WORK_DONE {
+                            send.send(local_best.clone())
+                                .expect("request sender panicked");
+                        }
                     }
                 }
 
@@ -73,6 +105,10 @@ pub async fn forge(
         })
         .collect::<Vec<_>>();
 
+    // Drop last sender. This will stop the sender task when the last thread resumes.
+    let _ = send;
+
+    // Calculate best (only to display):
     let proof = handles
         .into_iter()
         .map(|handle| handle.join().expect("thread panicked"))
@@ -80,13 +116,6 @@ pub async fn forge(
         .expect("num_cpus >= 1");
 
     log::debug!("Final PoW: {proof:?}");
-
-    post_identity(PostIdentityRequest {
-        identity: &identity_handle,
-        series: &key.to_string(),
-        proof,
-    })
-    .await?;
 
     Ok(())
 }
@@ -135,7 +164,10 @@ pub async fn import(
     solution: Hash,
 ) -> Result<(), anyhow::Error> {
     let information = Hash::hash(&identity_handle).rehash(&series.hash());
-    let proof = ProofOfWork { information, solution};
+    let proof = ProofOfWork {
+        information,
+        solution,
+    };
 
     post_identity(PostIdentityRequest {
         identity: &identity_handle,

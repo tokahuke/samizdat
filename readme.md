@@ -68,9 +68,9 @@ Go [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl8
 
 ## Quick start
 
-In the instalation, the `samizdat` cli tool is included. You can run `samizdat init` to create a new Samizdat project in your current directory. This will create a manifest file `Samizdat.toml` and a private manifest `.Samizdat.priv`, which will be added to your `.gitignore`. This file contains private credentials that you have to backup elsewhere dearly.
+In the installation, the `samizdat` cli tool is included. You can run `samizdat init` to create a new Samizdat project in your current directory. This will create a manifest file `Samizdat.toml` and a private manifest `.Samizdat.priv`, which will be added to your `.gitignore`. This file contains private credentials that you have to backup elsewhere dearly.
 
-In your local hub, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit`. Samizdat will run a build scrpt that you supply in `Samizdat.toml`. Your content will be available in the URL:
+In your local hub, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit`. Samizdat will run a build script that you supply in `Samizdat.toml`. Your content will be available in the URL:
 
 ```
 http://localhost:4510/_series/<series key>/path/to/stuff
@@ -84,7 +84,7 @@ This is just the tip of the iceberg, however! Check out more [here](https://prox
 
 ## Licensing
 
-All code under the Samizdat Project is Free Software and is licensed to any individal or
+All code under the Samizdat Project is Free Software and is licensed to any individual or
     organization under the AGPLv3 license. You are free to run, study, alter and redistribute
     the software as you wish, as long as you abide by the terms of the aforementioned license.
 

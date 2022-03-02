@@ -18,7 +18,7 @@ use rocksdb::WriteBatch;
 
 use crate::db;
 
-pub trait Dropable {
+pub trait Droppable {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error>;
 
     fn drop_if_exists(&self) -> Result<(), crate::Error> {

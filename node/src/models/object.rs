@@ -8,7 +8,7 @@ use samizdat_common::{Hash, MerkleTree, Riddle};
 
 use crate::db::{db, Table};
 
-use super::{Bookmark, BookmarkType, Dropable};
+use super::{Bookmark, BookmarkType, Droppable};
 
 /// The size of a chunk. An object consists of a sequence of chunks, the hash
 /// of which are used to create the Merkle tree whose root hash is the object
@@ -139,7 +139,7 @@ pub struct ObjectMetadata {
 pub struct ContentIter {
     /// An iterator over hashes.
     hashes: std::vec::IntoIter<Hash>,
-    /// An iterator voer the current chunk.
+    /// An iterator over the current chunk.
     current_chunk: Option<std::vec::IntoIter<u8>>,
     /// Indicates whether an error has occurred.
     is_error: bool,
@@ -224,7 +224,7 @@ pub struct ObjectRef {
     hash: Hash,
 }
 
-impl Dropable for ObjectRef {
+impl Droppable for ObjectRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         log::info!("Removing object {:?}", self);
 
@@ -327,7 +327,7 @@ impl ObjectRef {
         source: impl IntoIterator<Item = Result<u8, crate::Error>>,
     ) -> Result<ObjectRef, crate::Error> {
         let mut content_size = 0;
-        let mut buffer = header.buffer(); // start the first chunk with the serialized eader
+        let mut buffer = header.buffer(); // start the first chunk with the serialized header
         let mut hashes = Vec::new();
         let mut source = source.into_iter();
 

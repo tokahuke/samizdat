@@ -21,10 +21,10 @@ pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{MessageRiddle, Riddle};
 pub use transport::BincodeOverQuic;
 
-use rand::{CryptoRng, RngCore, SeedableRng};
+use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-pub fn csprng() -> impl CryptoRng + RngCore {
+pub fn csprng() -> ChaChaRng {
     let mut seed = [0; 8];
     getrandom::getrandom(&mut seed).expect("getrandom failed");
     ChaChaRng::seed_from_u64(u64::from_le_bytes(seed))

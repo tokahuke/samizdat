@@ -1,7 +1,7 @@
 //! A channel is a sub-division of a QUIC connection. Channels are used in
 //! connections between peers to enable them to keep simultaneous requests
 //! in the same connection. Remember that we cannot create connections from,
-//! e.g., ephemerous ports because NATs/Firewalls.
+//! e.g., ephemeral ports because NATs/Firewalls.
 //!
 
 use serde_derive::{Deserialize, Serialize};

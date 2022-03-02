@@ -27,7 +27,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     );
     let try_open_existing = OpenOptions::new().write(true).create_new(true).open(&path);
 
-    let acess_token = match try_open_existing {
+    let access_token = match try_open_existing {
         Ok(mut file) => {
             let access_token = gen_token();
             file.write_all(access_token.as_bytes())?;
@@ -41,7 +41,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
 
     // Set static:
     unsafe {
-        ACCESS_TOKEN = Some(acess_token);
+        ACCESS_TOKEN = Some(access_token);
     }
 
     Ok(())

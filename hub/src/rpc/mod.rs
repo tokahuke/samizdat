@@ -166,7 +166,7 @@ async fn get_identity(
     client_addr: SocketAddr,
     request: Arc<IdentityRequest>,
 ) -> Vec<IdentityResponse> {
-    // TODO: create didcated sampler....
+    // TODO: create dedicated sampler....
     ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
         let request = request.clone();
         async move {

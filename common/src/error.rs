@@ -28,7 +28,7 @@ pub enum Error {
     #[fail(display = "invalid edition")]
     InvalidEdition,
     #[fail(display = "different public keys")]
-    DifferentePublicKeys,
+    DifferentPublicKeys,
     #[fail(display = "no header read")]
     NoHeaderRead,
 }

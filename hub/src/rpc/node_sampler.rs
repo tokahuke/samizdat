@@ -18,7 +18,7 @@ struct Normal {
 
 impl Default for Normal {
     fn default() -> Normal {
-        // Two pesudo-observations: one of 0.5s and another of 2s.
+        // Two pseudo-observations: one of 0.5s and another of 2s.
         Normal {
             n: 2,
             x: 0.0,

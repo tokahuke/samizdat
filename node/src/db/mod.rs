@@ -13,7 +13,7 @@ use crate::cli;
 /// The handle to the RocksDB database.
 static mut DB: Option<rocksdb::DB> = None;
 
-/// Retrieives a reference to the RocksDB database. Must be called after initialization.
+/// Retrieves a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
 }
@@ -112,7 +112,7 @@ impl Display for Table {
     }
 }
 
-/// An aliase fot the merge function pointer.
+/// An alias for the merge function pointer.
 type MergeFunction = fn(&[u8], Option<&[u8]>, &rocksdb::MergeOperands) -> Option<Vec<u8>>;
 
 impl Table {
@@ -167,7 +167,7 @@ impl Default for MergeOperation {
 }
 
 impl MergeOperation {
-    /// Evalues the resulting operation from successive operations.
+    /// Evaluates the resulting operation from successive operations.
     fn associative(self, other: Self) -> MergeOperation {
         match (self, other) {
             (MergeOperation::Increment(inc1), MergeOperation::Increment(inc2)) => {

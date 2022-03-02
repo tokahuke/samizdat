@@ -5,7 +5,7 @@ use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
-use crate::models::{BookmarkType, Dropable, ObjectHeader, ObjectRef};
+use crate::models::{BookmarkType, Droppable, ObjectHeader, ObjectRef};
 
 use super::resolvers::resolve_object;
 use super::{api_reply, authenticate, tuple};

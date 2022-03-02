@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use super::Table;
 
-/// The `&mut DB` guarantees exclusive access to the db, since this type is not cloneable.
+/// The `&mut DB` guarantees exclusive access to the db, since this type is not clonable.
 pub(super) fn migrate(db: &mut rocksdb::DB) -> Result<(), crate::Error> {
     BaseMigration.migrate(db)
 }

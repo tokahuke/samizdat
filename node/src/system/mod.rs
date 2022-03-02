@@ -347,7 +347,7 @@ impl Hubs {
             .map(|hub| async move { (hub.name, hub.get_edition(series).await) })
             .buffer_unordered(cli().max_parallel_hubs);
 
-        // Even though we aould have to go through *aaaaaaall* the hubs to get the best answer, we
+        // Even though we should have to go through *aaaaaaall* the hubs to get the best answer, we
         // can wait for changes to propagate eventually.
         // In other words, this might be inaccurate, but it is faster.
         while let Some((hub_name, result)) = results.next().await {

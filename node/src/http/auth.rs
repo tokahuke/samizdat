@@ -13,7 +13,7 @@ use crate::db::{db, Table};
 
 use super::{api_reply, html};
 
-/// The authrntication management API.
+/// The authentication management API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
         get_auth_current(),
@@ -141,7 +141,7 @@ pub enum Forbidden {
     BadOrigin(url::Origin),
     NotAnEntity(String),
     TrustedContext(String),
-    InsuficientPrivilege,
+    InsufficientPrivilege,
 }
 
 impl warp::reject::Reject for Forbidden {}
@@ -155,9 +155,9 @@ impl Display for Forbidden {
             }
             Forbidden::NotAnEntity(bad_path) => write!(f, "not an entity: {}", bad_path),
             Forbidden::TrustedContext(context) => {
-                write!(f, "accesing from trusted context {}", context)
+                write!(f, "accessing from trusted context {}", context)
             }
-            Forbidden::InsuficientPrivilege => write!(f, "insuficient privilege"),
+            Forbidden::InsufficientPrivilege => write!(f, "insufficient privilege"),
         }
     }
 }
@@ -165,7 +165,7 @@ impl Display for Forbidden {
 /// Authentication header was not sent and must be sent.
 #[derive(Debug, Clone, Copy)]
 pub enum Unauthorized {
-    MissingReferer,
+    MissingReferrer,
     Unauthorized,
 }
 
@@ -174,14 +174,14 @@ impl warp::reject::Reject for Unauthorized {}
 impl Display for Unauthorized {
     fn fmt(&self, f: &'_ mut fmt::Formatter) -> fmt::Result {
         match self {
-            Unauthorized::MissingReferer => write!(f, "missing Referer header"),
-            Unauthorized::Unauthorized => write!(f, "missing Referer header or Bearer token"),
+            Unauthorized::MissingReferrer => write!(f, "missing Referrer header"),
+            Unauthorized::Unauthorized => write!(f, "missing Referrer header or Bearer token"),
         }
     }
 }
 
 lazy_static! {
-    static ref SAMIZDA_ORIGINS: [url::Origin; 4] = [
+    static ref SAMIZDAT_ORIGINS: [url::Origin; 4] = [
         url::Origin::Tuple(
             "http".to_owned(),
             url::Host::Domain("localhost".to_owned()),
@@ -205,14 +205,14 @@ lazy_static! {
     ];
 }
 
-/// Checks whether the request is _realy_ comming from Samizdat. This is a
+/// Checks whether the request is _really_ coming from Samizdat. This is a
 /// complement to CORS.
-fn check_origin(referer: &Url) -> Result<(), Forbidden> {
-    let origin = referer.origin();
+fn check_origin(referrer: &Url) -> Result<(), Forbidden> {
+    let origin = referrer.origin();
 
     // Find out if some cross-origin thing is trying ot trick you.
     // TODO: also implement proper CORS.
-    if !SAMIZDA_ORIGINS.contains(&origin) {
+    if !SAMIZDAT_ORIGINS.contains(&origin) {
         Err(Forbidden::BadOrigin(origin))
     } else {
         Ok(())
@@ -220,35 +220,35 @@ fn check_origin(referer: &Url) -> Result<(), Forbidden> {
 }
 
 /// Paths which are *always* trusted.
-fn is_trusted_context(referer: &Url) -> bool {
-    ["/_register"].contains(&referer.path())
+fn is_trusted_context(referrer: &Url) -> bool {
+    ["/_register"].contains(&referrer.path())
 }
 
 /// Returns `Ok(None)` when trusted context.
-fn entity_from_referer(raw_referer: &str) -> Result<Option<Entity>, Forbidden> {
-    let referer: Url = raw_referer.parse().unwrap();
+fn entity_from_referrer(raw_referrer: &str) -> Result<Option<Entity>, Forbidden> {
+    let referrer: Url = raw_referrer.parse().unwrap();
 
-    check_origin(&referer)?;
+    check_origin(&referrer)?;
 
-    if is_trusted_context(&referer) {
+    if is_trusted_context(&referrer) {
         Ok(None)
     } else {
         // Find which entity is requesting authorization.
-        Ok(Some(Entity::from_path(referer.path()).ok_or_else(
-            || Forbidden::NotAnEntity(referer.path().to_owned()),
+        Ok(Some(Entity::from_path(referrer.path()).ok_or_else(
+            || Forbidden::NotAnEntity(referrer.path().to_owned()),
         )?))
     }
 }
 
-/// Extracts the "security scope" (akin to "origin" in the normal Web) from the Referer header.
+/// Extracts the "security scope" (akin to "origin" in the normal Web) from the Referrer header.
 pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Rejection> + Clone {
-    warp::header::optional("Referer").and_then(|maybe_referer: Option<String>| async move {
-        let referer =
-            maybe_referer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferer))?;
+    warp::header::optional("Referrer").and_then(|maybe_referrer: Option<String>| async move {
+        let referrer =
+            maybe_referrer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferrer))?;
         let maybe_entity =
-            entity_from_referer(&referer).map_err(|forbidden| warp::reject::custom(forbidden))?;
-        let entity =
-            maybe_entity.ok_or_else(|| warp::reject::custom(Forbidden::TrustedContext(referer)))?;
+            entity_from_referrer(&referrer).map_err(|forbidden| warp::reject::custom(forbidden))?;
+        let entity = maybe_entity
+            .ok_or_else(|| warp::reject::custom(Forbidden::TrustedContext(referrer)))?;
 
         Ok(entity) as Result<Entity, warp::Rejection>
     })
@@ -283,7 +283,7 @@ pub fn authenticate<const N: usize>(
         let serialized = if let Some(serialized) = serialized_opt {
             serialized
         } else {
-            return Some(Forbidden::InsuficientPrivilege);
+            return Some(Forbidden::InsufficientPrivilege);
         };
 
         let granted_rights: Vec<AccessRight> = bincode::deserialize(&serialized).unwrap();
@@ -295,7 +295,7 @@ pub fn authenticate<const N: usize>(
         {
             None
         } else {
-            Some(Forbidden::InsuficientPrivilege)
+            Some(Forbidden::InsufficientPrivilege)
         }
     });
 

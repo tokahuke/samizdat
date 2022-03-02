@@ -12,7 +12,7 @@ use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, S
 use crate::db;
 use crate::db::Table;
 
-use super::{BookmarkType, CollectionRef, Dropable};
+use super::{BookmarkType, CollectionRef, Droppable};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
@@ -24,7 +24,7 @@ pub struct SeriesOwner {
     is_draft: bool,
 }
 
-impl Dropable for SeriesOwner {
+impl Droppable for SeriesOwner {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         self.series().drop_if_exists_with(batch)?;
         batch.delete_cf(Table::SeriesOwners.get(), self.name.as_bytes());
@@ -190,7 +190,7 @@ impl FromStr for SeriesRef {
     }
 }
 
-impl Dropable for SeriesRef {
+impl Droppable for SeriesRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         batch.delete_cf(Table::Editions.get(), self.key());
         batch.delete_cf(Table::Series.get(), self.key());
@@ -308,7 +308,7 @@ impl SeriesRef {
         }
 
         if self.public_key != edition.public_key {
-            return Err(crate::Error::DifferentePublicKeys);
+            return Err(crate::Error::DifferentPublicKeys);
         }
 
         db().put_cf(

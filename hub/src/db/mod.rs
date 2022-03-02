@@ -10,7 +10,7 @@ use crate::CLI;
 /// The handle to the RocksDB database.
 static mut DB: Option<rocksdb::DB> = None;
 
-/// Retrieives a reference to the RocksDB database. Must be called after initialization.
+/// Retrieves a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
 }

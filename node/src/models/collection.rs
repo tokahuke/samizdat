@@ -10,7 +10,7 @@ use samizdat_common::{Hash, PatriciaMap, PatriciaProof, Riddle};
 
 use crate::db::{db, Table};
 
-use super::{Dropable, ObjectHeader, ObjectRef};
+use super::{Droppable, ObjectHeader, ObjectRef};
 
 /// The function transforming an arbitrary string into its canonical path form.
 fn normalize(name: &str) -> Cow<str> {
@@ -62,7 +62,7 @@ impl Display for ItemPathBuf {
 }
 
 impl ItemPathBuf {
-    /// Transformes into a borrowed item path.
+    /// Transforms into a borrowed item path.
     pub(super) fn as_path(&self) -> ItemPath {
         ItemPath(self.0.as_ref().into())
     }
@@ -134,7 +134,7 @@ pub struct CollectionItem {
     pub is_draft: bool,
 }
 
-impl Dropable for CollectionItem {
+impl Droppable for CollectionItem {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         let path = self.name.as_path();
         let locator = self.collection.locator_for(path);
@@ -154,7 +154,7 @@ impl CollectionItem {
         let key = Hash::hash(self.name.0.as_bytes());
 
         if !is_included {
-            log::error!("Inclusion proof falied for {:?}", self);
+            log::error!("Inclusion proof failed for {:?}", self);
             return false;
         }
 
@@ -234,7 +234,7 @@ pub struct CollectionRef {
     hash: Hash,
 }
 
-impl Dropable for CollectionRef {
+impl Droppable for CollectionRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         for name in self.list() {
             if let Some(item) = self.get(name.as_path())? {

@@ -6,7 +6,7 @@ use warp::Filter;
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
-use crate::models::{CollectionRef, Dropable, SeriesOwner, SeriesRef};
+use crate::models::{CollectionRef, Droppable, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
@@ -25,7 +25,7 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
 }
 
 /// Creates a new series owner, i.e., a public-private keypair that allows one to push new
-/// colletions to a series.
+/// collections to a series.
 fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     #[derive(Deserialize)]
@@ -122,7 +122,7 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         #[serde(with = "humantime_serde")]
         ttl: Option<std::time::Duration>,
         #[serde(default)]
-        no_annouce: bool,
+        no_announce: bool,
     }
 
     warp::path!("_seriesowners" / String / "editions")
@@ -134,7 +134,7 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
                 let edition = series_owner
                     .advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
 
-                if !request.no_annouce {
+                if !request.no_announce {
                     let announcement = edition.announcement();
                     tokio::spawn({
                         let edition = edition.clone();

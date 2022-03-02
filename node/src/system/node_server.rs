@@ -1,4 +1,4 @@
-//! RPC implementation for the Node. This RPC is called by the hubs to trigger object resoution.
+//! RPC implementation for the Node. This RPC is called by the hubs to trigger object resolution.
 
 use futures::prelude::*;
 use std::sync::Arc;
@@ -172,7 +172,7 @@ impl Node for NodeServer {
             };
 
             tokio::spawn(async move {
-                // Sleep a random amount so as not for eeeeverybody to ask for the same items at
+                // Sleep a random amount so as not for everybody to ask for the same items at
                 // the same time.
                 tokio::time::sleep(std::time::Duration::from_secs_f32(rand::random())).await;
                 if let Err(err) = try_refresh.await {

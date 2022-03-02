@@ -54,7 +54,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                             body
                         };
 
-                        // Buid response:
+                        // Builsd response:
                         http::Response::builder()
                             .status(status)
                             .header("Content-Type", content_type)

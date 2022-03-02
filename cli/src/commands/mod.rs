@@ -109,7 +109,7 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
 pub async fn commit(
     ttl: &Option<String>,
     is_release: bool,
-    no_annouce: bool,
+    no_announce: bool,
 ) -> Result<(), anyhow::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -216,7 +216,7 @@ pub async fn commit(
         api::PostEditionRequest {
             collection: &collection,
             ttl: ttl.as_deref(),
-            no_annouce,
+            no_announce,
         },
     )
     .await?;
@@ -245,9 +245,13 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     /// Minimum time you have to wait to trigger rebuild.
     const MIN_WAIT: Duration = Duration::from_secs(1);
 
-    // Ignore the output folder.
     let manifest =
         Manifest::find_opt()?.ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exist"))?;
+    let private_manifest = PrivateManifest::find_opt()?.ok_or_else(|| {
+        anyhow::anyhow!("Private manifest `.Samizdat.priv` not found. Hint: run `samizdat import`.")
+    })?;
+
+    // Ignore the output folder.
     let base = if manifest.build.base.is_absolute() {
         manifest.build.base.clone()
     } else {
@@ -273,6 +277,16 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     log::info!("Installing watcher");
 
     watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
+
+    // Print watch banner:
+    const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
+    println!();
+    println!(
+        "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
+        crate::cli::cli().port,
+        private_manifest.public_key_debug
+    );
+    println!();
 
     log::info!("Starting rebuild loop");
 
