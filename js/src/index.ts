@@ -74,8 +74,8 @@ export class Samizdat {
   isAuthenticated: boolean;
   kvstore: KVStore;
 
-  constructor(accessRights: Array<AccessRight>) {
-    this.accessRights = accessRights;
+  constructor(accessRights?: Array<AccessRight>) {
+    this.accessRights = accessRights ?? [];
     this.isAuthenticated = false;
     this.kvstore = new KVStore();
   }
@@ -224,17 +224,29 @@ export class Samizdat {
     return await response.blob();
   }
 
+  async getIdentityItem(identityHandle: string, path: string) {
+    // TODO: make it conform exactly with IdentityRef::parse.
+    if (identityHandle.startsWith("_") || identityHandle.toString() == "") {
+      throw new Error(`Invalid identity handle "${identityHandle}"`);
+    }
+    const response = await call("GET", `/${identityHandle}${path}`);
+    return await response.blob();
+  }
+
   async getSubscription(seriesKey: string) {
+    await this._ensureRights([AccessRight.ManageSubscriptions]);
     const response = await call("GET", `/_subscriptions${seriesKey}`);
     return (await response.json())["Ok"] as Subscription | null;
   }
 
   async postSubscription(seriesKey: string, kind: SubscriptionKind = SubscriptionKind.FullInventory) {
+    await this._ensureRights([AccessRight.ManageSubscriptions]);
     const response = await call("POST", `/_subscriptions`, { series_key: seriesKey, kind });
     return (await response.json())["Ok"] as string;
   }
 
   async deleteSubscription(seriesKey: string) {
+    await this._ensureRights([AccessRight.ManageSubscriptions]);
     const response = await call("DELETE", `/_subscriptions${seriesKey}`);
     return (await response.json())["Ok"] as null;
   }
