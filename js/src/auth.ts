@@ -4,7 +4,7 @@ async function isAuthenticated(accessRights: Array<AccessRight>) {
   const response = await fetch("/_auth/_current");
 
   if (response.status == 200) {
-    const grantedRights: Array<AccessRight> = await response.json();
+    const grantedRights: Array<AccessRight> = (await response.json())["Ok"];
     for (const right of accessRights) {
       if (!grantedRights.includes(right)) {
         return false;
@@ -17,9 +17,10 @@ async function isAuthenticated(accessRights: Array<AccessRight>) {
   return false;
 }
 
-async function doAuthenticationFlow() {
+async function doAuthenticationFlow(accessRights: Array<AccessRight>) {
   interface AuthenticationDetail {
     status: "success" | "fail" | "canceled";
+    statusCode: number,
   }
 
   const screen = window.screen;
@@ -27,8 +28,9 @@ async function doAuthenticationFlow() {
     width: screen.width / 4.0,
     height: (screen.height * 2.0) / 3.0,
   };
+  const query = accessRights.map(right => `right=${right}`).join("&");
   const authWindow = window.open(
-    "http://localhost:4510/_register?right=ManageSeries&right=ManageObjects",
+    `/_register?${query}`,
     "RegisterApp",
     `
       left=${(screen.width - width) / 2.0},
@@ -51,6 +53,8 @@ async function doAuthenticationFlow() {
     }
   );
 
+  console.log(event);
+
   switch (event.detail.status) {
     case "canceled":
       throw new Error("User canceled authentication flow");
@@ -63,6 +67,6 @@ async function doAuthenticationFlow() {
 
 export async function authenticate(accessRights: Array<AccessRight>) {
   if (!(await isAuthenticated(accessRights))) {
-    await doAuthenticationFlow();
+    await doAuthenticationFlow(accessRights);
   }
 }

@@ -29,7 +29,7 @@ fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
     warp::path!("_auth" / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and(authenticate([]))
+        .and(authenticate_only_trusted())
         .map(|tail: warp::path::Tail| {
             let entity = Entity::from_path(tail.as_str()).ok_or_else(|| "not an entity")?;
             let serialized = bincode::serialize(&entity).expect("can serialize");
@@ -65,7 +65,7 @@ fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth")
         .and(warp::get())
-        .and(authenticate([]))
+        .and(authenticate_only_trusted())
         .map(|| {
             let all_auths = db()
                 .iterator_cf(Table::AccessRights.get(), IteratorMode::Start)
@@ -91,7 +91,7 @@ fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
     warp::path!("_auth" / ..)
         .and(warp::path::tail())
         .and(warp::patch())
-        .and(authenticate([]))
+        .and(authenticate_only_trusted())
         .and(warp::body::json())
         .map(|tail: warp::path::Tail, request: Request| {
             let entity = Entity::from_path(tail.as_str()).ok_or_else(|| "not an entity")?;
@@ -140,7 +140,8 @@ pub enum Forbidden {
     BadToken(String),
     BadOrigin(url::Origin),
     NotAnEntity(String),
-    TrustedContext(String),
+    TrustedContext(Url),
+    NotTrustedContext(Url),
     InsufficientPrivilege,
 }
 
@@ -149,13 +150,16 @@ impl warp::reject::Reject for Forbidden {}
 impl Display for Forbidden {
     fn fmt(&self, f: &'_ mut fmt::Formatter) -> fmt::Result {
         match self {
-            Forbidden::BadToken(token) => write!(f, "bad token: {}", token),
+            Forbidden::BadToken(token) => write!(f, "bad token: {token}"),
             Forbidden::BadOrigin(origin) => {
                 write!(f, "bad origin: {}", origin.unicode_serialization())
             }
-            Forbidden::NotAnEntity(bad_path) => write!(f, "not an entity: {}", bad_path),
+            Forbidden::NotAnEntity(bad_path) => write!(f, "not an entity: {bad_path}"),
             Forbidden::TrustedContext(context) => {
-                write!(f, "accessing from trusted context {}", context)
+                write!(f, "accessing from trusted context {context}",)
+            }
+            Forbidden::NotTrustedContext(url) => {
+                write!(f, "accessing outside a trusted context: {url}")
             }
             Forbidden::InsufficientPrivilege => write!(f, "insufficient privilege"),
         }
@@ -165,7 +169,7 @@ impl Display for Forbidden {
 /// Authentication header was not sent and must be sent.
 #[derive(Debug, Clone, Copy)]
 pub enum Unauthorized {
-    MissingReferrer,
+    MissingReferer,
     Unauthorized,
 }
 
@@ -174,8 +178,8 @@ impl warp::reject::Reject for Unauthorized {}
 impl Display for Unauthorized {
     fn fmt(&self, f: &'_ mut fmt::Formatter) -> fmt::Result {
         match self {
-            Unauthorized::MissingReferrer => write!(f, "missing Referrer header"),
-            Unauthorized::Unauthorized => write!(f, "missing Referrer header or Bearer token"),
+            Unauthorized::MissingReferer => write!(f, "missing Referer header"),
+            Unauthorized::Unauthorized => write!(f, "missing Referer header or Bearer token"),
         }
     }
 }
@@ -225,9 +229,7 @@ fn is_trusted_context(referrer: &Url) -> bool {
 }
 
 /// Returns `Ok(None)` when trusted context.
-fn entity_from_referrer(raw_referrer: &str) -> Result<Option<Entity>, Forbidden> {
-    let referrer: Url = raw_referrer.parse().unwrap();
-
+fn entity_from_referrer(referrer: &Url) -> Result<Option<Entity>, Forbidden> {
     check_origin(&referrer)?;
 
     if is_trusted_context(&referrer) {
@@ -240,11 +242,11 @@ fn entity_from_referrer(raw_referrer: &str) -> Result<Option<Entity>, Forbidden>
     }
 }
 
-/// Extracts the "security scope" (akin to "origin" in the normal Web) from the Referrer header.
+/// Extracts the "security scope" (akin to "origin" in the normal Web) from the Referer header.
 pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Rejection> + Clone {
-    warp::header::optional("Referrer").and_then(|maybe_referrer: Option<String>| async move {
+    warp::header::optional("Referer").and_then(|maybe_referrer: Option<Url>| async move {
         let referrer =
-            maybe_referrer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferrer))?;
+            maybe_referrer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferer))?;
         let maybe_entity =
             entity_from_referrer(&referrer).map_err(|forbidden| warp::reject::custom(forbidden))?;
         let entity = maybe_entity
@@ -254,11 +256,8 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
     })
 }
 
-/// Authenticate to the private part of the API. This requires access to the filesystem (only that)
-pub fn authenticate<const N: usize>(
-    required_rights: [AccessRight; N],
-) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
-    let authorization_access = warp::header("Authorization")
+fn authenticate_authorization() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+    warp::header("Authorization")
         .or_else(|_| async { Err(warp::reject::custom(Unauthorized::Unauthorized)) })
         .map(|authorization: String| {
             let token = authorization
@@ -270,9 +269,13 @@ pub fn authenticate<const N: usize>(
             } else {
                 Some(Forbidden::BadToken(token.to_owned()))
             }
-        });
+        })
+}
 
-    let secure_scope_access = security_scope().map(move |entity: Entity| {
+fn authenticate_security_scope<const N: usize>(
+    required_rights: [AccessRight; N],
+) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+    security_scope().map(move |entity: Entity| {
         // Get rights from db:
         let serialized_opt = db()
             .get_cf(
@@ -297,10 +300,39 @@ pub fn authenticate<const N: usize>(
         } else {
             Some(Forbidden::InsufficientPrivilege)
         }
-    });
+    })
+}
 
-    authorization_access
-        .or(secure_scope_access)
+fn authenticate_trusted_context() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+    warp::header("Referer").map(|referer: Url| {
+        if is_trusted_context(&referer) {
+            check_origin(&referer).err()
+        } else {
+            Some(Forbidden::NotTrustedContext(referer))
+        }
+    })
+}
+
+/// Authenticate to the private part of the API.
+pub fn authenticate<const N: usize>(
+    required_rights: [AccessRight; N],
+) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
+    authenticate_authorization()
+        .or(authenticate_security_scope(required_rights))
+        .unify()
+        .and_then(|outcome| async move {
+            match outcome {
+                None => Ok(()),
+                Some(forbidden) => Err(warp::reject::custom(forbidden)),
+            }
+        })
+        .untuple_one()
+}
+
+/// Authenticates to a trusted context only.
+pub fn authenticate_only_trusted() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
+    authenticate_authorization()
+        .or(authenticate_trusted_context())
         .unify()
         .and_then(|outcome| async move {
             match outcome {

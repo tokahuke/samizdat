@@ -109,7 +109,7 @@ export class Samizdat {
     return await response.blob();
   }
 
-  async postObject(content: BodyInit) {
+  async postObject(content: Blob) {
     await this._ensureRights([AccessRight.ManageObjects]);
     const response = await callRaw("POST", `/_objects`, content);
     return await response.text();
@@ -145,16 +145,16 @@ export class Samizdat {
     return (await response.json())["Ok"] as null;
   }
 
-  async getStats(object: string) {
+  async getObjectStats(object: string) {
     await this._ensureRights([AccessRight.GetObjectStats]);
-    const response = await call("DELETE", `/_objects/${object}/stats`);
-    return (await response.json())["Ok"] as ObjectStats | null;
+    const response = await call("GET", `/_objects/${object}/stats`);
+    return (await response.json())["Ok"] as object;
   }
 
   async getByteUsefulness(object: string) {
     await this._ensureRights([AccessRight.GetObjectStats]);
     const response = await call(
-      "DELETE",
+      "GET",
       `/_objects/${object}/stats/byte-usefulness`
     );
     return (await response.json())["Ok"] as number | null;

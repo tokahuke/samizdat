@@ -39,18 +39,21 @@
       <button onclick="allow()">Allow</button>
     </div>
     <script>
+      console.log(`{ "granted_rights": {{ rights|json|safe }} }`);
       async function allow() {
         const response = await fetch("/_auth{{ entity|safe }}", {
           headers: {
             "Content-Type": "application/json",
           },
           method: "PATCH",
-          body: `{ "granted_rights": {{ rights|json }} }`,
+          body: `{ "granted_rights": {{ rights|json|safe }} }`,
         });
 
         window.dispatchEvent(new CustomEvent("auth", {
           detail: {
-            status: response.status == 204 ? "success" : "fail",
+            statusCode: response.status, 
+            payload: await response.text(),
+            status: response.status >= 200 && response.status < 300 ? "success" : "fail",
           }
         }));
         
