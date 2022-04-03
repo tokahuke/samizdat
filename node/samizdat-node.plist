@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>Label</key>
+		<string>samizdat-node</string>
+
+        <key>ProgramArguments</key>
+        <array>
+            <string>/usr/local/bin/samizdat-node</string>
+            <string>--data</string>
+            <string>/var/lib/samizdat/node/</string>
+            <string>--hubs</string>
+            <string>testbed.hubfederation.com</string>
+        </array>
+
+		<key>StandardOutPath</key>
+        <string>/var/log/samizdat-node-stdout.log</string>
+        <key>StandardErrorPath</key>
+        <string>/var/log/samizdat-node-stderr.log</string>
+        
+        <key>RunAtLoad</key>
+		<true/>
+        
+        <key>ThrottleInterval</key>
+        <integer>1</integer>
+	</dict>
+</plist>
