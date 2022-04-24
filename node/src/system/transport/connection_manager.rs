@@ -78,7 +78,7 @@ impl ConnectionManager {
 
         let outgoing = async move {
             if let Some(connecting) = self.matcher.expect(peer_addr).await {
-                log::info!("found expected conection {}", peer_addr);
+                log::info!("found expected connection {}", peer_addr);
                 Ok(connecting.await?)
             } else {
                 Err("peer not expected".into()) as Result<_, crate::Error>

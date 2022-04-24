@@ -1,3 +1,5 @@
+#![feature(ip)]
+
 mod cli;
 mod db;
 mod replay_resistance;
@@ -36,8 +38,8 @@ async fn main() -> Result<(), crate::Error> {
     db::init_db()?;
 
     // Spawn services:
-    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct((CLI.address, CLI.direct_port)));
-    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse((CLI.address, CLI.reverse_port)));
+    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(CLI.direct_addresses.clone()));
+    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(CLI.reverse_addresses.clone()));
     let partners = tokio::spawn(crate::rpc::run_partners());
 
     // Await for services to end:

@@ -256,7 +256,8 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
     })
 }
 
-fn authenticate_authorization() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+fn authenticate_authorization(
+) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Authorization")
         .or_else(|_| async { Err(warp::reject::custom(Unauthorized::Unauthorized)) })
         .map(|authorization: String| {
@@ -303,7 +304,8 @@ fn authenticate_security_scope<const N: usize>(
     })
 }
 
-fn authenticate_trusted_context() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+fn authenticate_trusted_context(
+) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Referer").map(|referer: Url| {
         if is_trusted_context(&referer) {
             check_origin(&referer).err()

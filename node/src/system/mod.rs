@@ -1,4 +1,4 @@
-//! Implmentation of the node behavior in the Samizdat network, both with hubs and with
+//! Implementation of the node behavior in the Samizdat network, both with hubs and with
 //! other nodes.
 
 mod file_transfer;
@@ -141,9 +141,10 @@ impl HubConnection {
         content_hash: Hash,
         kind: QueryKind,
     ) -> Result<Option<ObjectRef>, crate::Error> {
-        let content_riddle = Riddle::new(&content_hash);
+        let content_riddles = (0..cli().riddles_per_query)
+            .map(|_| Riddle::new(&content_hash))
+            .collect();
         let location_riddle = Riddle::new(&content_hash);
-        let validation_riddle = Riddle::new(&content_hash);
 
         let inner = self.inner.get().await;
 
@@ -152,9 +153,8 @@ impl HubConnection {
             .query(
                 context::current(),
                 Query {
-                    content_riddle,
+                    content_riddles,
                     location_riddle,
-                    validation_riddle,
                     kind,
                 },
             )
@@ -162,6 +162,7 @@ impl HubConnection {
 
         let candidates = match query_response {
             QueryResponse::Replayed => return Err("hub has suspected replay attack".into()),
+            QueryResponse::EmptyQuery => return Err("hub has received an empty query".into()),
             QueryResponse::InternalError => {
                 return Err("hub has experienced an internal error".into())
             }

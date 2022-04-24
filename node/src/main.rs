@@ -1,3 +1,5 @@
+#![feature(ip)]
+
 mod access;
 mod cli;
 mod db;
@@ -14,7 +16,7 @@ pub use samizdat_common::Error;
 pub use cli::cli;
 pub use db::db;
 
-use futures::prelude::*;
+use futures::{prelude::*, TryStreamExt};
 use std::panic;
 use tokio::task;
 use warp::Filter;
@@ -31,11 +33,16 @@ static mut HUBS: Option<Hubs> = None;
 
 /// Initiates [`HUBS`] by connecting to all hubs defined in the command line.
 async fn init_hubs() -> Result<(), crate::Error> {
-    let resolved = futures::stream::iter(&cli().hubs)
-        .map(cli::AddrToResolve::resolve)
+    let sockets = cli()
+        .hubs
+        .iter()
+        .map(|to_resolve| to_resolve.resolve(cli().resolution_mode));
+    let resolved = stream::iter(sockets)
         .buffer_unordered(cli().hubs.len())
         .try_collect::<Vec<_>>()
-        .await?;
+        .await?
+        .into_iter()
+        .flatten();
     let hubs = Hubs::init(resolved).await?;
 
     unsafe {

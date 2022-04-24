@@ -82,14 +82,19 @@ impl Hub for HubServer {
                 _ => {}
             }
 
+            // If query is empty, nothing to be done:
+            if query.content_riddles.is_empty() {
+                return QueryResponse::EmptyQuery;
+            }
+
             // Now, prepare resolution request:
-            let message_riddle = query.content_riddle.riddle_for(channel_addr);
-            let resolution = Arc::new(Resolution {
-                content_riddle: query.content_riddle,
-                message_riddle,
-                validation_nonce: query.validation_riddle.rand,
+            let location_message_riddle = query.location_riddle.riddle_for(channel_addr);
+            let resolution = Resolution {
+                content_riddles: query.content_riddles,
+                location_message_riddle,
+                validation_nonces: vec![],
                 kind: query.kind,
-            });
+            };
 
             // And then send the request to the peers:
             let candidates = candidates_for_resolution(ctx, client_addr, resolution).await;
@@ -99,7 +104,6 @@ impl Hub for HubServer {
             QueryResponse::Resolved {
                 candidates: candidates
                     .into_iter()
-                    .filter(|candidate| candidate.validation_riddle == query.validation_riddle)
                     .map(|candidate| ChannelAddr::new(candidate.peer_addr, channel))
                     .collect(),
             }

@@ -13,9 +13,9 @@ use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::Mutex;
 
-use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
+use samizdat_common::{quic, Riddle};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
@@ -40,12 +40,13 @@ struct Node {
 }
 
 impl Node {
-    fn new(client_addr: SocketAddr, client: NodeClient) -> Node {
+    fn new(addr: SocketAddr, client: NodeClient) -> Node {
         Node {
             query_statistics: Statistics::default(),
             edition_statistics: Statistics::default(),
             client,
-            addr: client_addr,
+            // Make tunneled IPv4 addresses actual IPv4 addresses.
+            addr: (addr.ip().to_canonical(), addr.port()).into(),
         }
     }
 }
@@ -53,17 +54,32 @@ impl Node {
 async fn candidates_for_resolution(
     ctx: context::Context,
     client_addr: SocketAddr,
-    resolution: Arc<Resolution>,
+    mut resolution: Resolution,
 ) -> Vec<Candidate> {
+    // Go one step down with the resolution:
+    let validation_riddle = resolution
+        .content_riddles
+        .pop()
+        .expect("non-empty resolution");
+    resolution.validation_nonces.push(validation_riddle.rand);
+    let resolution = Arc::new(resolution);
+
+    // Ooops! Empty query resolution...
+    if resolution.content_riddles.is_empty() {
+        return vec![];
+    }
+
+    // Then query peers:
     ROOM.with_peers(QuerySampler, client_addr, move |peer_id, peer| {
         let resolution = resolution.clone();
+        let validation_riddle = validation_riddle.clone();
         async move {
             log::debug!("starting resolve for {peer_id}");
 
             peer.query_statistics.start_request();
 
             let start = Instant::now();
-            let outcome = peer.client.resolve(ctx, resolution).await;
+            let outcome = peer.client.resolve(ctx, resolution.clone()).await;
             let elapsed = start.elapsed();
 
             let response = match outcome {
@@ -77,19 +93,49 @@ async fn candidates_for_resolution(
 
             log::debug!("resolve done for {peer_id}");
 
+            let validate_riddles = |riddles: &[Riddle]| {
+                // `>=`: there can be more added nonces down the line because of further redirects.
+                riddles.len() >= resolution.validation_nonces.len()
+                    // Check that *your* riddle is correct
+                    && &riddles[resolution.validation_nonces.len() - 1] == &validation_riddle
+                    // Although you don't know the riddles before you, at least check that the nonces
+                    // match.
+                    && riddles
+                        .iter()
+                        .zip(&resolution.validation_nonces)
+                        .all(|(riddle, nonce)| riddle.rand == *nonce)
+            };
+
             match response {
-                ResolutionResponse::Found(validation_riddle) => {
+                ResolutionResponse::Found(validation_riddles)
+                    if validate_riddles(&validation_riddles) =>
+                {
                     peer.query_statistics.end_request_with_success(elapsed);
                     Some(vec![Candidate {
                         peer_addr: peer.addr,
-                        validation_riddle,
+                        validation_riddles,
                     }])
                 }
                 ResolutionResponse::Redirect(candidates) => {
-                    peer.query_statistics.end_request_with_success(elapsed);
-                    Some(candidates)
+                    let valid_candidates = candidates
+                        .into_iter()
+                        .filter(|candidate| validate_riddles(&candidate.validation_riddles))
+                        .filter(|candidate| {
+                            // IPv6 with IPv6; IPv4 with IPv4!
+                            candidate.peer_addr.ip().to_canonical().is_ipv6()
+                                == client_addr.ip().to_canonical().is_ipv6()
+                        })
+                        .collect::<Vec<_>>();
+
+                    if !valid_candidates.is_empty() {
+                        peer.query_statistics.end_request_with_success(elapsed);
+                        Some(valid_candidates)
+                    } else {
+                        peer.query_statistics.end_request_with_failure();
+                        None
+                    }
                 }
-                ResolutionResponse::NotFound => {
+                _ => {
                     peer.query_statistics.end_request_with_failure();
                     None
                 }
@@ -197,12 +243,19 @@ async fn get_identity(
     .collect::<Vec<_>>()
 }
 
-pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
-    let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Error> {
+    let all_incoming = addrs
+        .into_iter()
+        .map(|addr| {
+            let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+            log::info!("Direct server started at {}", endpoint.local_addr()?);
 
-    log::info!("Direct server started at {}", endpoint.local_addr()?);
+            Ok(incoming)
+        })
+        .collect::<Result<Vec<_>, io::Error>>()?;
 
-    incoming
+    stream::iter(all_incoming)
+        .flatten()
         .filter_map(|connecting| async move {
             connecting
                 .await
@@ -238,12 +291,19 @@ pub async fn run_direct(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
     Ok(())
 }
 
-pub async fn run_reverse(addr: impl Into<SocketAddr>) -> Result<(), io::Error> {
-    let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Error> {
+    let all_incoming = addrs
+        .into_iter()
+        .map(|addr| {
+            let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+            log::info!("Reverse server started at {}", endpoint.local_addr()?);
 
-    log::info!("Reverse server started at {}", endpoint.local_addr()?);
+            Ok(incoming)
+        })
+        .collect::<Result<Vec<_>, io::Error>>()?;
 
-    incoming
+    stream::iter(all_incoming)
+        .flatten()
         .filter_map(|connecting| async move {
             connecting
                 .await

@@ -47,7 +47,12 @@ impl Node for HubAsNodeServer {
             }
         }
 
-        let candidates = candidates_for_resolution(ctx, self.partner, resolution).await;
+        if resolution.content_riddles.is_empty() {
+            return ResolutionResponse::EmptyResolution;
+        }
+
+        let candidates =
+            candidates_for_resolution(ctx, self.partner, Resolution::clone(&resolution)).await;
 
         ResolutionResponse::Redirect(candidates)
     }

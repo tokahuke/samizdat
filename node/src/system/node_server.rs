@@ -22,7 +22,12 @@ impl NodeServer {
     async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got object {:?}", resolution);
 
-        let object = match ObjectRef::find(&resolution.content_riddle) {
+        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
+            content_riddle
+        } else {
+            return ResolutionResponse::EmptyResolution;
+        };
+        let object = match ObjectRef::find(content_riddle) {
             Some(object) if !object.is_draft().unwrap_or(true) => object,
             Some(_) => {
                 log::info!("Hash found but object is draft");
@@ -37,7 +42,10 @@ impl NodeServer {
         let hash = *object.hash();
 
         log::info!("Found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
+        let peer_addr = match resolution
+            .location_message_riddle
+            .resolve::<ChannelAddr>(&hash)
+        {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("Failed to resolve message riddle after resolving content riddle");
@@ -59,13 +67,24 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
+        ResolutionResponse::Found(
+            resolution
+                .validation_nonces
+                .iter()
+                .map(|&nonce| Riddle::new_with_nonce(&hash, nonce))
+                .collect(),
+        )
     }
 
     async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got item {:?}", resolution);
 
-        let item = match CollectionItem::find(&resolution.content_riddle) {
+        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
+            content_riddle
+        } else {
+            return ResolutionResponse::EmptyResolution;
+        };
+        let item = match CollectionItem::find(&content_riddle) {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
                 log::info!("hash found, but item is draft");
@@ -85,7 +104,10 @@ impl NodeServer {
         let hash = item.locator().hash();
 
         log::info!("found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
+        let peer_addr = match resolution
+            .location_message_riddle
+            .resolve::<ChannelAddr>(&hash)
+        {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
@@ -106,7 +128,13 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
+        ResolutionResponse::Found(
+            resolution
+                .validation_nonces
+                .iter()
+                .map(|&nonce| Riddle::new_with_nonce(&hash, nonce))
+                .collect(),
+        )
     }
 }
 

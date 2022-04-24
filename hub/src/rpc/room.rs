@@ -40,8 +40,13 @@ impl Room {
         current: SocketAddr,
     ) -> impl 'a + Stream<Item = (SocketAddr, Arc<Node>)> {
         let peers = self.participants.read().await;
-        let sampler = node_sampler::sample(sampler, &peers)
-            .filter(move |(_, peer)| peer.addr.ip() != current.ip());
+        let sampler = node_sampler::sample(sampler, &peers).filter(move |(_, peer)| {
+            // `to_canonical` not really needed, but better safe than sorry
+            let peer_ip = peer.addr.ip().to_canonical();
+            let current_ip = current.ip().to_canonical();
+            // Do not query yourself! IPv4 with IPv4; IPv6 with IPv6!
+            peer_ip != current_ip && peer_ip.is_ipv6() == current_ip.is_ipv6()
+        });
 
         futures::stream::iter(sampler)
     }

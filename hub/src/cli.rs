@@ -1,20 +1,17 @@
 use std::fmt::{self, Display};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Cli {
-    /// The IP to which to bind.
-    #[structopt(env = "SAMIZDAT_ADDRESS", long, default_value = "::")]
-    pub address: IpAddr,
-    /// The port for nodes to connect as clients.
-    #[structopt(env = "SAMIZDAT_DIRECT_PORT", long, default_value = "4511")]
-    pub direct_port: u16,
+    /// The socket addresses for nodes to connect as clients.
+    #[structopt(env = "SAMIZDAT_DIRECT_ADDRESSES", long, default_value = "[::]:4511")]
+    pub direct_addresses: Vec<SocketAddr>,
     /// The port for nodes to connect as servers.
-    #[structopt(env = "SAMIZDAT_REVERSE_PORT", long, default_value = "4512")]
-    pub reverse_port: u16,
+    #[structopt(env = "SAMIZDAT_REVERSE_ADDRESSES", long, default_value = "[::]:4512")]
+    pub reverse_addresses: Vec<SocketAddr>,
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
     /// Maximum number of simultaneous connections.
@@ -74,14 +71,25 @@ impl Display for AddrToResolve {
 }
 
 impl AddrToResolve {
+    fn name(&self) -> String {
+        match self {
+            AddrToResolve::SocketAddr(addr) => addr.to_string(),
+            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => domain.to_owned(),
+            AddrToResolve::DomainAndPort(domain, port) => format!("{}:{}", domain, port),
+        }
+    }
+
     pub async fn resolve(&self) -> Result<(&'static str, SocketAddr), crate::Error> {
-        let name = Box::leak(self.to_string().into_boxed_str());
+        fn prefer_ipv6(it: impl IntoIterator<Item = SocketAddr>) -> Option<SocketAddr> {
+            it.into_iter()
+                .max_by_key(|addr| if addr.is_ipv6() { 1 } else { 0 })
+        }
+
+        let name = Box::leak(self.name().into_boxed_str());
         let addr = match self {
             AddrToResolve::SocketAddr(addr) => *addr,
             AddrToResolve::DomainAndPort(domain, port) => {
-                tokio::net::lookup_host((&**domain, *port))
-                    .await?
-                    .next()
+                prefer_ipv6(tokio::net::lookup_host((&**domain, *port)).await?)
                     .ok_or_else(|| format!("no such host {}", domain))?
             }
         };

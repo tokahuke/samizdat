@@ -15,13 +15,10 @@ pub enum QueryKind {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
-    /// The riddle for the content hash.
-    pub content_riddle: Riddle,
+    /// The riddles the resolver can use to find the content hash.
+    pub content_riddles: Vec<Riddle>,
     /// The riddle that will be used by the peer that has the hash to find the IP of the client.
     pub location_riddle: Riddle,
-    /// The riddle that will be used by the hub to validate if the node has *really* found the
-    /// hash.
-    pub validation_riddle: Riddle,
     /// The kind of entity being requested.
     pub kind: QueryKind,
 }
@@ -32,6 +29,8 @@ pub enum QueryResponse {
     InternalError,
     /// Query was replayed. Therefore, it was rejected.
     Replayed,
+    /// Query was empty, i.e., `content_riddles` was empty.
+    EmptyQuery,
     /// Query was run and returned with these candidates (may be empty).
     Resolved { candidates: Vec<ChannelAddr> },
 }
@@ -84,14 +83,15 @@ pub trait Hub {
     async fn announce_identity(announcement: IdentityAnnouncement);
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resolution {
-    /// The riddle for the requested hash.
-    pub content_riddle: Riddle,
+    /// The riddles the resolver can use to find the content hash.
+    pub content_riddles: Vec<Riddle>,
+    /// The nonces which the resolver must combine with the content hash to prove that it knows the
+    /// correct hash.
+    pub validation_nonces: Vec<Hash>,
     /// The riddle for the client address.
-    pub message_riddle: MessageRiddle,
-    /// The nonce which the node uses to prove to the hub that it know the correct hash.
-    pub validation_nonce: Hash,
+    pub location_message_riddle: MessageRiddle,
     /// The kind of entity being requested.
     pub kind: QueryKind,
 }
@@ -99,13 +99,14 @@ pub struct Resolution {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Candidate {
     pub peer_addr: SocketAddr,
-    pub validation_riddle: Riddle,
+    pub validation_riddles: Vec<Riddle>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ResolutionResponse {
-    Found(Riddle),
+    Found(Vec<Riddle>),
     Redirect(Vec<Candidate>),
+    EmptyResolution,
     NotFound,
 }
 
