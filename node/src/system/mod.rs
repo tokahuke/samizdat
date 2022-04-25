@@ -308,9 +308,7 @@ impl Hubs {
         let hubs = stream::iter(addrs)
             .map(|(name, addr)| {
                 let direct_addr = addr;
-                let mut reverse_addr = addr;
-                reverse_addr.set_port(reverse_addr.port() + 1);
-
+                let reverse_addr = (addr.ip(), addr.port() + 1).into();
                 HubConnection::connect(name, direct_addr, reverse_addr)
             })
             .buffer_unordered(10) // 'cause 10!

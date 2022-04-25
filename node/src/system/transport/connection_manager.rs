@@ -36,9 +36,10 @@ impl ConnectionManager {
 
     pub async fn connect(&self, remote_addr: SocketAddr) -> Result<NewConnection, crate::Error> {
         let new_connection = quic::connect(&self.endpoint, remote_addr).await?;
+        let remote = new_connection.connection.remote_address();
         log::info!(
             "client connected to server at {}",
-            new_connection.connection.remote_address()
+            SocketAddr::from((remote.ip().to_canonical(), remote.port())),
         );
 
         Ok(new_connection)

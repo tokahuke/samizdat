@@ -44,8 +44,11 @@ impl Room {
             // `to_canonical` not really needed, but better safe than sorry
             let peer_ip = peer.addr.ip().to_canonical();
             let current_ip = current.ip().to_canonical();
-            // Do not query yourself! IPv4 with IPv4; IPv6 with IPv6!
-            peer_ip != current_ip && peer_ip.is_ipv6() == current_ip.is_ipv6()
+
+            // Do not query yourself (unless loopback)! IPv4 with IPv4; IPv6 with IPv6!
+            (peer_ip != current_ip
+                || current_ip.is_loopback() && peer.addr.port() != current.port())
+                && peer_ip.is_ipv6() == current_ip.is_ipv6()
         });
 
         futures::stream::iter(sampler)

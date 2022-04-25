@@ -66,7 +66,7 @@ impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(|server| async move {
-            log::debug!("got {:?}", query);
+            log::info!("got {:?}", query);
 
             // Create a channel address from peer address:
             let channel = rand::random();

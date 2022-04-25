@@ -62,10 +62,11 @@ async fn candidates_for_resolution(
         .pop()
         .expect("non-empty resolution");
     resolution.validation_nonces.push(validation_riddle.rand);
-    let resolution = Arc::new(resolution);
+    let resolution = dbg!(Arc::new(resolution));
 
     // Ooops! Empty query resolution...
     if resolution.content_riddles.is_empty() {
+        log::info!("Content riddles empty");
         return vec![];
     }
 
@@ -74,7 +75,7 @@ async fn candidates_for_resolution(
         let resolution = resolution.clone();
         let validation_riddle = validation_riddle.clone();
         async move {
-            log::debug!("starting resolve for {peer_id}");
+            log::info!("starting resolve for {peer_id}");
 
             peer.query_statistics.start_request();
 
@@ -91,7 +92,7 @@ async fn candidates_for_resolution(
                 }
             };
 
-            log::debug!("resolve done for {peer_id}");
+            log::info!("resolve done for {peer_id}");
 
             let validate_riddles = |riddles: &[Riddle]| {
                 // `>=`: there can be more added nonces down the line because of further redirects.

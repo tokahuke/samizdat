@@ -85,7 +85,7 @@ async fn main() -> Result<(), crate::Error> {
     let public_server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {
             if let Some(addr) = addr {
-                if addr.ip().is_loopback() {
+                if addr.ip().to_canonical().is_loopback() {
                     return Err(warp::reject::not_found());
                 }
             }
@@ -102,7 +102,7 @@ async fn main() -> Result<(), crate::Error> {
         .with(warp::log("api"));
 
     // Run public server:
-    let server = tokio::spawn(warp::serve(public_server).run(([0, 0, 0, 0], cli().port)));
+    let server = tokio::spawn(warp::serve(public_server).run(([0; 16], cli().port)));
 
     maybe_resume_panic(server.await);
 
