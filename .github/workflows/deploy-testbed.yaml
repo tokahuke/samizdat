@@ -10,22 +10,22 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-    # - name: Check out repository code
-    #   uses: actions/checkout@v2
+    - name: Check out repository code
+      uses: actions/checkout@v2
     
-    # - name: Install Rust
-    #   uses: actions-rs/toolchain@v1
-    #   with:
-    #     toolchain: stable
-    #     profile: minimal
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
 
-    # - name: Running cache
-    #   uses: Swatinem/rust-cache@v1
-    #   with:
-    #     cache-on-failure: true
+    - name: Running cache
+      uses: Swatinem/rust-cache@v1
+      with:
+        cache-on-failure: true
     
-    # - name: Running build
-    #   run: cargo build --all --release
+    - name: Running build
+      run: cargo build --all --release
 
    # See https://zellwk.com/blog/github-actions-deploy/
     - name: Install SSH Key
