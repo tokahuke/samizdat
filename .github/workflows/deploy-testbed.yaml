@@ -37,7 +37,7 @@ jobs:
     - name: Adding Known Hosts
       uses: kielabokkie/ssh-key-and-known-hosts-action@v1
       with:
-        ssh-key: ${{ secrets.SSH_KEY }}
+        ssh-private-key: ${{ secrets.SSH_KEY }}
         ssh-host: ${{ secrets.SSH_HOST }}
 
     - name: Test upload with rsync
