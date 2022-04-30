@@ -9,6 +9,9 @@ use structopt::StructOpt;
 /// The CLI parameters.
 #[derive(Debug, StructOpt)]
 pub struct Cli {
+    /// Set logging level.
+    #[structopt(short = "v")]
+    pub verbose: bool,
     /// Path to the locally stored program data.
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/node")]
     pub data: PathBuf,

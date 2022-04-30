@@ -33,11 +33,12 @@ fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
 
 #[tokio::main]
 async fn main() -> Result<(), crate::Error> {
-    // Init logger:
-    let _ = logger::init_logger();
-
     // Init resources:
     let _ = &*CLI;
+
+    // Init logger:
+    let _ = logger::init_logger(CLI.verbose);
+
     db::init_db()?;
 
     // Spawn services:

@@ -322,14 +322,17 @@ impl Hubs {
     /// Makes a query to all inscribed hubs.
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.query(content_hash, kind).await) })
+            .map(|hub| async move {
+                log::debug!("Querying {} for {content_hash} of {kind:?}", hub.name);
+                (hub.name, hub.query(content_hash, kind).await)
+            })
             .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {
             match result {
                 Ok(Some(found)) => return Some(found),
                 Ok(None) => {
-                    log::info!("got no result from {}", hub_name)
+                    log::debug!("got no result from {}", hub_name)
                 }
                 Err(err) => {
                     log::error!("Error while querying {}: {}", hub_name, err)
@@ -343,7 +346,10 @@ impl Hubs {
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Option<Edition> {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.get_edition(series).await) })
+            .map(|hub| async move {
+                log::debug!("Querying {} for latest edition of {series}", hub.name);
+                (hub.name, hub.get_edition(series).await)
+            })
             .buffer_unordered(cli().max_parallel_hubs);
 
         // Even though we should have to go through *aaaaaaall* the hubs to get the best answer, we
@@ -352,7 +358,9 @@ impl Hubs {
         while let Some((hub_name, result)) = results.next().await {
             match result {
                 Ok(Some(found)) => return Some(found),
-                Ok(None) => {}
+                Ok(None) => {
+                    log::debug!("got no result from {}", hub_name)
+                }
                 Err(err) => {
                     log::error!("Error while querying {hub_name}: {err}")
                 }
@@ -364,7 +372,10 @@ impl Hubs {
 
     pub async fn announce_edition(&self, announcement: &EditionAnnouncement) {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.announce_edition(announcement).await) })
+            .map(|hub| async move {
+                log::debug!("Announcing {announcement:?} to {}", hub.name);
+                (hub.name, hub.announce_edition(announcement).await)
+            })
             .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {
@@ -379,7 +390,10 @@ impl Hubs {
 
     pub async fn get_identity(&self, identity: &IdentityRef) -> Option<Identity> {
         let mut results = stream::iter(self.hubs.iter().cloned())
-            .map(|hub| async move { (hub.name, hub.get_identity(identity).await) })
+            .map(|hub| async move {
+                log::debug!("Querying {} for identity {identity}", hub.name);
+                (hub.name, hub.get_identity(identity).await)
+            })
             .buffer_unordered(cli().max_parallel_hubs);
 
         let mut most_worked_on: Option<Identity> = None;

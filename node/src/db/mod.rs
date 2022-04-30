@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_merge() {
-        let _ = crate::logger::init_logger();
+        let _ = crate::logger::init_logger(true);
 
         crate::cli::init_cli().unwrap();
         init_db().unwrap();

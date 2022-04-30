@@ -58,6 +58,8 @@ async fn candidates_for_resolution(
     client_addr: SocketAddr,
     mut resolution: Resolution,
 ) -> Vec<Candidate> {
+    log::debug!("Client {client_addr} requested {resolution:?}");
+
     // Go one step down with the resolution:
     let validation_riddle = resolution
         .content_riddles
@@ -74,8 +76,10 @@ async fn candidates_for_resolution(
 
     // Then query peers:
     ROOM.with_peers(QuerySampler, client_addr, move |peer_id, peer| {
+        log::debug!("Pairing client {client_addr} with peer {peer_id}");
         let resolution = resolution.clone();
         let validation_riddle = validation_riddle.clone();
+
         async move {
             log::info!("starting resolve for {peer_id}");
 
@@ -200,7 +204,7 @@ async fn announce_edition(
             match outcome {
                 Ok(_) => Some(()),
                 Err(err) => {
-                    log::warn!("error announcing to peer {}: {}", peer_id, err);
+                    log::warn!("error announcing to peer {peer_id}: {err}");
                     None
                 }
             }

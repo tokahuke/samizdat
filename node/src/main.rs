@@ -68,11 +68,12 @@ fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
 /// The entrypoint of the Samizdat node.
 #[tokio::main]
 async fn main() -> Result<(), crate::Error> {
+    init_cli()?;
+
     // Init logger:
-    let _ = logger::init_logger();
+    let _ = logger::init_logger(cli().verbose);
 
     // Init resources:
-    init_cli()?;
     init_access_token()?;
     init_db()?;
     init_hubs().await?;

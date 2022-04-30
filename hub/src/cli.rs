@@ -6,6 +6,9 @@ use structopt::StructOpt;
 
 #[derive(StructOpt)]
 pub struct Cli {
+    /// Set logging level.
+    #[structopt(env = "SAMIZDAT_VERBOSE", long, short = "v")]
+    pub verbose: bool,
     /// The socket addresses for nodes to connect as clients.
     #[structopt(env = "SAMIZDAT_DIRECT_ADDRESSES", long, default_value = "[::]:4511")]
     pub direct_addresses: Vec<SocketAddr>,

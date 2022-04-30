@@ -134,7 +134,7 @@ pub async fn resolve_item(
     }
 }
 
-/// Tries to find an object as an item the collection correspoinding to the latest
+/// Tries to find an object as an item the collection corresponding to the latest
 /// version of a series, asking the Samizdat network if necessary.
 pub async fn resolve_series(
     series: SeriesRef,

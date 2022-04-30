@@ -66,7 +66,7 @@ impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(|server| async move {
-            log::info!("got {:?}", query);
+            log::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
             let channel = rand::random();
@@ -84,6 +84,7 @@ impl Hub for HubServer {
 
             // If query is empty, nothing to be done:
             if query.content_riddles.is_empty() {
+                log::debug!("query riddle empty");
                 return QueryResponse::EmptyQuery;
             }
 

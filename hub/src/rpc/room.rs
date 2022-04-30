@@ -45,9 +45,17 @@ impl Room {
             let current_ip = current.ip();
 
             // Do not query yourself (unless loopback)! IPv4 with IPv4; IPv6 with IPv6!
-            (peer_ip != current_ip
+            let include = (peer_ip != current_ip
                 || current_ip.is_loopback() && peer.addr.port() != current.port())
-                && peer_ip.is_ipv6() == current_ip.is_ipv6()
+                && peer_ip.is_ipv6() == current_ip.is_ipv6();
+
+            if include {
+                log::debug!("Streaming {peer_ip} for client {current_ip}");
+            } else {
+                log::debug!("Filtering out {peer_ip} from client {current_ip}");
+            }
+
+            include
         });
 
         futures::stream::iter(sampler)
@@ -67,7 +75,20 @@ impl Room {
         self.stream_peers(sampler, current)
             .into_stream()
             .flatten()
-            .filter_map(move |(peer_id, peer)| map(peer_id, peer))
+            .filter_map(move |(peer_id, peer)| {
+                let fut_filter_map = map(peer_id, peer); // Cannot move out of FnMut
+                async move {
+                    let filter_map = fut_filter_map.await;
+
+                    if filter_map.is_some() {
+                        log::debug!("Mapping in {peer_id} for client {current}")
+                    } else {
+                        log::debug!("Mapping out {peer_id} from client {current}");
+                    }
+
+                    filter_map
+                }
+            })
             .map(|outcome| async move { outcome })
             .buffer_unordered(CLI.max_resolutions_per_query)
             .take(CLI.max_candidates)
