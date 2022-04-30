@@ -178,11 +178,17 @@ impl Node for NodeServer {
             None
         };
 
+        if let Some(response) = maybe_response.as_ref() {
+            log::info!("Edition found: {response:?}");
+        } else {
+            log::info!("Edition not found");
+        }
+
         maybe_response.into_iter().collect()
     }
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
-        log::info!("Sending announcement to hub");
+        log::info!("Got announcement from hub");
         if let Some(subscription) = SubscriptionRef::find(&announcement.key_riddle) {
             let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 

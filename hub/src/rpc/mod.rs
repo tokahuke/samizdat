@@ -66,7 +66,7 @@ async fn candidates_for_resolution(
         .pop()
         .expect("non-empty resolution");
     resolution.validation_nonces.push(validation_riddle.rand);
-    let resolution = dbg!(Arc::new(resolution));
+    let resolution = Arc::new(resolution);
 
     // Ooops! Empty query resolution...
     if resolution.content_riddles.is_empty() {
@@ -172,17 +172,23 @@ async fn edition_for_request(
 
             let response = match outcome {
                 Ok(response) => {
-                    peer.edition_statistics.end_request_with_success(elapsed);
-                    response
+                    // Empty response is not a valid candidate.
+                    if !response.is_empty() { 
+                        peer.edition_statistics.end_request_with_success(elapsed);
+                        Some(response)
+                    } else {
+                        peer.edition_statistics.end_request_with_failure();
+                        None
+                    }
                 }
                 Err(err) => {
                     log::warn!("error asking {peer_id} for latest: {err}");
                     peer.edition_statistics.end_request_with_failure();
-                    return None;
+                    None
                 }
             };
 
-            Some(response)
+            response
         }
     })
     .await
@@ -234,8 +240,13 @@ async fn get_identity(
 
             let response = match outcome {
                 Ok(response) => {
-                    peer.edition_statistics.end_request_with_success(elapsed);
-                    response
+                    // Empty response is not a valid candidate.
+                    if !response.is_empty() {
+                        peer.edition_statistics.end_request_with_success(elapsed);
+                        Some(response)
+                    } else {
+                        None
+                    }
                 }
                 Err(err) => {
                     log::warn!("error asking {peer_id} for latest: {err}");
@@ -244,7 +255,7 @@ async fn get_identity(
                 }
             };
 
-            Some(response)
+            response
         }
     })
     .await

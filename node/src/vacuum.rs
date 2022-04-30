@@ -102,7 +102,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 pub async fn run_vacuum_daemon() {
     const TIMING_BUFFER_SIZE: usize = 7;
     const VACUUM_TIMESHARE: f64 = 0.05;
-    const MIN_INTERLUDE: Duration = Duration::from_secs(2);
+    const MIN_INTERLUDE: Duration = Duration::from_secs(30);
 
     let mut last_timings = VecDeque::new();
     let mut push_timing = |timing| {

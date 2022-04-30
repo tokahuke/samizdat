@@ -31,7 +31,7 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_NODE", long, default_value = "12")]
     pub max_query_rate_per_node: f64,
     /// The maximum number of candidates to return to the client.
-    #[structopt(env = "SAMIZDAT_MAX_CANDIDATES", long, default_value = "1")]
+    #[structopt(env = "SAMIZDAT_MAX_CANDIDATES", long, default_value = "3")]
     pub max_candidates: usize,
     /// Other servers to which to listen to.
     #[structopt(env = "SAMIZDAT_PARTNERS", long)]

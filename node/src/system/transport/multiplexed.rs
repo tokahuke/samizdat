@@ -50,7 +50,7 @@ async fn receiver_task(
 
                 // Decode id:
                 let channel_id = u32::from_be_bytes(id_buf);
-                log::info!("stream arrived for channel {:x}", channel_id);
+                log::debug!("stream arrived for channel {:x}", channel_id);
 
                 // Send to the apropriate channel.
                 let guard = senders.lock().await;

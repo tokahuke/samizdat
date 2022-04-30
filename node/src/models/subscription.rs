@@ -68,11 +68,15 @@ impl SubscriptionRef {
     }
 
     pub fn build(subscription: Subscription) -> Result<SubscriptionRef, crate::Error> {
-        db().put_cf(
+        let mut batch = rocksdb::WriteBatch::default();
+
+        batch.put_cf(
             Table::Subscriptions.get(),
             &subscription.public_key.as_bytes(),
             bincode::serialize(&subscription).expect("can serialize"),
-        )?;
+        );
+
+        db().write(batch)?;
 
         Ok(SubscriptionRef {
             public_key: subscription.public_key,
@@ -126,11 +130,11 @@ impl SubscriptionRef {
     /// Refresh the underlying series using and *already validated* edition.
     pub async fn refresh(&self, edition: Edition) -> Result<(), crate::Error> {
         let collection = edition.collection();
-        let content_hash = collection.locator_for("_inventory".into()).hash();
+        let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
 
         SeriesRef::new(edition.public_key().clone()).advance(&edition)?;
 
-        if let Some(item) = hubs().query(content_hash, QueryKind::Item).await {
+        if let Some(item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
             if let Some(content) = item.content()? {
                 let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
                     crate::Error::from(format!(

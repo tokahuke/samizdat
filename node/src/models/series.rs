@@ -26,7 +26,8 @@ pub struct SeriesOwner {
 
 impl Droppable for SeriesOwner {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        self.series().drop_if_exists_with(batch)?;
+        // Bad idea to drop series and not really worth it space wise.
+        // self.series().drop_if_exists_with(batch)?;
         batch.delete_cf(Table::SeriesOwners.get(), self.name.as_bytes());
 
         Ok(())
@@ -190,14 +191,18 @@ impl FromStr for SeriesRef {
     }
 }
 
-impl Droppable for SeriesRef {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        batch.delete_cf(Table::Editions.get(), self.key());
-        batch.delete_cf(Table::Series.get(), self.key());
+// Bad idea to drop series and not really worth it space wise.
 
-        Ok(())
-    }
-}
+// impl Droppable for SeriesRef {
+//     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+//         // TODO: no, you dummy! Drop _prefix_
+//         // TODO: and don't forget to drop
+//         batch.delete_cf(Table::Editions.get(), self.key());
+//         batch.delete_cf(Table::Series.get(), self.key());
+
+//         Ok(())
+//     }
+// }
 
 impl SeriesRef {
     pub fn new(public_key: Key) -> SeriesRef {
@@ -311,15 +316,31 @@ impl SeriesRef {
             return Err(crate::Error::DifferentPublicKeys);
         }
 
-        db().put_cf(
+        let mut batch = rocksdb::WriteBatch::default();
+
+        // Insert series if you don't have it yet.
+        batch.put_cf(
+            Table::Series.get(),
+            self.key(),
+            bincode::serialize(&self).expect("can serialize"),
+        );
+        batch.put_cf(
             Table::Editions.get(),
             edition.key(),
             bincode::serialize(&edition).expect("can serialize"),
-        )?;
+        );
+
+        db().write(batch)?;
 
         // TODO: do some cleanup on the old values.
 
         Ok(())
+    }
+
+    pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
+        db().iterator_cf(Table::Series.get(), IteratorMode::Start)
+            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .collect::<Result<Vec<_>, crate::Error>>()
     }
 }
 
@@ -383,6 +404,12 @@ impl Edition {
             edition,
         }
     }
+
+    pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
+        db().iterator_cf(Table::Editions.get(), IteratorMode::Start)
+            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .collect::<Result<Vec<_>, crate::Error>>()
+    }
 }
 
 #[test]
@@ -399,9 +426,7 @@ fn generate_series_ownership() {
 fn validate_edition() {
     let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
     let _series = owner.series();
-
     let current_collection = CollectionRef::rand();
-
     let edition = owner.sign(current_collection, None);
 
     assert!(edition.is_valid())

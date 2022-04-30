@@ -9,6 +9,7 @@ mod redirects;
 mod resolvers;
 mod series;
 mod subscriptions;
+mod editions;
 
 pub use auth::authenticate;
 
@@ -77,6 +78,7 @@ fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + C
         objects::api(),
         collections::api(),
         series::api(),
+        editions::api(),
         identities::api(),
         subscriptions::api(),
         auth::api(),
