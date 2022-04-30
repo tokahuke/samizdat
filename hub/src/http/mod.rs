@@ -1,8 +1,11 @@
 mod auth;
 
-use futures::Future;
+use futures::{Future, StreamExt};
+use serde_derive::Deserialize;
+use std::net::SocketAddr;
 use warp::Filter;
 
+use crate::rpc::node_sampler::QuerySampler;
 use crate::rpc::ROOM;
 use crate::{balanced_or_tree, CLI};
 
@@ -75,10 +78,10 @@ pub fn serve() -> impl Future<Output = ()> {
 }
 
 fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(connected())
+    balanced_or_tree!(connected_ips(), resolution_order())
 }
 
-fn connected() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn connected_ips() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path("connected-ips")
         .and(warp::get())
         .and_then(|| async {
@@ -89,6 +92,28 @@ fn connected() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                 .map(|(addr, _)| *addr)
                 .collect::<Vec<_>>();
             Ok(api_reply(Ok(ips))) as Result<_, warp::Rejection>
+        })
+        .map(tuple)
+}
+
+fn resolution_order() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
+    #[derive(Deserialize)]
+    struct QueryParameters {
+        addr: SocketAddr,
+    }
+
+    warp::path!("resolution-order")
+        .and(warp::get())
+        .and(warp::query())
+        .and_then(|QueryParameters { addr }| async move {
+            let resolution_order = ROOM
+                .stream_peers(QuerySampler, addr)
+                .await
+                .map(|(peer_ip, _)| peer_ip)
+                .collect::<Vec<_>>()
+                .await;
+            Ok(api_reply(Ok(resolution_order))) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

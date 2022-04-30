@@ -34,7 +34,7 @@ impl Room {
         self.participants.write().await.remove(&addr);
     }
 
-    async fn stream_peers<'a>(
+    pub async fn stream_peers<'a>(
         &'a self,
         sampler: impl 'a + PrioritySampler,
         current: SocketAddr,
@@ -53,7 +53,7 @@ impl Room {
         futures::stream::iter(sampler)
     }
 
-    pub(super) fn with_peers<'a, F, FFut, U>(
+    pub fn with_peers<'a, F, FFut, U>(
         &'a self,
         sampler: impl 'a + PrioritySampler,
         current: SocketAddr,

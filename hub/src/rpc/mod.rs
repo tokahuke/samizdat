@@ -1,6 +1,7 @@
+pub mod node_sampler;
+
 mod hub_as_node;
 mod hub_server;
-mod node_sampler;
 mod room;
 
 use futures::prelude::*;
@@ -18,8 +19,8 @@ use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
 
 use crate::replay_resistance::ReplayResistance;
-use crate::CLI;
 use crate::utils;
+use crate::CLI;
 
 use self::hub_server::HubServer;
 use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
@@ -124,8 +125,7 @@ async fn candidates_for_resolution(
                         .filter(|candidate| validate_riddles(&candidate.validation_riddles))
                         .filter(|candidate| {
                             // IPv6 with IPv6; IPv4 with IPv4!
-                            candidate.peer_addr.ip().is_ipv6()
-                                == client_addr.ip().is_ipv6()
+                            candidate.peer_addr.ip().is_ipv6() == client_addr.ip().is_ipv6()
                         })
                         .collect::<Vec<_>>();
 
@@ -266,7 +266,8 @@ pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Err
         })
         .map(|new_connection| {
             // Get peer address:
-            let client_addr = utils::socket_to_canonical(new_connection.connection.remote_address());
+            let client_addr =
+                utils::socket_to_canonical(new_connection.connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 
@@ -314,7 +315,8 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
         })
         .for_each_concurrent(Some(CLI.max_connections), |new_connection| async move {
             // Get peer address:
-            let client_addr = utils::socket_to_canonical(new_connection.connection.remote_address());
+            let client_addr =
+                utils::socket_to_canonical(new_connection.connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 

@@ -138,7 +138,7 @@ pub(super) fn sample(
     std::iter::from_fn(move || queue.pop().map(|entry| entry.content))
 }
 
-pub(super) trait PrioritySampler {
+pub trait PrioritySampler {
     fn sample_priority(&self, node: &Node) -> f64;
 }
 
