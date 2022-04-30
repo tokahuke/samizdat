@@ -159,7 +159,7 @@ async fn edition_for_request(
     client_addr: SocketAddr,
     latest: Arc<EditionRequest>,
 ) -> Vec<EditionResponse> {
-    ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
+    let responses = ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
         let latest = latest.clone();
         async move {
             log::debug!("starting resolve latest edition for {peer_id}");
@@ -188,7 +188,11 @@ async fn edition_for_request(
     .await
     .into_iter()
     .flatten()
-    .collect::<Vec<_>>()
+    .collect::<Vec<_>>();
+
+    log::debug!("Client {client_addr} receives {responses:?}");
+
+    responses
 }
 
 async fn announce_edition(
@@ -265,7 +269,7 @@ pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Err
         .filter_map(|connecting| async move {
             connecting
                 .await
-                .map_err(|err| log::warn!("failed to establish QUIC connection: {}", err))
+                .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
                 .ok()
         })
         .map(|new_connection| {
