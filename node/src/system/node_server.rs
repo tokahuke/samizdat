@@ -152,6 +152,8 @@ impl Node for NodeServer {
         _: context::Context,
         latest: Arc<EditionRequest>,
     ) -> Vec<EditionResponse> {
+        log::info!("got {latest:?}");
+
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle) {
             let editions = series.get_editions();
             match editions.as_ref().map(|editions| editions.first()) {

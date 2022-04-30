@@ -4,6 +4,8 @@ use quinn::{Connecting, Endpoint, Incoming, NewConnection};
 use samizdat_common::{quic, BincodeOverQuic};
 use std::net::SocketAddr;
 
+use crate::utils;
+
 use super::matcher::Matcher;
 
 const MAX_TRANSFER_SIZE: usize = 2_048;
@@ -25,8 +27,10 @@ impl ConnectionManager {
         let matcher_task = matcher.clone();
         tokio::spawn(async move {
             while let Some(connecting) = incoming.next().await {
+                let peer_addr = utils::socket_to_canonical(connecting.remote_address());
+                log::info!("{} arrived", peer_addr);
                 matcher_task
-                    .arrive(connecting.remote_address(), connecting)
+                    .arrive(peer_addr, connecting)
                     .await;
             }
         });
@@ -87,12 +91,14 @@ impl ConnectionManager {
         };
 
         match join(incoming, outgoing).await {
-            (Err(_), Ok(outgoing)) => {
+            (Err(err), Ok(outgoing)) => {
                 log::info!("only outgoing succeeded");
+                log::info!("incoming got: {err}");
                 Ok(outgoing)
             }
-            (Ok(incoming), Err(_)) => {
+            (Ok(incoming), Err(err)) => {
                 log::info!("only incoming succeeded");
+                log::info!("outgoing got: {err}");
                 Ok(incoming)
             }
             (Ok(incoming), Ok(outgoing)) => {

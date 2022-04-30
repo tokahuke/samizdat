@@ -73,6 +73,7 @@ async fn receiver_task(
             }
             Err(err) => {
                 log::warn!("error receiving new stream: {}", err);
+                break;
             }
         }
     }
