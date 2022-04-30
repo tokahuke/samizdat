@@ -15,7 +15,7 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
     /// Maximum number of simultaneous connections.
-    #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS", long, default_value = "1024")]
+    #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS", long, default_value = "2048")]
     pub max_connections: usize,
     /// Maximum number of _simultaneous_ resolutions per query.
     #[structopt(env = "SAMIZDAT_MAX_RESOLUTIONS_PER_QUERY", long, default_value = "12")]
@@ -33,6 +33,9 @@ pub struct Cli {
     /// Other servers to which to listen to.
     #[structopt(env = "SAMIZDAT_PARTNERS", long)]
     pub partners: Option<Vec<AddrToResolve>>,
+    /// The port for the monitoring http server.
+    #[structopt(env = "SAMIZDAT_HTTP_PORT", long, default_value = "45180")]
+    pub http_port: u16,
 }
 
 /// A flexible representation of an address in the internet.

@@ -1,21 +1,10 @@
-//! HTTP API for the Samizdat Node.
-
 mod auth;
-mod collections;
-mod identities;
-mod kvstore;
-mod objects;
-mod redirects;
-mod resolvers;
-mod series;
-mod subscriptions;
-
-pub use auth::authenticate;
 
 use futures::Future;
 use warp::Filter;
 
-use crate::{balanced_or_tree, cli};
+use crate::rpc::ROOM;
+use crate::{balanced_or_tree, CLI};
 
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
     match err {
@@ -61,59 +50,8 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
-fn html(rendered: String) -> impl warp::Reply {
-    warp::reply::with_header(
-        warp::reply::with_status(rendered, http::StatusCode::OK),
-        http::header::CONTENT_TYPE,
-        "text/html; charset=UTF-8",
-    )
-}
-
-/// The entrypoint of the Samizdat node public HTTP API.
-fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        kvstore::api(),                // kvstore not subject to redirect rules.
-        redirects::general_redirect(), // redirect rules here...
-        objects::api(),
-        collections::api(),
-        series::api(),
-        identities::api(),
-        subscriptions::api(),
-        auth::api(),
-        post_vacuum(),
-    )
-    .recover(|rejection: warp::Rejection| async move {
-        if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
-            Ok(warp::reply::with_status(
-                forbidden.to_string(),
-                http::StatusCode::FORBIDDEN,
-            ))
-        } else if let Some(unauthorized) = rejection.find::<auth::Unauthorized>() {
-            Ok(warp::reply::with_status(
-                unauthorized.to_string(),
-                http::StatusCode::UNAUTHORIZED,
-            ))
-        } else if let Some(error) = rejection.find::<crate::Error>() {
-            Ok(warp::reply::with_status(
-                error.to_string(),
-                http::StatusCode::BAD_REQUEST,
-            ))
-        } else {
-            Err(rejection)
-        }
-    })
-}
-
-/// Triggers a manual vacuum round.
-fn post_vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::post()
-        .and(warp::path!("_vacuum"))
-        .map(|| crate::vacuum::vacuum())
-        .map(api_reply)
-}
-
 pub fn serve() -> impl Future<Output = ()> {
-    let public_server = warp::filters::addr::remote()
+    let server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {
             if let Some(addr) = addr {
                 if addr.ip().to_canonical().is_loopback() {
@@ -133,5 +71,24 @@ pub fn serve() -> impl Future<Output = ()> {
         .with(warp::log("api"));
 
     // Run public server:
-    warp::serve(public_server).run(([0; 16], cli().port))
+    warp::serve(server).run(([0; 16], CLI.http_port))
+}
+
+fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    balanced_or_tree!(connected())
+}
+
+fn connected() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path("connected-ips")
+        .and(warp::get())
+        .and_then(|| async {
+            let ips = ROOM
+                .raw_participants()
+                .await
+                .iter()
+                .map(|(addr, _)| *addr)
+                .collect::<Vec<_>>();
+            Ok(api_reply(Ok(ips))) as Result<_, warp::Rejection>
+        })
+        .map(tuple)
 }

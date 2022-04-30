@@ -19,7 +19,6 @@ pub use db::db;
 use futures::{prelude::*, TryStreamExt};
 use std::panic;
 use tokio::task;
-use warp::Filter;
 
 use samizdat_common::logger;
 
@@ -81,28 +80,8 @@ async fn main() -> Result<(), crate::Error> {
     // Start vacuum:
     tokio::spawn(crate::vacuum::run_vacuum_daemon());
 
-    // Describe server:
-    let public_server = warp::filters::addr::remote()
-        .and_then(|addr: Option<std::net::SocketAddr>| async move {
-            if let Some(addr) = addr {
-                if addr.ip().to_canonical().is_loopback() {
-                    return Err(warp::reject::not_found());
-                }
-            }
-
-            Ok(warp::reply::with_status(
-                "cannot connect outside loopback",
-                ::http::StatusCode::FORBIDDEN,
-            ))
-        })
-        .or(warp::get().and(warp::path::end()).map(|| {
-            warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
-        }))
-        .or(http::api())
-        .with(warp::log("api"));
-
     // Run public server:
-    let server = tokio::spawn(warp::serve(public_server).run(([0; 16], cli().port)));
+    let server = tokio::spawn(http::serve());
 
     maybe_resume_panic(server.await);
 

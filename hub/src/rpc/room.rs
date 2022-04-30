@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::CLI;
 
@@ -73,5 +73,11 @@ impl Room {
             .buffer_unordered(CLI.max_resolutions_per_query)
             .take(CLI.max_candidates)
             .collect::<Vec<_>>()
+    }
+
+    pub async fn raw_participants<'a>(
+        &'a self,
+    ) -> RwLockReadGuard<'a, BTreeMap<SocketAddr, Arc<Node>>> {
+        self.participants.read().await
     }
 }

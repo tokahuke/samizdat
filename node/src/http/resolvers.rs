@@ -141,22 +141,26 @@ pub async fn resolve_series(
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving series {series}/{name}");
+    log::info!("Resolving series item {series}/{name}");
 
-    log::info!("Ensuring series is fresh");
+    log::info!("Ensuring series {series} is fresh");
     if !series.is_fresh()? {
-        log::info!("Series is not fresh. Ask the network");
+        log::info!("Series is not fresh. Asking the network...");
         if let Some(latest) = hubs().get_latest(&series).await {
-            log::info!("Found an edition (new or existing). Inserting");
+            log::info!("Found an edition (new or existing): {latest:?}. Inserting");
             series.advance(&latest)?;
+            log::info!("Setting series as fresh");
+            series.refresh()?;
+        } else {
+            log::info!("No edition returned from the network for series {series}. Does it exist?");
         }
-
-        log::info!("Setting series as fresh");
-        series.refresh()?;
     }
 
     log::info!("Trying to find path in each edition");
+    let mut empty = true;
+
     for edition in series.get_editions()? {
+        empty = false;
         log::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());
 
@@ -183,6 +187,10 @@ pub async fn resolve_series(
             )
             .await;
         }
+    }
+
+    if empty {
+        log::info!("No local editions found for series {series}");
     }
 
     let not_resolved = NotResolved {

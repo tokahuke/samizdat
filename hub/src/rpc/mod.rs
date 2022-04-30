@@ -27,12 +27,12 @@ use self::room::Room;
 const MAX_LENGTH: usize = 2_048;
 
 lazy_static! {
-    static ref ROOM: Room = Room::new();
-    static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
+    pub static ref ROOM: Room = Room::new();
+    pub static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
 }
 
 #[derive(Debug)]
-struct Node {
+pub struct Node {
     query_statistics: Statistics,
     edition_statistics: Statistics,
     client: NodeClient,
