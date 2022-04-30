@@ -6,6 +6,7 @@ mod http;
 mod replay_resistance;
 mod rpc;
 mod slow_compiler_workaround;
+mod utils;
 
 pub use db::db;
 pub use samizdat_common::Error;

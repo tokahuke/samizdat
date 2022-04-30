@@ -19,6 +19,7 @@ use samizdat_common::{quic, Riddle};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::CLI;
+use crate::utils;
 
 use self::hub_server::HubServer;
 use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
@@ -46,7 +47,7 @@ impl Node {
             edition_statistics: Statistics::default(),
             client,
             // Make tunneled IPv4 addresses actual IPv4 addresses.
-            addr: (addr.ip().to_canonical(), addr.port()).into(),
+            addr,
         }
     }
 }
@@ -123,8 +124,8 @@ async fn candidates_for_resolution(
                         .filter(|candidate| validate_riddles(&candidate.validation_riddles))
                         .filter(|candidate| {
                             // IPv6 with IPv6; IPv4 with IPv4!
-                            candidate.peer_addr.ip().to_canonical().is_ipv6()
-                                == client_addr.ip().to_canonical().is_ipv6()
+                            candidate.peer_addr.ip().is_ipv6()
+                                == client_addr.ip().is_ipv6()
                         })
                         .collect::<Vec<_>>();
 
@@ -265,7 +266,7 @@ pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Err
         })
         .map(|new_connection| {
             // Get peer address:
-            let client_addr = new_connection.connection.remote_address();
+            let client_addr = utils::socket_to_canonical(new_connection.connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 
@@ -313,7 +314,7 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
         })
         .for_each_concurrent(Some(CLI.max_connections), |new_connection| async move {
             // Get peer address:
-            let client_addr = new_connection.connection.remote_address();
+            let client_addr = utils::socket_to_canonical(new_connection.connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 
