@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tarpc::context;
 
 use samizdat_common::cipher::TransferCipher;
+use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{ChannelAddr, Hash, Riddle};
 
@@ -16,6 +17,7 @@ use super::transport::ChannelManager;
 #[derive(Clone)]
 pub struct NodeServer {
     pub channel_manager: Arc<ChannelManager>,
+    pub candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl NodeServer {
@@ -145,6 +147,15 @@ impl Node for NodeServer {
             QueryKind::Object => self.resolve_object(resolution).await,
             QueryKind::Item => self.resolve_item(resolution).await,
         }
+    }
+
+    async fn recv_candidate(
+        self,
+        _: context::Context,
+        candidate_channel: CandidateChannelId,
+        candidate: Candidate,
+    ) {
+        self.candidate_channels.send(candidate_channel, candidate);
     }
 
     async fn get_edition(

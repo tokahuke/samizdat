@@ -1,4 +1,5 @@
 use futures::prelude::*;
+use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::context;
@@ -8,6 +9,7 @@ use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 use samizdat_common::rpc::*;
 use samizdat_common::ChannelAddr;
 
+use crate::rpc::ROOM;
 use crate::CLI;
 
 use super::{
@@ -19,13 +21,14 @@ struct HubServerInner {
     call_semaphore: Semaphore,
     call_throttle: Mutex<Interval>,
     addr: SocketAddr,
+    candidate_channels: KeyedChannel<Candidate>,
 }
 
 #[derive(Clone)]
 pub struct HubServer(Arc<HubServerInner>);
 
 impl HubServer {
-    pub fn new(addr: SocketAddr) -> HubServer {
+    pub fn new(addr: SocketAddr, candidate_channels: KeyedChannel<Candidate>) -> HubServer {
         let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -35,6 +38,7 @@ impl HubServer {
                 1. / CLI.max_query_rate_per_node,
             ))),
             addr,
+            candidate_channels,
         }))
     }
 
@@ -65,7 +69,7 @@ impl HubServer {
 impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
-        self.throttle(|server| async move {
+        self.throttle(move |server| async move {
             log::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
@@ -97,17 +101,61 @@ impl Hub for HubServer {
                 kind: query.kind,
             };
 
-            // And then send the request to the peers:
-            let candidates = candidates_for_resolution(ctx, client_addr, resolution).await;
+            // And then create a candidate channel to forward candidate peers:
+            let candidate_channel: CandidateChannelId = rand::random();
+
+            let node = if let Some(node) = ROOM.get(client_addr).await {
+                node
+            } else {
+                return QueryResponse::NoReverseConnection;
+            };
+
+            // Forward all candidate peers:
+            let candidate_channels = server.0.candidate_channels.clone();
+            tokio::spawn(async move {
+                // TODO: maybe wait some millis to make sure query response has arrived?
+                let candidates = candidates_for_resolution(
+                    ctx,
+                    client_addr,
+                    resolution,
+                    candidate_channels.clone(),
+                );
+                let mut pinned = Box::pin(candidates);
+
+                while let Some(candidate) = pinned.next().await {
+                    let channel_addr = candidate.channel_addr;
+                    let outcome = node
+                        .client
+                        .recv_candidate(ctx.clone(), candidate_channel, candidate)
+                        .await;
+
+                    if let Err(err) = outcome {
+                        log::warn!(
+                            "Error sending candidate {channel_addr} to {}: {err}",
+                            node.addr
+                        );
+                    }
+                }
+            });
 
             log::debug!("query done");
 
-            QueryResponse::Resolved {
-                candidates: candidates
-                    .into_iter()
-                    .map(|candidate| ChannelAddr::new(candidate.peer_addr, channel))
-                    .collect(),
-            }
+            QueryResponse::Resolved { candidate_channel }
+        })
+        .await
+    }
+
+    async fn recv_candidate(
+        self,
+        _: context::Context,
+        candidate_channel: CandidateChannelId,
+        candidate: Candidate,
+    ) {
+        self.throttle(|server| async move {
+            server
+                .0
+                .candidate_channels
+                .send(candidate_channel, candidate)
         })
         .await
     }

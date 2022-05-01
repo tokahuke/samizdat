@@ -6,7 +6,6 @@ use crate::api::{self};
 
 use super::show_table;
 
-
 pub async fn ls(series_key: Option<String>) -> Result<(), anyhow::Error> {
     pub async fn ls_series(_series_key: String) -> Result<(), anyhow::Error> {
         todo!()

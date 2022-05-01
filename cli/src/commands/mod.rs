@@ -1,9 +1,9 @@
 pub mod auth;
 pub mod collection;
+pub mod edition;
 pub mod identity;
 pub mod series;
 pub mod subscription;
-pub mod edition;
 
 use anyhow::Context;
 use futures::prelude::*;

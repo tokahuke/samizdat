@@ -34,6 +34,10 @@ impl Room {
         self.participants.write().await.remove(&addr);
     }
 
+    pub async fn get(&self, addr: SocketAddr) -> Option<Arc<Node>> {
+        self.participants.read().await.get(&addr).cloned()
+    }
+
     pub async fn stream_peers<'a>(
         &'a self,
         sampler: impl 'a + PrioritySampler,
@@ -66,7 +70,7 @@ impl Room {
         sampler: impl 'a + PrioritySampler,
         current: SocketAddr,
         map: F,
-    ) -> impl 'a + Future<Output = Vec<U>>
+    ) -> impl 'a + Stream<Item = U>
     where
         F: 'a + Fn(SocketAddr, Arc<Node>) -> FFut,
         FFut: 'a + Future<Output = Option<U>>,
@@ -92,7 +96,6 @@ impl Room {
             .map(|outcome| async move { outcome })
             .buffer_unordered(CLI.max_resolutions_per_query)
             .take(CLI.max_candidates)
-            .collect::<Vec<_>>()
     }
 
     pub async fn raw_participants<'a>(

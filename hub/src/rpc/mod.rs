@@ -6,17 +6,18 @@ mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
+use samizdat_common::keyed_channel::KeyedChannel;
 use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::Mutex;
 
-use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
+use samizdat_common::{rpc::*, ChannelAddr};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
@@ -53,11 +54,12 @@ impl Node {
     }
 }
 
-async fn candidates_for_resolution(
+fn candidates_for_resolution(
     ctx: context::Context,
     client_addr: SocketAddr,
     mut resolution: Resolution,
-) -> Vec<Candidate> {
+    candidate_channels: KeyedChannel<Candidate>,
+) -> impl Send + Stream<Item = Candidate> {
     log::debug!("Client {client_addr} requested {resolution:?}");
 
     // Go one step down with the resolution:
@@ -68,39 +70,29 @@ async fn candidates_for_resolution(
     resolution.validation_nonces.push(validation_riddle.rand);
     let resolution = Arc::new(resolution);
 
-    // Ooops! Empty query resolution...
-    if resolution.content_riddles.is_empty() {
-        log::info!("Content riddles empty");
-        return vec![];
-    }
-
     // Then query peers:
     ROOM.with_peers(QuerySampler, client_addr, move |peer_id, peer| {
         log::debug!("Pairing client {client_addr} with peer {peer_id}");
         let resolution = resolution.clone();
         let validation_riddle = validation_riddle.clone();
+        let candidate_channels = candidate_channels.clone();
 
         async move {
-            log::info!("starting resolve for {peer_id}");
-
-            peer.query_statistics.start_request();
-
-            let start = Instant::now();
+            log::debug!("starting resolve for {peer_id}");
+            let experiment = peer.query_statistics.start_experiment();
             let outcome = peer.client.resolve(ctx, resolution.clone()).await;
-            let elapsed = start.elapsed();
 
             let response = match outcome {
                 Ok(response) => response,
                 Err(err) => {
                     log::warn!("error asking {peer_id} to resolve: {err}");
-                    peer.query_statistics.end_request_with_failure();
                     return None;
                 }
             };
 
-            log::info!("resolve done for {peer_id}");
+            log::debug!("resolve done for {peer_id}");
 
-            let validate_riddles = |riddles: &[Riddle]| {
+            let validate_riddles = move |riddles: &[Riddle]| {
                 // `>=`: there can be more added nonces down the line because of further redirects.
                 riddles.len() >= resolution.validation_nonces.len()
                     // Check that *your* riddle is correct
@@ -117,41 +109,46 @@ async fn candidates_for_resolution(
                 ResolutionResponse::Found(validation_riddles)
                     if validate_riddles(&validation_riddles) =>
                 {
-                    peer.query_statistics.end_request_with_success(elapsed);
-                    Some(vec![Candidate {
-                        peer_addr: peer.addr,
-                        validation_riddles,
-                    }])
+                    experiment.end_with_success();
+                    let channel_id = rand::random();
+                    let channel_addr = ChannelAddr::new(peer.addr, channel_id);
+                    Some(Box::pin(stream::once(async move {
+                        Candidate {
+                            channel_addr,
+                            validation_riddles,
+                        }
+                    }))
+                        as Pin<Box<dyn Send + Stream<Item = Candidate>>>)
                 }
-                ResolutionResponse::Redirect(candidates) => {
-                    let valid_candidates = candidates
-                        .into_iter()
-                        .filter(|candidate| validate_riddles(&candidate.validation_riddles))
-                        .filter(|candidate| {
-                            // IPv6 with IPv6; IPv4 with IPv4!
-                            candidate.peer_addr.ip().is_ipv6() == client_addr.ip().is_ipv6()
-                        })
-                        .collect::<Vec<_>>();
+                ResolutionResponse::Redirect(candidate_channel) => {
+                    let mut maybe_experiment = Some(experiment);
+                    let valid_candidates =
+                        candidate_channels
+                            .recv_stream(candidate_channel)
+                            .filter(move |candidate| {
+                                let is_valid = validate_riddles(&candidate.validation_riddles);
+                                // IPv6 with IPv6; IPv4 with IPv4!
+                                let ip_version_matches =
+                                    candidate.channel_addr.peer_addr().ip().is_ipv6()
+                                        == client_addr.ip().is_ipv6();
 
-                    if !valid_candidates.is_empty() {
-                        peer.query_statistics.end_request_with_success(elapsed);
-                        Some(valid_candidates)
-                    } else {
-                        peer.query_statistics.end_request_with_failure();
-                        None
-                    }
+                                async move { is_valid && ip_version_matches }
+                            }).inspect(move |_| {
+                                // End experiment with success on first received candidate
+                                if let Some(experiment) = maybe_experiment.take() {
+                                    experiment.end_with_success();
+                                }
+                            });
+
+                    Some(Box::pin(valid_candidates) as Pin<Box<dyn Send + Stream<Item = Candidate>>>)
                 }
                 _ => {
-                    peer.query_statistics.end_request_with_failure();
                     None
                 }
             }
         }
     })
-    .await
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
+    .flatten_unordered(10)
 }
 
 async fn edition_for_request(
@@ -159,42 +156,38 @@ async fn edition_for_request(
     client_addr: SocketAddr,
     latest: Arc<EditionRequest>,
 ) -> Vec<EditionResponse> {
-    let responses = ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
-        let latest = latest.clone();
-        async move {
-            log::debug!("starting resolve latest edition for {peer_id}");
+    let responses = ROOM
+        .with_peers(EditionSampler, client_addr, |peer_id, peer| {
+            let latest = latest.clone();
+            async move {
+                log::debug!("starting resolve latest edition for {peer_id}");
+                let experiment = peer.edition_statistics.start_experiment();
+                let outcome = peer.client.get_edition(ctx, latest).await;
 
-            peer.edition_statistics.start_request();
-
-            let start = Instant::now();
-            let outcome = peer.client.get_edition(ctx, latest).await;
-            let elapsed = start.elapsed();
-
-            let response = match outcome {
-                Ok(response) => {
-                    // Empty response is not a valid candidate.
-                    if !response.is_empty() { 
-                        peer.edition_statistics.end_request_with_success(elapsed);
-                        Some(response)
-                    } else {
-                        peer.edition_statistics.end_request_with_failure();
+                let response = match outcome {
+                    Ok(response) => {
+                        // Empty response is not a valid candidate.
+                        if !response.is_empty() {
+                            experiment.end_with_success();
+                            Some(response)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(err) => {
+                        log::warn!("error asking {peer_id} for latest: {err}");
                         None
                     }
-                }
-                Err(err) => {
-                    log::warn!("error asking {peer_id} for latest: {err}");
-                    peer.edition_statistics.end_request_with_failure();
-                    None
-                }
-            };
+                };
 
-            response
-        }
-    })
-    .await
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>();
+                response
+            }
+        })
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
 
     log::debug!("Client {client_addr} receives {responses:?}");
 
@@ -220,6 +213,7 @@ async fn announce_edition(
             }
         }
     })
+    .collect::<Vec<_>>()
     .await;
 }
 
@@ -232,17 +226,14 @@ async fn get_identity(
     ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
         let request = request.clone();
         async move {
-            peer.edition_statistics.start_request();
-
-            let start = Instant::now();
+            let experiment = peer.edition_statistics.start_experiment();
             let outcome = peer.client.get_identity(ctx, request).await;
-            let elapsed = start.elapsed();
 
             let response = match outcome {
                 Ok(response) => {
                     // Empty response is not a valid candidate.
                     if !response.is_empty() {
-                        peer.edition_statistics.end_request_with_success(elapsed);
+                        experiment.end_with_success();
                         Some(response)
                     } else {
                         None
@@ -250,7 +241,6 @@ async fn get_identity(
                 }
                 Err(err) => {
                     log::warn!("error asking {peer_id} for latest: {err}");
-                    peer.edition_statistics.end_request_with_failure();
                     return None;
                 }
             };
@@ -258,13 +248,17 @@ async fn get_identity(
             response
         }
     })
+    .collect::<Vec<_>>()
     .await
     .into_iter()
     .flatten()
     .collect::<Vec<_>>()
 }
 
-pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Error> {
+pub async fn run_direct(
+    addrs: Vec<impl Into<SocketAddr>>,
+    candidate_channels: KeyedChannel<Candidate>,
+) -> Result<(), io::Error> {
     let all_incoming = addrs
         .into_iter()
         .map(|addr| {
@@ -297,7 +291,7 @@ pub async fn run_direct(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Err
             );
 
             // Set up server:
-            let server = HubServer::new(client_addr);
+            let server = HubServer::new(client_addr, candidate_channels.clone());
             let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
 
             log::info!("Connection from node (as server) {client_addr} accepted");
@@ -384,6 +378,6 @@ pub async fn run_partners() {
         .await;
 
     for partner in partners {
-        partner.await;
+        partner.await
     }
 }

@@ -159,7 +159,8 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
 
 /// Gets the content of a collection item using the series public key. This will give the
 /// best-effort latest version for this item.
-fn get_edition_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn get_edition_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
         .and(warp::get())
@@ -172,8 +173,7 @@ fn get_edition_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 }
 
 /// Lists all known public keys the node has seen, be they locally owned or not.
-fn get_all_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn get_all_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_series")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageSeries]))

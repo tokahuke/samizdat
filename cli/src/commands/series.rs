@@ -70,7 +70,6 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
     }
 }
 
-
 pub async fn ls_cached(series_name: Option<String>) -> Result<(), anyhow::Error> {
     pub async fn ls_cached_series(_series_name: String) -> Result<(), anyhow::Error> {
         todo!()
