@@ -199,14 +199,13 @@ impl SeriesCommand {
             }
             SeriesCommand::Ls { series_owner_name } => {
                 commands::series::ls(series_owner_name).await
-            },
+            }
             SeriesCommand::LsCached { series_name } => {
                 commands::series::ls_cached(series_name).await
             }
         }
     }
 }
-
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum EditionCommand {
@@ -217,9 +216,7 @@ pub enum EditionCommand {
 impl EditionCommand {
     async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            EditionCommand::Ls { series_key } => {
-                commands::edition::ls(series_key).await
-            },
+            EditionCommand::Ls { series_key } => commands::edition::ls(series_key).await,
         }
     }
 }

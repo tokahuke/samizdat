@@ -1,5 +1,6 @@
 pub mod cipher;
 pub mod heap_entry;
+pub mod keyed_channel;
 pub mod logger;
 pub mod pow;
 pub mod quic;

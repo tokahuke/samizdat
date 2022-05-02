@@ -29,9 +29,7 @@ impl ConnectionManager {
             while let Some(connecting) = incoming.next().await {
                 let peer_addr = utils::socket_to_canonical(connecting.remote_address());
                 log::info!("{} arrived", peer_addr);
-                matcher_task
-                    .arrive(peer_addr, connecting)
-                    .await;
+                matcher_task.arrive(peer_addr, connecting).await;
             }
         });
 

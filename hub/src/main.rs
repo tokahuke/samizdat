@@ -15,7 +15,7 @@ use std::panic;
 use structopt::StructOpt;
 use tokio::task;
 
-use samizdat_common::logger;
+use samizdat_common::{keyed_channel::KeyedChannel, logger};
 
 lazy_static::lazy_static! {
     pub static ref CLI: cli::Cli = cli::Cli::from_args();
@@ -42,10 +42,14 @@ async fn main() -> Result<(), crate::Error> {
     db::init_db()?;
 
     // Spawn services:
-    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(CLI.direct_addresses.clone()));
+    let candidate_channels = KeyedChannel::new();
+    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(
+        CLI.direct_addresses.clone(),
+        candidate_channels.clone(),
+    ));
     let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(CLI.reverse_addresses.clone()));
-    let http_server = tokio::spawn(http::serve());
     let partners = tokio::spawn(crate::rpc::run_partners());
+    let http_server = tokio::spawn(http::serve());
 
     // Await for services to end:
     maybe_resume_panic(direct_rpc_server.await);

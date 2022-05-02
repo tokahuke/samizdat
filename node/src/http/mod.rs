@@ -2,6 +2,7 @@
 
 mod auth;
 mod collections;
+mod editions;
 mod identities;
 mod kvstore;
 mod objects;
@@ -9,7 +10,6 @@ mod redirects;
 mod resolvers;
 mod series;
 mod subscriptions;
-mod editions;
 
 pub use auth::authenticate;
 
@@ -33,7 +33,7 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
         crate::Error::InvalidEdition => http::StatusCode::BAD_REQUEST,
         crate::Error::DifferentPublicKeys => http::StatusCode::BAD_REQUEST,
         crate::Error::NoHeaderRead => http::StatusCode::INTERNAL_SERVER_ERROR,
-        //_ => http::StatusCode::INTERNAL_SERVER_ERROR,
+        _ => http::StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 

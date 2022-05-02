@@ -10,16 +10,20 @@ pub use reconnect::Reconnect;
 
 use futures::prelude::*;
 use futures::stream;
+use samizdat_common::ChannelAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tarpc::client::NewClient;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio::time::Duration;
+use tokio::time::Instant;
+use tokio::time::{timeout_at, Duration};
 
 use samizdat_common::cipher::TransferCipher;
+use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
@@ -29,14 +33,15 @@ use crate::models::Identity;
 use crate::models::IdentityRef;
 use crate::models::{Edition, ObjectRef, SeriesRef};
 
-use node_server::NodeServer;
-use transport::{ChannelManager, ConnectionManager};
+use self::node_server::NodeServer;
+use self::transport::{ChannelManager, ConnectionManager};
 
-/// A single connection instance, which will be recreates by [`Reconnect`] on connection loss.
+/// A single connection instance, which will be recreated by [`Reconnect`] on connection loss.
 pub struct HubConnectionInner {
     client: HubClient,
     // connection_manager: Arc<ConnectionManager>,
     channel_manager: Arc<ChannelManager>,
+    candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl HubConnectionInner {
@@ -65,12 +70,14 @@ impl HubConnectionInner {
     async fn connect_reverse(
         reverse_addr: SocketAddr,
         connection_manager: Arc<ConnectionManager>,
+        candidate_channels: KeyedChannel<Candidate>,
     ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
         let transport = connection_manager.transport(reverse_addr).await?;
         let server_task = server::BaseChannel::with_defaults(transport).execute(
             NodeServer {
                 channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),
+                candidate_channels,
             }
             .serve(),
         );
@@ -89,10 +96,15 @@ impl HubConnectionInner {
         let (endpoint, incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
         let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
         let channel_manager = Arc::new(ChannelManager::new(connection_manager.clone()));
+        let candidate_channels = KeyedChannel::new();
         let (client, client_reset_recv) =
             Self::connect_direct(direct_addr, connection_manager.clone()).await?;
-        let server_reset_recv =
-            Self::connect_reverse(reverse_addr, connection_manager.clone()).await?;
+        let server_reset_recv = Self::connect_reverse(
+            reverse_addr,
+            connection_manager.clone(),
+            candidate_channels.clone(),
+        )
+        .await?;
 
         let reset_trigger = future::select(server_reset_recv, client_reset_recv).map(|_| ());
 
@@ -101,6 +113,7 @@ impl HubConnectionInner {
                 client,
                 // connection_manager,
                 channel_manager,
+                candidate_channels,
             },
             reset_trigger,
         ))
@@ -140,18 +153,29 @@ impl HubConnection {
         &self,
         content_hash: Hash,
         kind: QueryKind,
-    ) -> Result<Option<ObjectRef>, crate::Error> {
+    ) -> Result<ObjectRef, crate::Error> {
+        // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
             .map(|_| Riddle::new(&content_hash))
             .collect();
         let location_riddle = Riddle::new(&content_hash);
 
+        // Acquire hub connection:
         let inner = self.inner.get().await;
 
+        // Get the deadline of the request:
+        let context = context::current();
+        let request_duration = context
+            .deadline
+            .duration_since(SystemTime::now())
+            .expect("deadline is in the future");
+        let deadline = Instant::now() + request_duration;
+
+        // Do the RPC call:
         let query_response = inner
             .client
             .query(
-                context::current(),
+                context,
                 Query {
                     content_riddles,
                     location_riddle,
@@ -160,53 +184,82 @@ impl HubConnection {
             )
             .await?;
 
-        let candidates = match query_response {
+        // Interpret RPC response:
+        let (candidate_channel, channel_id) = match query_response {
             QueryResponse::Replayed => return Err("hub has suspected replay attack".into()),
             QueryResponse::EmptyQuery => return Err("hub has received an empty query".into()),
+            QueryResponse::NoReverseConnection => {
+                return Err("hub said I have no reverse connection".into())
+            }
             QueryResponse::InternalError => {
                 return Err("hub has experienced an internal error".into())
             }
-            QueryResponse::Resolved { candidates } => candidates,
+            QueryResponse::Resolved { candidate_channel , channel_id } => (candidate_channel, channel_id),
         };
 
-        log::info!("Candidates for {}: {:?}", content_hash, candidates);
+        log::info!(
+            "Candidate channel for {}: {:x}",
+            content_hash,
+            candidate_channel
+        );
 
-        if candidates.is_empty() {
-            // Forget it!
-            return Ok(None);
-        }
-
-        let n_candidates = candidates.len();
-        let channel = stream::iter(candidates)
+        // Stream of peer candidates:
+        let mut candidates = inner
+            .candidate_channels
+            .recv_stream(candidate_channel)
             .map(|candidate| {
+                // TODO: check if candidate is valid. However, seems to be unnecessary, since
+                // transport will make sure no naughty people are involved.
+                let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
+                log::info!("Got candidate {channel_addr} for channel {candidate_channel:x}");
                 let channel_manager = inner.channel_manager.clone();
                 Box::pin(async move {
                     channel_manager
-                        .expect(candidate)
+                        .expect(channel_addr)
                         .await
                         .map_err(|err| {
-                            log::warn!("hole punching with {} failed: {}", candidate, err)
+                            log::warn!("Hole punching with {channel_addr} failed: {err}")
                         })
                         .ok()
                 })
             })
-            .buffer_unordered(n_candidates)
-            .filter_map(|done| Box::pin(async move { done })) // pointless box, compiler!
-            .next()
-            .await;
+            .buffer_unordered(4) // TODO: create CLI knob
+            .filter_map(|done| Box::pin(async move { done }));
 
-        // TODO: minor improvement... could we tee the object stream directly to the user? By now,
-        // we are waiting for the whole object to arrive, which is fine for most files, but ca be
-        // a pain for the bigger ones...
-        let outcome = match channel {
-            Some((_sender, receiver)) => Ok(Some(match kind {
-                QueryKind::Object => file_transfer::recv_object(receiver, content_hash).await?,
-                QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await?,
-            })),
-            None => Err(crate::Error::AllCandidatesFailed),
+        // For each candidate, "do the thing":
+        let outcome = loop {
+            match timeout_at(deadline, candidates.next()).await {
+                Ok(Some((_sender, receiver))) => {
+                    // TODO: minor improvement... could we tee the object stream directly to the
+                    // user? By now, we are waiting for the whole object to arrive, which is fine
+                    // for most files, but can be a pain for the bigger ones...
+                    let receive_outcome = match kind {
+                        QueryKind::Object => {
+                            file_transfer::recv_object(receiver, content_hash).await
+                        }
+                        QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await,
+                    };
+
+                    match receive_outcome {
+                        Ok(outcome) => break Ok(outcome),
+                        Err(err) => {
+                            log::warn!(
+                                "Candidate for query {kind:?} {content_hash} failed with: {err}"
+                            );
+                        }
+                    }
+                }
+                Ok(None) => {
+                    log::info!("Candidate channel {candidate_channel:x} dried");
+                    break Err(crate::Error::AllCandidatesFailed);
+                }
+                Err(_) => {
+                    break Err(crate::Error::Timeout);
+                }
+            }
         };
 
-        log::info!("query done: {:?} {}", kind, content_hash);
+        log::info!("Query done: {kind:?} {content_hash} {outcome:?}");
 
         outcome
     }
@@ -323,17 +376,14 @@ impl Hubs {
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
-                log::debug!("Querying {} for {content_hash} of {kind:?}", hub.name);
+                log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
                 (hub.name, hub.query(content_hash, kind).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
         while let Some((hub_name, result)) = results.next().await {
             match result {
-                Ok(Some(found)) => return Some(found),
-                Ok(None) => {
-                    log::debug!("got no result from {}", hub_name)
-                }
+                Ok(found) => return Some(found),
                 Err(err) => {
                     log::error!("Error while querying {}: {}", hub_name, err)
                 }

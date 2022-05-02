@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BinaryHeap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use samizdat_common::heap_entry::HeapEntry;
 
@@ -47,7 +47,6 @@ impl Normal {
 struct StatisticsInner {
     requests: f64,
     successes: f64,
-    failures: f64,
     latency_success_log: Normal,
 }
 
@@ -57,14 +56,13 @@ impl Default for StatisticsInner {
         StatisticsInner {
             requests: 10.0,
             successes: 1.0,
-            failures: 9.0,
             latency_success_log: Normal::default(),
         }
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Statistics(RwLock<StatisticsInner>);
+#[derive(Clone, Debug, Default)]
+pub struct Statistics(Arc<RwLock<StatisticsInner>>);
 
 impl Statistics {
     pub fn rand_priority(&self) -> f64 {
@@ -101,21 +99,35 @@ impl Statistics {
         success_prob / sample_latency
     }
 
-    pub fn start_request(&self) {
+    fn start_request(&self) {
         let mut lock = self.0.write().expect("poisoned");
         lock.requests += 1.0;
     }
 
-    pub fn end_request_with_success(&self, latency: Duration) {
+    fn end_request_with_success(&self, latency: Duration) {
         let mut lock = self.0.write().expect("poisoned");
         lock.successes += 1.0;
         lock.latency_success_log
             .observe((latency.as_millis() as f64).max(1.0).ln());
     }
 
-    pub fn end_request_with_failure(&self) {
-        let mut lock = self.0.write().expect("poisoned");
-        lock.failures += 1.0;
+    pub fn start_experiment(&self) -> Experiment {
+        self.start_request();
+        Experiment {
+            statistics: self.clone(),
+            start: Instant::now(),
+        }
+    }
+}
+
+pub struct Experiment {
+    statistics: Statistics,
+    start: Instant,
+}
+
+impl Experiment {
+    pub fn end_with_success(self) {
+        self.statistics.end_request_with_success(self.start.elapsed());
     }
 }
 

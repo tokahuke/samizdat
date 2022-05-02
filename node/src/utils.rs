@@ -1,5 +1,7 @@
 //! General utilities which don't fit anywhere else.
 
+use std::net::SocketAddr;
+
 /// An adaptor that splits the elements of another into vectors of a given size
 /// (except the last). This is a "try-iterator" implementation.
 pub struct Chunks<I> {
@@ -55,8 +57,6 @@ where
         is_done: false,
     }
 }
-
-use std::net::SocketAddr;
 
 pub fn socket_to_canonical(socket_addr: SocketAddr) -> SocketAddr {
     (socket_addr.ip().to_canonical(), socket_addr.port()).into()
