@@ -23,8 +23,8 @@ pub struct Cli {
     /// Maximum number of _simultaneous_ resolutions per query.
     #[structopt(env = "SAMIZDAT_MAX_RESOLUTIONS_PER_QUERY", long, default_value = "12")]
     pub max_resolutions_per_query: usize,
-    /// The maximum number of _simultaneous_ queries a node can make.
-    #[structopt(env = "SAMIZDAT_MAX_QUERY_PER_NODE", long, default_value = "4")]
+    /// The maximum number of _simultaneous_ requests a node can make.
+    #[structopt(env = "SAMIZDAT_MAX_QUERY_PER_NODE", long, default_value = "12")]
     pub max_queries_per_node: usize,
     /// The inverse of the interval that we delay if a node is requesting too many queries.
     /// (e.g., 2 => delay 500ms).

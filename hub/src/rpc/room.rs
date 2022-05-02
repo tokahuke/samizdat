@@ -79,7 +79,7 @@ impl Room {
         self.stream_peers(sampler, current)
             .into_stream()
             .flatten()
-            .filter_map(move |(peer_id, peer)| {
+            .map(move |(peer_id, peer)| {
                 let fut_filter_map = map(peer_id, peer); // Cannot move out of FnMut
                 async move {
                     let filter_map = fut_filter_map.await;
@@ -93,8 +93,8 @@ impl Room {
                     filter_map
                 }
             })
-            .map(|outcome| async move { outcome })
             .buffer_unordered(CLI.max_resolutions_per_query)
+            .filter_map(|outcome| async move { outcome })
             .take(CLI.max_candidates)
     }
 
