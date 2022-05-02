@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 
 use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
-use samizdat_common::{rpc::*, ChannelAddr};
+use samizdat_common::{rpc::*};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
@@ -70,6 +70,11 @@ fn candidates_for_resolution(
     resolution.validation_nonces.push(validation_riddle.rand);
     let resolution = Arc::new(resolution);
 
+    // // TODO: streaming broke this...
+    // if validation_riddle.is_empty() {
+    //     // now what?
+    // }
+
     // Then query peers:
     ROOM.with_peers(QuerySampler, client_addr, move |peer_id, peer| {
         log::debug!("Pairing client {client_addr} with peer {peer_id}");
@@ -110,11 +115,9 @@ fn candidates_for_resolution(
                     if validate_riddles(&validation_riddles) =>
                 {
                     experiment.end_with_success();
-                    let channel_id = rand::random();
-                    let channel_addr = ChannelAddr::new(peer.addr, channel_id);
                     Some(Box::pin(stream::once(async move {
                         Candidate {
-                            channel_addr,
+                            socket_addr:peer.addr,
                             validation_riddles,
                         }
                     }))
@@ -129,7 +132,7 @@ fn candidates_for_resolution(
                                 let is_valid = validate_riddles(&candidate.validation_riddles);
                                 // IPv6 with IPv6; IPv4 with IPv4!
                                 let ip_version_matches =
-                                    candidate.channel_addr.peer_addr().ip().is_ipv6()
+                                    candidate.socket_addr.ip().is_ipv6()
                                         == client_addr.ip().is_ipv6();
 
                                 async move { is_valid && ip_version_matches }

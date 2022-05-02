@@ -1,8 +1,9 @@
 use serde_derive::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::cipher::OpaqueEncrypted;
-use crate::{ChannelAddr, Hash, MessageRiddle, Riddle};
+use crate::{Hash, MessageRiddle, Riddle};
 
 pub type CandidateChannelId = u32;
 
@@ -36,7 +37,10 @@ pub enum QueryResponse {
     NoReverseConnection,
     /// Query was run and returned and candidates may be following (watch `recv_candidate`).
     Resolved {
+        /// The id of the channel through which the candidates will arrive.
         candidate_channel: CandidateChannelId,
+        /// The channel to be used to to transport the payload.
+        channel_id: u32,
     },
 }
 
@@ -103,7 +107,7 @@ pub struct Resolution {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
-    pub channel_addr: ChannelAddr,
+    pub socket_addr: SocketAddr,
     pub validation_riddles: Vec<Riddle>,
 }
 

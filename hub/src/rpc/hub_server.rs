@@ -73,8 +73,8 @@ impl Hub for HubServer {
             log::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
-            let channel = rand::random();
-            let channel_addr = ChannelAddr::new(server.0.addr, channel);
+            let channel_id = rand::random();
+            let channel_addr = ChannelAddr::new(server.0.addr, channel_id);
 
             // Se if you are not being replayed:
             match REPLAY_RESISTANCE.lock().await.check(&query) {
@@ -123,7 +123,7 @@ impl Hub for HubServer {
                 let mut pinned = Box::pin(candidates);
 
                 while let Some(candidate) = pinned.next().await {
-                    let channel_addr = candidate.channel_addr;
+                    let socket_addr = candidate.socket_addr;
                     let outcome = node
                         .client
                         .recv_candidate(ctx.clone(), candidate_channel, candidate)
@@ -131,7 +131,7 @@ impl Hub for HubServer {
 
                     if let Err(err) = outcome {
                         log::warn!(
-                            "Error sending candidate {channel_addr} to {}: {err}",
+                            "Error sending candidate {socket_addr} to {}: {err}",
                             node.addr
                         );
                     }
@@ -140,7 +140,7 @@ impl Hub for HubServer {
 
             log::debug!("query done");
 
-            QueryResponse::Resolved { candidate_channel }
+            QueryResponse::Resolved { candidate_channel, channel_id }
         })
         .await
     }

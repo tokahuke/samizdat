@@ -10,6 +10,7 @@ pub use reconnect::Reconnect;
 
 use futures::prelude::*;
 use futures::stream;
+use samizdat_common::ChannelAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -184,7 +185,7 @@ impl HubConnection {
             .await?;
 
         // Interpret RPC response:
-        let candidate_channel = match query_response {
+        let (candidate_channel, channel_id) = match query_response {
             QueryResponse::Replayed => return Err("hub has suspected replay attack".into()),
             QueryResponse::EmptyQuery => return Err("hub has received an empty query".into()),
             QueryResponse::NoReverseConnection => {
@@ -193,7 +194,7 @@ impl HubConnection {
             QueryResponse::InternalError => {
                 return Err("hub has experienced an internal error".into())
             }
-            QueryResponse::Resolved { candidate_channel } => candidate_channel,
+            QueryResponse::Resolved { candidate_channel , channel_id } => (candidate_channel, channel_id),
         };
 
         log::info!(
@@ -209,7 +210,7 @@ impl HubConnection {
             .map(|candidate| {
                 // TODO: check if candidate is valid. However, seems to be unnecessary, since
                 // transport will make sure no naughty people are involved.
-                let channel_addr = candidate.channel_addr;
+                let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
                 log::info!("Got candidate {channel_addr} for channel {candidate_channel:x}");
                 let channel_manager = inner.channel_manager.clone();
                 Box::pin(async move {

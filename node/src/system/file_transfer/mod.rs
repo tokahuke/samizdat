@@ -211,7 +211,7 @@ impl ObjectMessage {
 
         for chunk in object.chunks()?.expect("object exits") {
             let chunk = chunk?;
-            log::info!("stream for data opened");
+            log::debug!("stream for data opened");
             let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
                 .bytes()
                 .collect::<Result<Vec<_>, _>>()
