@@ -21,6 +21,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
 
             // Get entity and content hash from page path.
             let mut split = path.as_str().split('/');
+            split.next().expect("always starts with /, right?");
             let (entity, content_hash) = match (split.next(), split.next()) {
                 (None, None) => return Err(warp::reject()),
                 (Some(identity), None) => ("_identity", identity),
@@ -32,7 +33,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
             };
 
             // Query node for the web page:
-            let translated = format!("http://localhost:4510/{}", path.as_str());
+            let translated = format!("http://localhost:4510{}", path.as_str());
             let response = CLIENT
                 .with(|client| client.get(translated).send())
                 .await
