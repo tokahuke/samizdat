@@ -194,7 +194,10 @@ impl HubConnection {
             QueryResponse::InternalError => {
                 return Err("hub has experienced an internal error".into())
             }
-            QueryResponse::Resolved { candidate_channel , channel_id } => (candidate_channel, channel_id),
+            QueryResponse::Resolved {
+                candidate_channel,
+                channel_id,
+            } => (candidate_channel, channel_id),
         };
 
         log::info!(

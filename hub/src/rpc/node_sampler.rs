@@ -127,7 +127,8 @@ pub struct Experiment {
 
 impl Experiment {
     pub fn end_with_success(self) {
-        self.statistics.end_request_with_success(self.start.elapsed());
+        self.statistics
+            .end_request_with_success(self.start.elapsed());
     }
 }
 

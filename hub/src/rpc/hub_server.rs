@@ -140,7 +140,10 @@ impl Hub for HubServer {
 
             log::debug!("query done");
 
-            QueryResponse::Resolved { candidate_channel, channel_id }
+            QueryResponse::Resolved {
+                candidate_channel,
+                channel_id,
+            }
         })
         .await
     }

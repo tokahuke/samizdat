@@ -82,7 +82,7 @@ impl Node for HubAsNodeServer {
                     .client
                     .recv_candidate(ctx.clone(), candidate_channel, candidate)
                     .await;
-                
+
                 if let Err(err) = outcome {
                     log::error!("Failed to send candidate to channel {candidate_channel}: {err}");
                 }

@@ -15,9 +15,9 @@ use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::Mutex;
 
+use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
-use samizdat_common::{rpc::*};
 
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
