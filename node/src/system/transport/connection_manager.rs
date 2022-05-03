@@ -4,6 +4,8 @@ use quinn::{Connecting, Endpoint, Incoming, NewConnection};
 use samizdat_common::{quic, BincodeOverQuic};
 use std::net::SocketAddr;
 
+use crate::utils;
+
 use super::matcher::Matcher;
 
 const MAX_TRANSFER_SIZE: usize = 2_048;
@@ -25,9 +27,9 @@ impl ConnectionManager {
         let matcher_task = matcher.clone();
         tokio::spawn(async move {
             while let Some(connecting) = incoming.next().await {
-                matcher_task
-                    .arrive(connecting.remote_address(), connecting)
-                    .await;
+                let peer_addr = utils::socket_to_canonical(connecting.remote_address());
+                log::info!("{} arrived", peer_addr);
+                matcher_task.arrive(peer_addr, connecting).await;
             }
         });
 
@@ -36,9 +38,10 @@ impl ConnectionManager {
 
     pub async fn connect(&self, remote_addr: SocketAddr) -> Result<NewConnection, crate::Error> {
         let new_connection = quic::connect(&self.endpoint, remote_addr).await?;
+        let remote = new_connection.connection.remote_address();
         log::info!(
             "client connected to server at {}",
-            new_connection.connection.remote_address()
+            SocketAddr::from((remote.ip().to_canonical(), remote.port())),
         );
 
         Ok(new_connection)
@@ -78,7 +81,7 @@ impl ConnectionManager {
 
         let outgoing = async move {
             if let Some(connecting) = self.matcher.expect(peer_addr).await {
-                log::info!("found expected conection {}", peer_addr);
+                log::info!("found expected connection {}", peer_addr);
                 Ok(connecting.await?)
             } else {
                 Err("peer not expected".into()) as Result<_, crate::Error>
@@ -86,12 +89,14 @@ impl ConnectionManager {
         };
 
         match join(incoming, outgoing).await {
-            (Err(_), Ok(outgoing)) => {
+            (Err(err), Ok(outgoing)) => {
                 log::info!("only outgoing succeeded");
+                log::info!("incoming got: {err}");
                 Ok(outgoing)
             }
-            (Ok(incoming), Err(_)) => {
+            (Ok(incoming), Err(err)) => {
                 log::info!("only incoming succeeded");
+                log::info!("outgoing got: {err}");
                 Ok(incoming)
             }
             (Ok(incoming), Ok(outgoing)) => {

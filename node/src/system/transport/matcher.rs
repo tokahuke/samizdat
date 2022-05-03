@@ -61,6 +61,8 @@ impl<K: 'static + Ord + Copy + Send, T: 'static + Send> Matcher<K, T> {
 
             assert!(removed.is_none());
 
+            drop(inner);
+
             let cloned = self.0.clone();
             tokio::spawn(async move {
                 sleep(Duration::from_millis(10_000)).await;

@@ -50,7 +50,7 @@ async fn receiver_task(
 
                 // Decode id:
                 let channel_id = u32::from_be_bytes(id_buf);
-                log::info!("stream arrived for channel {:x}", channel_id);
+                log::debug!("stream arrived for channel {:x}", channel_id);
 
                 // Send to the apropriate channel.
                 let guard = senders.lock().await;
@@ -73,6 +73,7 @@ async fn receiver_task(
             }
             Err(err) => {
                 log::warn!("error receiving new stream: {}", err);
+                break;
             }
         }
     }
@@ -103,19 +104,19 @@ impl Multiplexed {
 
     pub async fn send(&self, channel_id: u32, payload: &[u8]) -> Result<(), crate::Error> {
         let mut stream = self.connection.open_uni().await?;
-        log::info!("stream opened for {:x}", channel_id);
+        log::debug!("stream opened for {:x}", channel_id);
 
         stream
             .write_all(&channel_id.to_be_bytes())
             .await
             .map_err(io::Error::from)?;
-        log::info!("channel id sent for {:x}", channel_id);
+        log::debug!("channel id sent for {:x}", channel_id);
 
         stream.write_all(payload).await.map_err(io::Error::from)?;
-        log::info!("payload streamed for {:x}", channel_id);
+        log::debug!("payload streamed for {:x}", channel_id);
 
         stream.finish().await.map_err(io::Error::from)?;
-        log::info!("payload sent for {:x}", channel_id);
+        log::debug!("payload sent for {:x}", channel_id);
 
         Ok(())
     }

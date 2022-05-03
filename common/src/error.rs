@@ -4,6 +4,7 @@ use std::io;
 use tarpc::client::RpcError;
 
 #[derive(Debug, Fail)]
+#[non_exhaustive]
 pub enum Error {
     #[fail(display = "message: {}", _0)]
     Message(String),
@@ -31,6 +32,8 @@ pub enum Error {
     DifferentPublicKeys,
     #[fail(display = "no header read")]
     NoHeaderRead,
+    #[fail(display = "timeout")]
+    Timeout,
 }
 
 impl warp::reject::Reject for crate::Error {}

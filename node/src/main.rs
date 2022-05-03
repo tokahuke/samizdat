@@ -1,3 +1,5 @@
+#![feature(ip)]
+
 mod access;
 mod cli;
 mod db;
@@ -14,10 +16,9 @@ pub use samizdat_common::Error;
 pub use cli::cli;
 pub use db::db;
 
-use futures::prelude::*;
+use futures::{prelude::*, TryStreamExt};
 use std::panic;
 use tokio::task;
-use warp::Filter;
 
 use samizdat_common::logger;
 
@@ -31,11 +32,16 @@ static mut HUBS: Option<Hubs> = None;
 
 /// Initiates [`HUBS`] by connecting to all hubs defined in the command line.
 async fn init_hubs() -> Result<(), crate::Error> {
-    let resolved = futures::stream::iter(&cli().hubs)
-        .map(cli::AddrToResolve::resolve)
+    let sockets = cli()
+        .hubs
+        .iter()
+        .map(|to_resolve| to_resolve.resolve(cli().resolution_mode));
+    let resolved = stream::iter(sockets)
         .buffer_unordered(cli().hubs.len())
         .try_collect::<Vec<_>>()
-        .await?;
+        .await?
+        .into_iter()
+        .flatten();
     let hubs = Hubs::init(resolved).await?;
 
     unsafe {
@@ -62,11 +68,12 @@ fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
 /// The entrypoint of the Samizdat node.
 #[tokio::main]
 async fn main() -> Result<(), crate::Error> {
+    init_cli()?;
+
     // Init logger:
-    let _ = logger::init_logger();
+    let _ = logger::init_logger(cli().verbose);
 
     // Init resources:
-    init_cli()?;
     init_access_token()?;
     init_db()?;
     init_hubs().await?;
@@ -74,28 +81,8 @@ async fn main() -> Result<(), crate::Error> {
     // Start vacuum:
     tokio::spawn(crate::vacuum::run_vacuum_daemon());
 
-    // Describe server:
-    let public_server = warp::filters::addr::remote()
-        .and_then(|addr: Option<std::net::SocketAddr>| async move {
-            if let Some(addr) = addr {
-                if addr.ip().is_loopback() {
-                    return Err(warp::reject::not_found());
-                }
-            }
-
-            Ok(warp::reply::with_status(
-                "cannot connect outside loopback",
-                ::http::StatusCode::FORBIDDEN,
-            ))
-        })
-        .or(warp::get().and(warp::path::end()).map(|| {
-            warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
-        }))
-        .or(http::api())
-        .with(warp::log("api"));
-
     // Run public server:
-    let server = tokio::spawn(warp::serve(public_server).run(([0, 0, 0, 0], cli().port)));
+    let server = tokio::spawn(http::serve());
 
     maybe_resume_panic(server.await);
 

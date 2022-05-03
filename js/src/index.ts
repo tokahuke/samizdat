@@ -177,10 +177,15 @@ export class Samizdat {
     return await response.blob();
   }
 
-  // TODO: find a good ED25519 JS library to generate keypairs.
-  // async postSeriesOwner() {
-  //   const response = await call("GET", `/_seriesowners`);
-  // }
+  async postSeriesOwner(seriesOwnerName: string, keypair = null, isDraft = false) {
+    await this._ensureRights([AccessRight.ManageSeries]);
+    const response = await call("POST", `/_seriesowners`, {
+      series_owner_name: seriesOwnerName,
+      keypair,
+      is_draft: isDraft
+    });
+    return (await response.json())["Ok"] as object;
+  }
 
   async getSeriesOwner(seriesOwner: string) {
     await this._ensureRights([AccessRight.ManageSeries]);
@@ -190,7 +195,7 @@ export class Samizdat {
 
   async deleteSeriesOwner(seriesOwner: string) {
     await this._ensureRights([AccessRight.ManageSeries]);
-    const response = await call("DELETEs", `/_seriesowners/${seriesOwner}`);
+    const response = await call("DELETE", `/_seriesowners/${seriesOwner}`);
     return (await response.json())["Ok"] as boolean;
   }
 

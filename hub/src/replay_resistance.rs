@@ -67,13 +67,13 @@ impl ReplayResistance {
 
 impl Nonce for Query {
     fn nonce(&self) -> Hash {
-        self.content_riddle.rand
+        self.location_riddle.rand
     }
 }
 
 impl Nonce for Resolution {
     fn nonce(&self) -> Hash {
-        self.content_riddle.rand
+        self.location_message_riddle.rand
     }
 }
 

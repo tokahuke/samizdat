@@ -91,6 +91,11 @@ pub enum Command {
         #[structopt(subcommand)]
         command: SeriesCommand,
     },
+    /// Commands for managing editions.
+    Edition {
+        #[structopt(subcommand)]
+        command: EditionCommand,
+    },
     /// Commands for managing collections.
     Collection {
         #[structopt(subcommand)]
@@ -138,6 +143,7 @@ impl Command {
                 commands::upload(&file, content_type, !no_bookmark, draft).await
             }
             Command::Series { command } => command.execute().await,
+            Command::Edition { command } => command.execute().await,
             Command::Collection { command } => command.execute().await,
             Command::Subscription { command } => command.execute().await,
             Command::Identity { command } => command.execute().await,
@@ -174,6 +180,8 @@ pub enum SeriesCommand {
     Show { series_owner_name: String },
     /// Lists all locally owned series.
     Ls { series_owner_name: Option<String> },
+    /// Lists all known public keys the node has seen, be they locally owned or not.
+    LsCached { series_name: Option<String> },
 }
 
 impl SeriesCommand {
@@ -192,13 +200,30 @@ impl SeriesCommand {
             SeriesCommand::Ls { series_owner_name } => {
                 commands::series::ls(series_owner_name).await
             }
+            SeriesCommand::LsCached { series_name } => {
+                commands::series::ls_cached(series_name).await
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum EditionCommand {
+    /// Lists all known editions or all known editions for a given series public key, if supplied.
+    Ls { series_key: Option<String> },
+}
+
+impl EditionCommand {
+    async fn execute(self) -> Result<(), anyhow::Error> {
+        match self {
+            EditionCommand::Ls { series_key } => commands::edition::ls(series_key).await,
         }
     }
 }
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum SubscriptionCommand {
-    /// Subscribe to a series. This tells the node to listen to anouncements
+    /// Subscribe to a series. This tells the node to listen to announcements
     /// and to _actively_ keep in sync with the series.
     New { public_key: String },
     /// Removes an existing subscription.

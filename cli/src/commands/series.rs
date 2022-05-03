@@ -69,3 +69,35 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
         ls_all().await
     }
 }
+
+pub async fn ls_cached(series_name: Option<String>) -> Result<(), anyhow::Error> {
+    pub async fn ls_cached_series(_series_name: String) -> Result<(), anyhow::Error> {
+        todo!()
+    }
+
+    pub async fn ls_cached_all() -> Result<(), anyhow::Error> {
+        let response = api::get_all_series().await?;
+
+        #[derive(Tabled)]
+        struct Row {
+            public_key: Key,
+        }
+
+        show_table(
+            response
+                .into_iter()
+                .map(|series| Row {
+                    public_key: series.public_key,
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        Ok(())
+    }
+
+    if let Some(series_name) = series_name {
+        ls_cached_series(series_name).await
+    } else {
+        ls_cached_all().await
+    }
+}

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tarpc::context;
 
 use samizdat_common::cipher::TransferCipher;
+use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{ChannelAddr, Hash, Riddle};
 
@@ -16,13 +17,19 @@ use super::transport::ChannelManager;
 #[derive(Clone)]
 pub struct NodeServer {
     pub channel_manager: Arc<ChannelManager>,
+    pub candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl NodeServer {
     async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got object {:?}", resolution);
 
-        let object = match ObjectRef::find(&resolution.content_riddle) {
+        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
+            content_riddle
+        } else {
+            return ResolutionResponse::EmptyResolution;
+        };
+        let object = match ObjectRef::find(content_riddle) {
             Some(object) if !object.is_draft().unwrap_or(true) => object,
             Some(_) => {
                 log::info!("Hash found but object is draft");
@@ -37,7 +44,10 @@ impl NodeServer {
         let hash = *object.hash();
 
         log::info!("Found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
+        let peer_addr = match resolution
+            .location_message_riddle
+            .resolve::<ChannelAddr>(&hash)
+        {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("Failed to resolve message riddle after resolving content riddle");
@@ -59,13 +69,24 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
+        ResolutionResponse::Found(
+            resolution
+                .validation_nonces
+                .iter()
+                .map(|&nonce| Riddle::new_with_nonce(&hash, nonce))
+                .collect(),
+        )
     }
 
     async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got item {:?}", resolution);
 
-        let item = match CollectionItem::find(&resolution.content_riddle) {
+        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
+            content_riddle
+        } else {
+            return ResolutionResponse::EmptyResolution;
+        };
+        let item = match CollectionItem::find(&content_riddle) {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
                 log::info!("hash found, but item is draft");
@@ -85,7 +106,10 @@ impl NodeServer {
         let hash = item.locator().hash();
 
         log::info!("found hash {}", hash);
-        let peer_addr = match resolution.message_riddle.resolve::<ChannelAddr>(&hash) {
+        let peer_addr = match resolution
+            .location_message_riddle
+            .resolve::<ChannelAddr>(&hash)
+        {
             Some(socket_addr) => socket_addr,
             None => {
                 log::warn!("failed to resolve message riddle after resolving content riddle");
@@ -106,7 +130,13 @@ impl NodeServer {
             }),
         );
 
-        ResolutionResponse::Found(Riddle::new_with_nonce(&hash, resolution.validation_nonce))
+        ResolutionResponse::Found(
+            resolution
+                .validation_nonces
+                .iter()
+                .map(|&nonce| Riddle::new_with_nonce(&hash, nonce))
+                .collect(),
+        )
     }
 }
 
@@ -119,11 +149,22 @@ impl Node for NodeServer {
         }
     }
 
+    async fn recv_candidate(
+        self,
+        _: context::Context,
+        candidate_channel: CandidateChannelId,
+        candidate: Candidate,
+    ) {
+        self.candidate_channels.send(candidate_channel, candidate);
+    }
+
     async fn get_edition(
         self,
         _: context::Context,
         latest: Arc<EditionRequest>,
     ) -> Vec<EditionResponse> {
+        log::info!("got {latest:?}");
+
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle) {
             let editions = series.get_editions();
             match editions.as_ref().map(|editions| editions.first()) {
@@ -148,11 +189,17 @@ impl Node for NodeServer {
             None
         };
 
+        if let Some(response) = maybe_response.as_ref() {
+            log::info!("Edition found: {response:?}");
+        } else {
+            log::info!("Edition not found");
+        }
+
         maybe_response.into_iter().collect()
     }
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
-        log::info!("Sending announcement to hub");
+        log::info!("Got announcement from hub");
         if let Some(subscription) = SubscriptionRef::find(&announcement.key_riddle) {
             let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 

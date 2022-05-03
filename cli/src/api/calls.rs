@@ -85,6 +85,31 @@ pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyh
     get("/_seriesowners").await
 }
 
+// Series:
+
+#[derive(Deserialize)]
+pub struct GetSeriesResponse {
+    pub public_key: Key,
+}
+
+pub async fn get_all_series() -> Result<Vec<GetSeriesResponse>, anyhow::Error> {
+    get("/_series").await
+}
+
+// Editions:
+
+#[derive(Deserialize)]
+pub struct GetEditionResponse {
+    pub signed: Signed<EditionContent>,
+    pub public_key: Key,
+    #[serde(default)]
+    pub is_draft: bool,
+}
+
+pub async fn get_all_editions() -> Result<Vec<GetEditionResponse>, anyhow::Error> {
+    get("/_editions").await
+}
+
 // Auth:
 
 #[derive(Serialize)]

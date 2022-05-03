@@ -1,14 +1,12 @@
 use askama::Template;
-use lazy_static::lazy_static;
 use rocksdb::IteratorMode;
 use serde_derive::Deserialize;
 use std::fmt::{self, Display};
-use url::Url;
+use url::{Host, Url};
 use warp::Filter;
 
 use crate::access::{access_token, AccessRight, Entity};
 use crate::balanced_or_tree;
-use crate::cli;
 use crate::db::{db, Table};
 
 use super::{api_reply, html};
@@ -184,31 +182,6 @@ impl Display for Unauthorized {
     }
 }
 
-lazy_static! {
-    static ref SAMIZDAT_ORIGINS: [url::Origin; 4] = [
-        url::Origin::Tuple(
-            "http".to_owned(),
-            url::Host::Domain("localhost".to_owned()),
-            cli().port,
-        ),
-        url::Origin::Tuple(
-            "http".to_owned(),
-            url::Host::Ipv4([127, 0, 0, 1].into()),
-            cli().port,
-        ),
-        url::Origin::Tuple(
-            "http".to_owned(),
-            url::Host::Ipv4([0, 0, 0, 0].into()),
-            cli().port,
-        ),
-        url::Origin::Tuple(
-            "http".to_owned(),
-            url::Host::Ipv6([0; 16].into()),
-            cli().port,
-        ),
-    ];
-}
-
 /// Checks whether the request is _really_ coming from Samizdat. This is a
 /// complement to CORS.
 fn check_origin(referrer: &Url) -> Result<(), Forbidden> {
@@ -216,11 +189,17 @@ fn check_origin(referrer: &Url) -> Result<(), Forbidden> {
 
     // Find out if some cross-origin thing is trying ot trick you.
     // TODO: also implement proper CORS.
-    if !SAMIZDAT_ORIGINS.contains(&origin) {
-        Err(Forbidden::BadOrigin(origin))
-    } else {
-        Ok(())
+    match dbg!(&origin) {
+        url::Origin::Tuple(http, host, _) if http == "http" || http == "https" => match host {
+            Host::Domain(domain) if domain == "localhost" => return Ok(()),
+            Host::Ipv4(ip) if ip.is_loopback() => return Ok(()),
+            Host::Ipv6(ip) if ip.to_canonical().is_loopback() => return Ok(()),
+            _ => {}
+        },
+        _ => {}
     }
+
+    Err(Forbidden::BadOrigin(origin))
 }
 
 /// Paths which are *always* trusted.
@@ -256,7 +235,8 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
     })
 }
 
-fn authenticate_authorization() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+fn authenticate_authorization(
+) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Authorization")
         .or_else(|_| async { Err(warp::reject::custom(Unauthorized::Unauthorized)) })
         .map(|authorization: String| {
@@ -303,7 +283,8 @@ fn authenticate_security_scope<const N: usize>(
     })
 }
 
-fn authenticate_trusted_context() -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
+fn authenticate_trusted_context(
+) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Referer").map(|referer: Url| {
         if is_trusted_context(&referer) {
             check_origin(&referer).err()
