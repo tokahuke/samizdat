@@ -38,9 +38,15 @@ pub async fn upload(
     Ok(())
 }
 
-pub async fn init() -> Result<(), anyhow::Error> {
+pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
     let pwd = env::current_dir()?;
-    let name = pwd.iter().last().expect("not empty").to_string_lossy();
+    let name = name.unwrap_or_else(|| {
+        pwd.iter()
+            .last()
+            .expect("not empty")
+            .to_string_lossy()
+            .to_string()
+    });
 
     let (manifest, private_key) = Manifest::create(&name)
         .await

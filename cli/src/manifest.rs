@@ -98,8 +98,9 @@ pub struct Debug {
     pub name: String,
 }
 
+#[cfg(not(target_os = "darwin"))]
 fn default_shell() -> String {
-    "/usr/bin/bash".to_owned()
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
 }
 
 #[derive(Deserialize)]

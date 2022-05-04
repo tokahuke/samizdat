@@ -47,7 +47,10 @@ pub struct Cli {
 #[derive(Clone, Debug, StructOpt)]
 pub enum Command {
     /// Starts a new collection in this folder.
-    Init,
+    Init {
+        #[structopt(long)]
+        name: Option<String>,
+    },
     /// Imports a series from a `Samizdat.toml` in the current directory.
     Import {
         /// The private key of the series.
@@ -121,7 +124,7 @@ pub enum Command {
 impl Command {
     pub async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            Command::Init => commands::init().await,
+            Command::Init { name } => commands::init(name).await,
             Command::Import { private_key } => commands::import(private_key).await,
             Command::Commit {
                 ttl,
