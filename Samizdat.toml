@@ -12,11 +12,11 @@ public-key = "r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM"
 # Same thing as the last section, but for debugging and testing purposes.
 
 name = "get-samizdat-debug"
-# ttl = "1h"    
+# ttl = "1h"
 
 
 [build]
 # Build instructions for this series.
 
-base = "./dist" # the input directory that Samizdat will read from
-run = "./install/build.sh aarch64-apple-darwin" # a build command to be run before upload
+base = "./dist"
+run = "./install/build.sh 'aarch64-apple-darwin x86_64-unknown-linux-gnu'"
