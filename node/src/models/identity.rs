@@ -85,9 +85,9 @@ impl Identity {
         let it = db().iterator_cf(Table::Identities.get(), IteratorMode::Start);
 
         for (key, value) in it {
-            match IdentityRef::from_bytes(&key) {
-                Ok(key) => {
-                    if riddle.resolves(&key.hash()) {
+            match Hash::try_from(&*key) {
+                Ok(hash) => {
+                    if riddle.resolves(&hash) {
                         match bincode::deserialize(&value) {
                             Ok(identity) => return Some(identity),
                             Err(err) => {

@@ -442,6 +442,8 @@ impl Hubs {
     }
 
     pub async fn get_identity(&self, identity: &IdentityRef) -> Option<Identity> {
+        log::info!("HERE!");
+        
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for identity {identity}", hub.name);

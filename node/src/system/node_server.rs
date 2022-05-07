@@ -234,16 +234,21 @@ impl Node for NodeServer {
         _ctx: context::Context,
         request: Arc<IdentityRequest>,
     ) -> Vec<IdentityResponse> {
+        log::info!("Got identity request from hub: {request:?}");
+
         let maybe_response = if let Some(identity) = Identity::find(&request.identity_riddle) {
             let cipher_key = identity.identity().hash();
             let rand = Hash::rand();
             let cipher = TransferCipher::new(&cipher_key, &rand);
+
+            log::info!("Found identity {}", identity.identity().handle());
 
             Some(IdentityResponse {
                 rand,
                 identity: cipher.encrypt_opaque(&identity),
             })
         } else {
+            log::info!("No identity found for request");
             None
         };
 
