@@ -2,14 +2,32 @@ use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
 
-use crate::api;
+use crate::api::{self, Keypair};
 
 use super::show_table;
 
-pub async fn new(series_name: String, is_draft: bool) -> Result<(), anyhow::Error> {
+pub async fn new(
+    series_name: String,
+    is_draft: bool,
+    public_key: Option<String>,
+    private_key: Option<String>,
+) -> Result<(), anyhow::Error> {
+    if public_key.is_some() && private_key.is_none() {
+        anyhow::bail!("Missing private key")
+    } else if public_key.is_none() && private_key.is_some() {
+        anyhow::bail!("Missing public key")
+    }
+
+    let keypair = public_key
+        .zip(private_key)
+        .map(|(public_key, private_key)| Keypair {
+            public_key,
+            private_key,
+        });
+
     api::post_series_owner(api::PostSeriesOwnerRequest {
         series_owner_name: &*series_name,
-        keypair: None,
+        keypair,
         is_draft,
     })
     .await?;

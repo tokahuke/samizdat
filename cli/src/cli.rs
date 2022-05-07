@@ -176,6 +176,10 @@ pub enum SeriesCommand {
         series_owner_name: String,
         #[structopt(long)]
         is_draft: bool,
+        #[structopt(long)]
+        public_key: Option<String>,
+        #[structopt(long)]
+        private_key: Option<String>,
     },
     /// Removes an existing locally owned series.
     Rm { series_owner_name: String },
@@ -193,7 +197,9 @@ impl SeriesCommand {
             SeriesCommand::New {
                 series_owner_name,
                 is_draft,
-            } => commands::series::new(series_owner_name, is_draft).await,
+                public_key,
+                private_key,
+            } => commands::series::new(series_owner_name, is_draft, public_key, private_key).await,
             SeriesCommand::Rm { series_owner_name } => {
                 commands::series::rm(series_owner_name).await
             }
