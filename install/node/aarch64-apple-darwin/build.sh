@@ -28,7 +28,6 @@ echo "Commiting changes to homebrew repository (brew tap)"
 cd ../../../../homebrew-samizdat &&
 git add . &&
 (
-    git commit -m "Update Samizdat.rb for distribution" && git push
-    || echo "Nothing to commit? Ok!"
+    git commit -m "Update Samizdat.rb for distribution" && git push || echo "Nothing to commit? Ok!"
 ) &&
 cd ../samizdat/install/node/aarch64-apple-darwin

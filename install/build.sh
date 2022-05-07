@@ -78,3 +78,14 @@ do
         echo "No build routine for hub in $arch! Skiping..."
     fi
 done
+
+echo
+echo "Starting to build SamizdatJS"
+echo
+
+cd js &&
+output=../dist/$version/js/
+mkdir -p $output &&
+OUTPUT=$output . ../install/js/build.sh &&
+cd /..
+
