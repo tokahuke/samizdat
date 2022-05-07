@@ -36,7 +36,7 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
 }
 
 fn transport_config() -> TransportConfig {
-    const IDLE_TIMEOUT_MS: u32 = 2 * 60 * 1_000;
+    const IDLE_TIMEOUT_MS: u32 = 10_000;
 
     let mut transport = TransportConfig::default();
     transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));

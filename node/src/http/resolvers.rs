@@ -149,10 +149,10 @@ pub async fn resolve_series(
         if let Some(latest) = hubs().get_latest(&series).await {
             log::info!("Found an edition (new or existing): {latest:?}. Inserting");
             series.advance(&latest)?;
-            log::info!("Setting series as fresh");
             series.refresh()?;
         } else {
             log::info!("No edition returned from the network for series {series}. Does it exist?");
+            series.mark_delayed()?;
         }
     }
 

@@ -258,6 +258,20 @@ impl SeriesRef {
 
     /// Set this series as just recently refresh.
     pub fn refresh(&self) -> Result<(), crate::Error> {
+        log::info!("Setting series {self} as fresh");
+        db().put_cf(
+            Table::SeriesFreshnesses.get(),
+            self.key(),
+            bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
+        )?;
+
+        Ok(())
+    }
+
+    /// Set this series as just delayed.
+    /// TODO: should get a better implementation in the future. By now, same as refresh.
+    pub fn mark_delayed(&self) -> Result<(), crate::Error> {
+        log::info!("Setting series {self} as fresh");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -375,6 +389,10 @@ impl Edition {
 
     pub fn public_key(&self) -> &Key {
         &self.public_key
+    }
+
+    pub fn series(&self) -> SeriesRef {
+        SeriesRef { public_key: self.public_key.clone() }
     }
 
     #[inline(always)]

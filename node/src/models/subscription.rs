@@ -11,7 +11,7 @@ use crate::db;
 use crate::db::Table;
 use crate::hubs;
 
-use super::{Droppable, Edition, Inventory, SeriesRef};
+use super::{Droppable, Edition, Inventory};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SubscriptionKind {
@@ -132,7 +132,9 @@ impl SubscriptionRef {
         let collection = edition.collection();
         let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
 
-        SeriesRef::new(edition.public_key().clone()).advance(&edition)?;
+        let series = edition.series();
+        series.advance(&edition)?;
+        series.refresh()?;
 
         if let Some(item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
             if let Some(content) = item.content()? {
