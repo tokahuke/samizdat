@@ -140,7 +140,7 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
                     tokio::spawn({
                         let edition = edition.clone();
                         async move {
-                            log::info!("Announcing edition {:?}", edition);
+                            log::info!("Announcing edition {edition:?}");
                             hubs().announce_edition(&announcement).await
                         }
                     });

@@ -28,7 +28,7 @@ impl ConnectionManager {
         tokio::spawn(async move {
             while let Some(connecting) = incoming.next().await {
                 let peer_addr = utils::socket_to_canonical(connecting.remote_address());
-                log::info!("{} arrived", peer_addr);
+                log::info!("{peer_addr} arrived");
                 matcher_task.arrive(peer_addr, connecting).await;
             }
         });
@@ -72,7 +72,7 @@ impl ConnectionManager {
         peer_addr: SocketAddr,
         drop_mode: DropMode,
     ) -> Result<NewConnection, crate::Error> {
-        log::info!("punching hole to {}", peer_addr);
+        log::info!("punching hole to {peer_addr}");
 
         let incoming = self
             .endpoint
@@ -81,7 +81,7 @@ impl ConnectionManager {
 
         let outgoing = async move {
             if let Some(connecting) = self.matcher.expect(peer_addr).await {
-                log::info!("found expected connection {}", peer_addr);
+                log::info!("found expected connection {peer_addr}");
                 Ok(connecting.await?)
             } else {
                 Err("peer not expected".into()) as Result<_, crate::Error>
@@ -116,8 +116,9 @@ impl ConnectionManager {
                 log::info!("both connections failed");
                 log::info!("incoming error: {}", incoming_err);
                 log::info!("outgoing error: {}", outgoing_err);
-                // TODO: better error message here.
-                Err("failed miserably".to_owned().into())
+                Err(format!(
+                    "both connections failed: incoming got \"{incoming_err}\"; outgoing got \"{outgoing_err}\""
+                ).into())
             }
         }
     }
