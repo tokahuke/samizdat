@@ -1,7 +1,10 @@
+//! Standard logging for applications in Samizdat.
+
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Config, Logger, Root};
 use log4rs::encode::pattern::PatternEncoder;
 
+/// Standard logging for applications in Samizdat.
 pub fn init_logger(verbose: bool) -> log4rs::Handle {
     let pattern = PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S%.3f)} [{M}:{L} {T}] {h({l})} {m}{n}");
 
