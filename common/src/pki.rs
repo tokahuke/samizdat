@@ -1,3 +1,5 @@
+//! Asymmetric cryptography primitives for Samizdat.
+
 use ed25519_dalek::{Keypair, PublicKey, Signature, Signer, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerialize};
@@ -7,9 +9,13 @@ use std::str::FromStr;
 
 use crate::Hash;
 
+/// A signed piece of data. The data is to be serialized with bincode and the serialized
+/// binary data is signed.
 #[derive(Debug, Clone, DeriveSerialize, DeriveDeserialize)]
 pub struct Signed<T> {
+    /// The data to which the signature refers to.
     content: T,
+    /// The signature for the data.
     signature: Signature,
 }
 
@@ -17,15 +23,18 @@ impl<T> Signed<T>
 where
     T: Serialize + for<'a> Deserialize<'a>,
 {
+    /// Create a new signature for some information, given a keypair.
     pub fn new(content: T, keypair: &Keypair) -> Signed<T> {
         let signature = keypair.sign(&bincode::serialize(&content).expect("can serialize"));
         Signed { content, signature }
     }
 
+    /// Retrieve the content of the signature.
     pub fn into_inner(self) -> T {
         self.content
     }
 
+    /// Checks of the signature is valid under the supplied public key.
     pub fn verify(&self, public_key: &PublicKey) -> bool {
         public_key
             .verify(
@@ -43,6 +52,7 @@ impl<T> Deref for Signed<T> {
     }
 }
 
+/// A private key.
 #[derive(DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct PrivateKey(ed25519_dalek::SecretKey);
@@ -82,11 +92,13 @@ impl From<ed25519_dalek::SecretKey> for PrivateKey {
 }
 
 impl PrivateKey {
+    /// Retrieves the undelying key implementation.
     pub fn into_inner(self) -> ed25519_dalek::SecretKey {
         self.0
     }
 }
 
+/// A public key.
 #[derive(Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct Key(ed25519_dalek::PublicKey);
@@ -127,23 +139,28 @@ impl From<ed25519_dalek::PublicKey> for Key {
 }
 
 impl Key {
+    /// Creates a new public key from a raw public key.
     pub fn new(key: ed25519_dalek::PublicKey) -> Key {
         Key(key)
     }
 
+    /// Retrieve the raw public key from the public key.
     pub fn into_inner(self) -> ed25519_dalek::PublicKey {
         self.0
     }
 
+    /// Gets the hash of this public key.
     pub fn hash(&self) -> Hash {
         Hash::hash(self.0.as_bytes())
     }
 
+    /// Deserializes a public key from binary data.
     pub fn from_bytes(bytes: &[u8]) -> Result<Key, crate::Error> {
         Ok(Key(ed25519_dalek::PublicKey::from_bytes(bytes)
             .map_err(|err| format!("bad public key: {}", err))?))
     }
 
+    /// Retrieves the binary representation of this public key.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }

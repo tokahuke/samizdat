@@ -1,3 +1,5 @@
+//! Access rights infrastructure for the node.
+
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
@@ -7,6 +9,9 @@ use samizdat_common::Hash;
 
 use crate::cli;
 
+/// The access token is a file in the local filesystem that grants access to protected
+/// routes in the Samizdat HTTP API. This avoids unauthorized access from scripts running
+/// in webpages.
 static mut ACCESS_TOKEN: Option<String> = None;
 
 /// Retrieves the access token. Must be called after initialization.
@@ -14,6 +19,7 @@ pub fn access_token<'a>() -> &'a str {
     unsafe { ACCESS_TOKEN.as_ref().expect("access token not initialized") }
 }
 
+/// Generates a new access token value.
 fn gen_token() -> String {
     Hash::rand().to_string()
 }
@@ -47,20 +53,32 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Access rights that can be granted to web applications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum AccessRight {
+    /// Can create and delete objects.
     ManageObjects,
+    /// Can get statistics on object usage.
     GetObjectStats,
+    /// Can create and delete bookmarks.
     ManageBookmarks,
+    /// Can create collections.
     ManageCollections,
+    /// Can create and delete series (including private keys).
     ManageSeries,
+    /// Can create and delete subscriptions.
     ManageSubscriptions,
+    /// Can create and delete identities.
     ManageIdentities,
 }
 
+/// A name of an entity inside the Samizdat network. An entity can be an object, a
+/// collection item, a series item, etc...
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
+    /// The type of the entity.
     r#type: String,
+    /// The identifier of the entity.
     identifier: String,
 }
 
@@ -71,6 +89,7 @@ impl Display for Entity {
 }
 
 impl Entity {
+    /// Transforms an URL path into an entity, if possible.
     pub fn from_path(path: &str) -> Option<Entity> {
         let mut split = path.split('/');
         let mut r#type = split.next()?;

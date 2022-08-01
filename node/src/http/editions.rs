@@ -1,3 +1,5 @@
+//! Editions API.
+
 use warp::Filter;
 
 use crate::access::AccessRight;

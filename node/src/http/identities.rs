@@ -1,3 +1,5 @@
+//! Identities API.
+
 use serde_derive::Deserialize;
 use warp::path::Tail;
 use warp::Filter;
@@ -37,6 +39,9 @@ fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
         .map(tuple)
 }
 
+/// Inserts a new identity in a database. This only has effect if no previous identity
+/// existed before or if the new supplied identity has a better proof of work than the
+/// existing one.
 fn post_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
@@ -82,6 +87,7 @@ fn post_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .map(api_reply)
 }
 
+/// Lists all identities.
 fn get_identities() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_identities")
         .and(warp::get())

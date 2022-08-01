@@ -1,3 +1,7 @@
+//! A key-value store on the same line of the `LocalStorage` Web API, but partitioned by
+//! identity. This provides better context isolation for Samizdat web applications than
+//! `LocalStorage` currently does.
+
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::Deserialize;
 use warp::Filter;
@@ -13,10 +17,13 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     balanced_or_tree!(get(), put(), delete(), clear(),)
 }
 
+/// The full prefix of the keys to be stored in RocksDB. This provides the desired context
+/// isolation.
 fn key(entity: &Entity, tail: &warp::path::Tail) -> Vec<u8> {
     bincode::serialize(&(entity, tail.as_str())).expect("can serialize")
 }
 
+/// Gets a value for key from the store.
 pub fn get() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_kvstore" / ..)
         .and(warp::get())
@@ -32,6 +39,7 @@ pub fn get() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         .map(api_reply)
 }
 
+/// Inserts a value for a key in the store.
 pub fn put() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
@@ -55,6 +63,7 @@ pub fn put() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
         .map(api_reply)
 }
 
+/// Clears a key in the store.
 pub fn delete() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_kvstore" / ..)
         .and(warp::delete())
@@ -67,6 +76,7 @@ pub fn delete() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
         .map(api_reply)
 }
 
+/// Clears the whole store.
 pub fn clear() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_kvstore")
         .and(warp::delete())

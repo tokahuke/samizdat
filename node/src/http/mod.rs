@@ -18,6 +18,7 @@ use warp::Filter;
 
 use crate::{balanced_or_tree, cli};
 
+/// Gets the corresponding HTTP status code for a Samizdat error.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
     match err {
         crate::Error::Message(_) => http::StatusCode::BAD_REQUEST,
@@ -37,6 +38,7 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
+/// The standardized JSON reply for the API.
 fn api_reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
     T: serde::Serialize,
@@ -62,6 +64,7 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
+/// Transforms a rendered string into an HTML reply.
 fn html(rendered: String) -> impl warp::Reply {
     warp::reply::with_header(
         warp::reply::with_status(rendered, http::StatusCode::OK),
@@ -114,6 +117,7 @@ fn post_vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .map(api_reply)
 }
 
+/// Runs the HTTP API server.
 pub fn serve() -> impl Future<Output = ()> {
     let public_server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {
