@@ -1,5 +1,3 @@
-//! The Samizdat RPC definition using [`tarpc`].
-
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,11 +5,8 @@ use std::sync::Arc;
 use crate::cipher::OpaqueEncrypted;
 use crate::{Hash, MessageRiddle, Riddle};
 
-/// The channel id to be used when initiating a connection with a candidate peer.
 pub type CandidateChannelId = u32;
 
-/// The kind of a query, i.e., whether the sent content hash corresponds to an object 
-/// hash or to an item hash.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {
     /// The hash corresponds to an object hash.
@@ -20,7 +15,6 @@ pub enum QueryKind {
     Item,
 }
 
-/// A query of a given information.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Query {
     /// The riddles the resolver can use to find the content hash.
@@ -31,7 +25,6 @@ pub struct Query {
     pub kind: QueryKind,
 }
 
-/// A response to a given query, given by a node to a hub.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum QueryResponse {
     /// Hub experienced internal error (please report bug!)
@@ -51,57 +44,38 @@ pub enum QueryResponse {
     },
 }
 
-/// A request for an edition with key defined by a riddle.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EditionRequest {
-    /// The riddle defining the series public key.
     pub key_riddle: Riddle,
 }
 
-/// The response to an edition request.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EditionResponse {
-    /// The series corresponding to that edition.
     pub series: OpaqueEncrypted,
-    /// The random initialization to be used when decoding the encrypted value of
-    /// `series`.
     pub rand: Hash,
 }
 
-/// An announcement of a new edition in a series.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditionAnnouncement {
-    /// The riddle defining the series public key.
     pub key_riddle: Riddle,
-    /// The information for the new edition.
     pub edition: OpaqueEncrypted,
-    /// The random initialization to be used when decoding the encrypted value of
-    /// `edition`.
     pub rand: Hash,
 }
 
-/// A request for an identity within the newtork.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityRequest {
-    /// The riddle corresponding to the identity name.
     pub identity_riddle: Riddle,
 }
 
-/// The response for an identity request.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityResponse {
-    /// The identity information (incl. the corresponding series public key).
     pub identity: OpaqueEncrypted,
-    /// The random initialization to be used when decoding the encrypted value of
-    /// `identity`.
     pub rand: Hash,
 }
 
-/// The announcement of a new identity candidate in the network (as of yet, _unimplemented_).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityAnnouncement {}
 
-/// The Samizdat hub RPC interface.
 #[tarpc::service]
 pub trait Hub {
     /// Returns a response resolving (or not) the supplied object query.
@@ -118,7 +92,6 @@ pub trait Hub {
     async fn announce_identity(announcement: IdentityAnnouncement);
 }
 
-/// A resolution to a given query, given by the hub to a node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resolution {
     /// The riddles the resolver can use to find the content hash.
@@ -132,16 +105,12 @@ pub struct Resolution {
     pub kind: QueryKind,
 }
 
-/// A promisse of a possible peer in the network that might know the answer to a given query.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
-    /// The address of the peer.
     pub socket_addr: SocketAddr,
-    /// The validation riddles that the peer has supplied.
     pub validation_riddles: Vec<Riddle>,
 }
 
-/// The response of a node to a hub on the resolution status of a query.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ResolutionResponse {
     Found(Vec<Riddle>),
@@ -150,7 +119,6 @@ pub enum ResolutionResponse {
     NotFound,
 }
 
-/// The Samizdat node RPC interface.
 #[tarpc::service]
 pub trait Node {
     /// Tries to resolve an object or item query.

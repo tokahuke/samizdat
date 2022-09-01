@@ -1,24 +1,17 @@
-//! Riddles are cryptographic challenges use to test whether an agent knows a given
-//! information without revealing the information itself.
-
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 use crate::cipher::{OpaqueEncrypted, TransferCipher};
 use crate::Hash;
 
-/// A message that can be passed around and only decoded by who knows the secret solution
-/// of a riddle.
 #[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
 struct Message<T> {
-    /// The payload of this message.
     pub payload: T,
     /// A short which is always zero, for validation purposes.
     validation: u16,
 }
 
 impl<T> Message<T> {
-    /// Creates a new message, with a given payload.
     pub fn new(payload: T) -> Message<T> {
         Message {
             payload,
@@ -27,13 +20,9 @@ impl<T> Message<T> {
     }
 }
 
-/// Riddles are cryptographic challenges use to test whether an agent knows a given
-/// information without revealing the information itself.
-/// 
-/// More specificly, a riddle is a cryptographic riddle for a hidden value. It basically
-/// asks: which [`struct@Hash`] `h` has `H(h || nonce)` equal to `X`? If `H` is a sound
-/// hashing function, then the only ones who can solve this riddle are the ones who know
-/// `h`.
+/// A content riddle is a cryptographic riddle for a missing value. It basically asks: which
+/// [`Hash`] `h` has `H(h || nonce)` equal to `X`? If `H` is a good hash, then
+/// the only ones who can solve this riddle are the ones who know `h`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Riddle {
     /// The nonce used for the riddle.
@@ -73,26 +62,20 @@ impl Riddle {
         }
     }
 
-    /// Tests whether the given hash solves the supplied riddle.
     pub fn resolves(&self, hash: &Hash) -> bool {
         hash.rehash(&self.rand) == self.hash
     }
 }
 
-/// A message riddle works just like a riddle, except that a payload is also sent. This
-/// payload is ciphered using the response to the riddle that generated this message
-/// riddle.
+/// A message riddle works just like a riddle, except that a payload is also sent. This payload is
+/// ciphered using the response to the riddle.
 #[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
 pub struct MessageRiddle {
-    /// The random initialization of the symmetric cipher.
     pub rand: Hash,
-    /// The encrypted contents of this message riddle.
     pub masked: OpaqueEncrypted,
 }
 
 impl MessageRiddle {
-    /// Tries to resolve the message riddle, given a proposed hash. If the proposed hash
-    /// does not solve the message riddle, [`None`] is returned.
     pub fn resolve<T>(&self, content_hash: &Hash) -> Option<T>
     where
         T: for<'a> Deserialize<'a>,

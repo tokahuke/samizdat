@@ -1,6 +1,3 @@
-//! Default configuration for QUIC used by Samizdat. Samizdat has its own way of dealing
-//! with security. Therefore, much of the complexity involving security in QUIC can be igonred.
-
 use quinn::{
     ClientConfig, Endpoint, IdleTimeout, Incoming, NewConnection, ServerConfig, TransportConfig,
     VarInt,
@@ -12,10 +9,10 @@ use std::time::Duration;
 /// "I am Spartacus!"
 const DEFAULT_SERVER_NAME: &str = "spartacus";
 
-/// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
-/// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
-/// 
-/// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
+// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
+// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
+
+// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
 struct SkipServerVerification;
 
 impl SkipServerVerification {
@@ -38,7 +35,6 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
     }
 }
 
-/// Creates a default transport configuration for QUIC.
 fn transport_config() -> TransportConfig {
     const IDLE_TIMEOUT_MS: u32 = 10_000;
 
@@ -49,7 +45,6 @@ fn transport_config() -> TransportConfig {
     transport
 }
 
-/// Creates a default client configuration for QUIC.
 fn client_config() -> ClientConfig {
     let crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
@@ -62,7 +57,6 @@ fn client_config() -> ClientConfig {
     client_config
 }
 
-/// Creates a default server configuration for QUIC.
 fn server_config() -> ServerConfig {
     let cert = rcgen::generate_simple_self_signed(vec![DEFAULT_SERVER_NAME.into()]).unwrap();
     let key = rustls::PrivateKey(cert.serialize_private_key_der());
@@ -75,7 +69,6 @@ fn server_config() -> ServerConfig {
     server_config
 }
 
-/// Opens a new QUIC listener on `bind_addr`.
 pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
     let (mut endpoint, incoming) =
         Endpoint::server(server_config(), bind_addr).expect("can bind endpoint");
@@ -84,7 +77,6 @@ pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
     (endpoint, incoming)
 }
 
-/// Connects to a remote host using an [`Endpoint`].
 pub async fn connect(
     endpoint: &Endpoint,
     remote_addr: SocketAddr,

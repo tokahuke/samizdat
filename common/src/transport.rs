@@ -10,22 +10,13 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::task::JoinHandle;
 
-/// A [`Stream`] and [`Sink`] implementation for objects that are seriaizable to be
-/// passed over QUIC to (and received from) a remote peer.
 pub struct BincodeOverQuic<S, R> {
-    /// The QUIC connection
     connection: Connection,
-    /// The incoming QUIC streams from the peer
     incoming: IncomingUniStreams,
-    /// The current ongoing send operation.
     ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
-    /// The current ongoing receive operation.
     ongoing_recv: Option<Fuse<JoinHandle<Result<R, io::Error>>>>,
-    /// Max length that the objects can have when serialized.
     max_length: usize,
-    /// A token for the data type to be sent.
     _request: PhantomData<S>,
-    /// A token for the data type to be received.
     _response: PhantomData<R>,
 }
 
@@ -34,7 +25,6 @@ where
     S: 'static + Send + Serialize,
     R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    /// Creates a new [`BincodeOverQuic`] over an existing connection.
     pub fn new(
         connection: Connection,
         incoming: IncomingUniStreams,
@@ -51,13 +41,11 @@ where
         }
     }
 
-    /// Restores the underlying connection.
     pub fn into_inner(self) -> (Connection, IncomingUniStreams) {
         (self.connection, self.incoming)
     }
 }
 
-/// Transforms a bincode error into an [`io::Error`].
 fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
