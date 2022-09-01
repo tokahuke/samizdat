@@ -1,7 +1,5 @@
 #! /usr/bin/env bash
 
-set -e
-
 if [ -z $1 ]; then
     archs=$(ls ./install/node)
 else
@@ -20,12 +18,11 @@ done
 
 version="latest"
 
-rm -rf ./dist
-mkdir -p ./dist
+rm -rf ./dist &&
+mkdir -p ./dist &&
 
 
-if [ $(uname) == "Darwin" ]
-then
+if [ $(uname) == "Darwin" ]; then
     echo
     echo "Darwin host detected"
     export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-unknown-linux-gnu-gcc
@@ -36,31 +33,22 @@ fi
 
 for arch in $archs
 do
-    if [ ! -f ./install/node/$arch/.skip ]
-    then
+    if [ -f ./install/node/$arch/build.sh ]; then
         echo
         echo "Starting to build node installer for $arch"
         echo
 
         output=./dist/$version/node/$arch/
         
-        mkdir -p $output
+        mkdir -p $output &&
 
-        cargo build --release --bin samizdat-node --target $arch
-        cargo build --release --bin samizdat --target $arch
+        cargo build --release --bin samizdat-node --target $arch &&
+        cargo build --release --bin samizdat --target $arch &&
 
-        for artifact in $(cat ./install/node/$arch/artifacts.txt)
-        do
-            echo "Loading artifact $artifact"
-            if [ $artifact != "" ]
-            then
-                cp ./target/$arch/release/$artifact $output || \
-                    (echo "no such artifact $artifact in $arch" && exit 1);
-            fi
-        done
-
-        cd ./install/node/$arch/
-        OUTPUT=../../../$output VERSION=$version . ./build.sh
+        cp ./target/$arch/release/samizdat-node $output &&
+        cp ./target/$arch/release/samizdat $output &&
+        cd ./install/node/$arch/ &&
+        OUTPUT=../../../$output VERSION=$version . ./build.sh &&
         cd ../../../
     else
         echo
@@ -68,34 +56,23 @@ do
     fi
 done
 
-
 for arch in $archs
 do
-    if [ -f ./install/hub/$arch/build.sh ]
-    then
+    if [ -f ./install/hub/$arch/build.sh ]; then
         echo
         echo "Starting to build hub installer for $arch"
         echo
 
         output=./dist/$version/hub/$arch/
         
-        mkdir -p $output
+        mkdir -p $output &&
 
-        cargo build --release --bin samizdat-hub --target $arch
+        cargo build --release --bin samizdat-hub --target $arch &&
 
-        for artifact in $(cat ./install/node/$arch/artifacts.txt)
-        do
-            echo "Loading artifact $artifact"
-            if [ $artifact != "" ]
-            then
-                cp ./target/$arch/release/$artifact $output || \
-                    (echo "no such artifact $artifact in $arch" && exit 1);
-            fi
-        done
-
-        cd ./install/hub/$arch/
-        OUTPUT=../../../$output VERSION=$version . ./build.sh
-        cd ../../../ 
+        cp ./target/$arch/release/samizdat-hub $output &&
+        cd ./install/hub/$arch/ &&
+        OUTPUT=../../../$output VERSION=$version . ./build.sh &&
+        cd ../../../
     else
         echo
         echo "No build routine for hub in $arch! Skiping..."
@@ -106,8 +83,9 @@ echo
 echo "Starting to build SamizdatJS"
 echo
 
-cd js
+cd js &&
 output=../dist/$version/js/
-mkdir -p $output
-OUTPUT=$output . ../install/js/build.sh
+mkdir -p $output &&
+OUTPUT=$output . ../install/js/build.sh &&
 cd /..
+

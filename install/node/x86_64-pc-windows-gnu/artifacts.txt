@@ -1,2 +1,0 @@
-samizdat-node.exe
-samizdat.exe
