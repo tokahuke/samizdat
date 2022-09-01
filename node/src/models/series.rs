@@ -392,9 +392,7 @@ impl Edition {
     }
 
     pub fn series(&self) -> SeriesRef {
-        SeriesRef {
-            public_key: self.public_key.clone(),
-        }
+        SeriesRef { public_key: self.public_key.clone() }
     }
 
     #[inline(always)]

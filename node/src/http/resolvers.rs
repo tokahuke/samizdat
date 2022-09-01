@@ -55,13 +55,13 @@ pub async fn resolve_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving {object:?}");
+    log::info!("Resolving {:?}", object);
 
     let iter = if let Some(iter) = object.iter_skip_header()? {
-        log::info!("Found local hash {}", object.hash());
+        log::info!("found local hash {}", object.hash());
         Some(iter)
     } else {
-        log::info!("Hash {} not found locally. Querying hubs", object.hash());
+        log::info!("hash {} not found locally. Querying hubs", object.hash());
         hubs().query(*object.hash(), QueryKind::Object).await;
         object.iter_skip_header()?
     };
@@ -91,7 +91,7 @@ pub async fn resolve_object(
         Ok(resolved.try_into())
     } else {
         let not_resolved = NotResolved {
-            message: format!("Object {} not found", object.hash()),
+            message: format!("object {} not found", object.hash()),
         };
 
         Ok(not_resolved.try_into())
@@ -104,13 +104,13 @@ pub async fn resolve_item(
     locator: Locator<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving item {locator}");
+    log::info!("Resolving item {}", locator);
 
     let maybe_item = if let Some(item) = locator.get()? {
-        log::info!("Found item {locator} locally. Resolving object.");
+        log::info!("found item {} locally. Resolving object.", locator);
         Some(item)
     } else {
-        log::info!("Item not found locally. Querying hubs.");
+        log::info!("item not found locally. Querying hubs.");
         hubs().query(locator.hash(), QueryKind::Item).await;
 
         locator.get()?
@@ -127,7 +127,7 @@ pub async fn resolve_item(
         .await
     } else {
         let not_resolved = NotResolved {
-            message: format!("Item {locator} not found"),
+            message: format!("item {} not found", locator),
         };
 
         Ok(not_resolved.try_into())
@@ -165,10 +165,10 @@ pub async fn resolve_series(
         let locator = edition.collection().locator_for(name.clone());
 
         let maybe_item = if let Some(item) = locator.get()? {
-            log::info!("Found item {locator} locally. Resolving object.");
+            log::info!("found item {} locally. Resolving object.", locator);
             Some(item)
         } else {
-            log::info!("Item not found locally. Querying hubs.");
+            log::info!("item not found locally. Querying hubs.");
             hubs().query(locator.hash(), QueryKind::Item).await;
 
             locator.get()?
@@ -194,7 +194,7 @@ pub async fn resolve_series(
     }
 
     let not_resolved = NotResolved {
-        message: format!("Item {series}/{name} not found"),
+        message: format!("item {}/{} not found", series, name.as_str()),
     };
 
     Ok(not_resolved.try_into())
@@ -208,10 +208,10 @@ pub async fn resolve_identity(
     log::info!("Resolving identity {identity_ref}/{name}");
 
     let identity = if let Some(identity) = identity_ref.get()? {
-        log::info!("Fond identity {identity_ref} locally. Resolving series.");
+        log::info!("found identity {identity_ref} locally. Resolving series.");
         identity
     } else {
-        log::info!("Identity not found locally. Querying hubs.");
+        log::info!("identity not found locally. Querying hubs.");
         if let Some(identity) = hubs().get_identity(&identity_ref).await {
             let mut batch = WriteBatch::default();
             identity.insert(&mut batch);
@@ -220,7 +220,7 @@ pub async fn resolve_identity(
             identity
         } else {
             let not_resolved = NotResolved {
-                message: format!("Identity {identity_ref} not found"),
+                message: format!("identity {identity_ref} not found"),
             };
 
             return Ok(not_resolved.try_into());
