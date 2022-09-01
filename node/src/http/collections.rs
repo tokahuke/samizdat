@@ -1,5 +1,3 @@
-//! Collections API.
-
 use serde_derive::Deserialize;
 use warp::path::Tail;
 use warp::Filter;

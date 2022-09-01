@@ -1,5 +1,3 @@
-//! Subscriptions API.
-
 use serde_derive::Deserialize;
 use warp::Filter;
 

@@ -69,19 +69,12 @@ pub fn cli<'a>() -> &'a Cli {
     unsafe { CLI.as_ref().expect("cli not initialized") }
 }
 
-/// The way addresses are resolved from DNS.
 #[derive(Debug, Clone, Copy)]
 pub enum AddrResolutionMode {
-    /// Only use IPv6 addresses and ignore IPv4 entries.
     EnsureIpv6,
-    /// Only use IPv4 addresses and ignore IPv6 entries.
     EnsureIpv4,
-    /// Use IPv6 addresses when possible, but default to an IPv4 if necessary.
     PreferIpv6,
-    /// Use IPv4 addresses when possible, but default to an IPv6 if necessary.
     PreferIpv4,
-    /// Use both IPv6 and IPv4 addresses. If both are present, two addresses will be
-    /// resolved for the same name.
     UseBoth,
 }
 
@@ -100,7 +93,6 @@ impl FromStr for AddrResolutionMode {
 }
 
 impl AddrResolutionMode {
-    /// Choose from a list of addresses which ones to use.
     fn filter_hosts(self, hosts: &[SocketAddr]) -> Vec<SocketAddr> {
         // Iterator factory (makes IPs canonical).
         let iter_hosts = || {
@@ -161,8 +153,6 @@ impl FromStr for AddrToResolve {
 }
 
 impl AddrToResolve {
-    /// Gets the string representation of this address (TODO: perhaps implement
-    /// [`std::fmt::Display`]?).
     fn name(&self) -> String {
         match self {
             AddrToResolve::SocketAddr(addr) => addr.to_string(),
@@ -171,7 +161,6 @@ impl AddrToResolve {
         }
     }
 
-    /// Resolve this address into an iterator of socket addresses.
     pub async fn resolve(
         &self,
         resolution_mode: AddrResolutionMode,

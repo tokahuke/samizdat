@@ -1,6 +1,3 @@
-//! Collections are a set of objects indexed by human-readable names. Collections are
-//! powered by Patricia trees and inclusion proofs.
-
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -70,7 +67,6 @@ impl ItemPathBuf {
         ItemPath(self.0.as_ref().into())
     }
 
-    /// Hashes this item path.
     fn hash(&self) -> Hash {
         Hash::hash(self.0.as_bytes())
     }
@@ -99,12 +95,8 @@ impl<'a> ItemPath<'a> {
     }
 }
 
-/// An association of paths with all object hashes for a given collection. Inventories
-/// are automatically included in all collections as a JSON file under the key
-/// `_inventory` and work much the same way like sitemaps do on the regular Web.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Inventory {
-    /// The mapping of all paths to the corresponding object hash.
     inventory: BTreeMap<ItemPathBuf, Hash>,
 }
 
@@ -128,22 +120,16 @@ impl<'a> IntoIterator for &'a Inventory {
 }
 
 impl Inventory {
-    /// Iterates through all key-value pairs in this inventory.
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
         self.into_iter()
     }
 }
 
-/// An item inside a collection.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
-    /// The collectiion this item belongs to.
     pub collection: CollectionRef,
-    /// The path of this item in the collection.
     pub name: ItemPathBuf,
-    /// The cryptographic proof that the item is included in the collection.
     pub inclusion_proof: PatriciaProof,
-    /// Whether this item is a draft. Drafts cannot be shared with the Samizdat network.
     #[serde(default)]
     pub is_draft: bool,
 }
@@ -163,10 +149,6 @@ impl Droppable for CollectionItem {
 }
 
 impl CollectionItem {
-    /// Checks whether a collection item is valid, that is
-    /// 
-    /// 1. If the inclusion proof is valid for the claimed collection.
-    /// 2. If the clamed name corresponds to the claimed key hash in the inclusion proof. 
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
         let key = Hash::hash(self.name.0.as_bytes());
@@ -194,7 +176,6 @@ impl CollectionItem {
         }
     }
 
-    /// Returns the locator of this collection item. The locator works as a URL for items.
     pub fn locator(&self) -> Locator {
         Locator {
             collection: self.collection.clone(),
@@ -202,8 +183,6 @@ impl CollectionItem {
         }
     }
 
-    /// Runs through the database trying to find an item that fits to the supplied
-    /// content riddle. Returns `Ok(None)` if no matching item is found.
     pub fn find(content_riddle: &Riddle) -> Result<Option<CollectionItem>, crate::Error> {
         let iter = db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start);
 
@@ -224,7 +203,6 @@ impl CollectionItem {
         Ok(None)
     }
 
-    /// Inserts this collection item in the database using the supplied [`WriteBatch`].
     pub fn insert_with(&self, batch: &mut WriteBatch) {
         let locator = self.collection.locator_for(self.name.as_path());
 
@@ -242,7 +220,6 @@ impl CollectionItem {
         log::info!("Inserting item {}: {:#?}", locator, self);
     }
 
-    /// Inserts this collection item in the database.
     pub fn insert(&self) -> Result<(), crate::Error> {
         let mut batch = WriteBatch::default();
         self.insert_with(&mut batch);
@@ -252,10 +229,8 @@ impl CollectionItem {
     }
 }
 
-/// A reference to a collection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionRef {
-    /// The root hash of the Patricia tree of the collection.
     hash: Hash,
 }
 
@@ -272,24 +247,19 @@ impl Droppable for CollectionRef {
 }
 
 impl CollectionRef {
-    /// Creates a new collection reference from a root hash of a Patricia tree.
     pub fn new(hash: Hash) -> CollectionRef {
         CollectionRef { hash }
     }
 
-    /// Gets the root hash of this collection.
     pub fn hash(&self) -> Hash {
         self.hash
     }
 
-    /// Generates a collection reference from a random hash.
     #[cfg(test)]
     pub(crate) fn rand() -> CollectionRef {
         CollectionRef { hash: Hash::rand() }
     }
 
-    /// Builds a new collection from a list of paths and objects, returning the collection
-    /// reference.
     pub fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
     where
         I: AsRef<[(ItemPathBuf, ObjectRef)]>,
@@ -353,7 +323,6 @@ impl CollectionRef {
         Ok(collection)
     }
 
-    /// Builds the locator for the supplied item name in the current collection.
     pub fn locator_for<'a>(&self, name: ItemPath<'a>) -> Locator<'a> {
         Locator {
             collection: self.clone(),
@@ -361,9 +330,6 @@ impl CollectionRef {
         }
     }
 
-    /// Looks up in the database for an item with the given name in the current
-    /// collection. Note that the item must exist in the database for a result to be
-    /// returned.
     pub fn get(&self, name: ItemPath) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
         let maybe_item = db().get_cf(Table::CollectionItems.get(), locator.hash())?;
@@ -375,8 +341,6 @@ impl CollectionRef {
         }
     }
 
-    /// Returns an iterator over all the item paths for the current collection that
-    /// currently exist in the database.
     pub fn list(&'_ self) -> impl '_ + Iterator<Item = ItemPathBuf> {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
             .map(move |(key, _)| {
@@ -384,8 +348,6 @@ impl CollectionRef {
             })
     }
 
-    /// Returns an iterator over all the objects for the current collection that
-    /// currently exist in the database.
     pub fn list_objects(&'_ self) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
         self.list().filter_map(move |name| {
             let locator = Locator {
@@ -397,12 +359,9 @@ impl CollectionRef {
     }
 }
 
-/// A locator works like a URL for collection items.
 #[derive(Debug)]
 pub struct Locator<'a> {
-    /// The collection reference.
     collection: CollectionRef,
-    /// The name of the item in the referenced collection.
     name: ItemPath<'a>,
 }
 
@@ -413,29 +372,24 @@ impl<'a> Display for Locator<'a> {
 }
 
 impl<'a> Locator<'a> {
-    /// Returns the corresponding hash for this locator.
     pub fn hash(&self) -> Hash {
         self.collection
             .hash
             .rehash(&Hash::hash(self.name.0.as_ref()))
     }
 
-    /// The collection reference for this locator.
     pub fn collection(&self) -> CollectionRef {
         self.collection.clone()
     }
 
-    /// The full key in the database for this locator.
     pub fn path(&self) -> Vec<u8> {
         [self.collection.hash.as_ref(), self.name.0.as_bytes()].concat()
     }
 
-    /// Tries to retrieve the corresponding item from the database.
     pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
         self.collection.get(self.name.clone())
     }
 
-    /// Tries to retrieve the corresponding object from the database.
     pub fn get_object(&self) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(item) = self.get()? {
             Ok(Some(item.object()?))

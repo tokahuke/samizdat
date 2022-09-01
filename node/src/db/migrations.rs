@@ -1,6 +1,3 @@
-//! Migrations to be run to evolve the schema of the database and ensure forward
-//! version compatibility.
-
 use std::fmt::Debug;
 
 use super::Table;

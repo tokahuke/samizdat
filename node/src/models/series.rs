@@ -1,6 +1,3 @@
-//! Series are temporal sequences of collections that are authenticated by the same
-//! private key.
-
 use chrono::SubsecRound;
 use ed25519_dalek::Keypair;
 use rocksdb::{IteratorMode, WriteBatch};
@@ -17,19 +14,12 @@ use crate::db::Table;
 
 use super::{BookmarkType, CollectionRef, Droppable};
 
-/// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
-    /// An _internal_ name to identify this keypair.
     name: String,
-    /// The keypair that controls the series.
     keypair: Keypair,
-    /// The default time-to-leave. This is the reccommended minimum period peers should
-    /// wait to query the network for new connections.
     #[serde(with = "humantime_serde")]
     default_ttl: Duration,
-    /// Whether this series is a draft. Draft series cannot be shared with the Samizdat
-    /// network.
     #[serde(default)]
     is_draft: bool,
 }
@@ -45,7 +35,6 @@ impl Droppable for SeriesOwner {
 }
 
 impl SeriesOwner {
-    /// Inserts the series owner using the supplied [`WriteBatch`].
     fn insert(&self, batch: &mut WriteBatch) {
         let series = self.series();
 
@@ -61,7 +50,6 @@ impl SeriesOwner {
         );
     }
 
-    /// Creates a new [`SeriesOwner`] and inserts it into the database.
     pub fn create(
         name: &str,
         default_ttl: Duration,
@@ -83,7 +71,6 @@ impl SeriesOwner {
         Ok(owner)
     }
 
-    /// Creates a [`SeriesOwner`] from existing data and inserts it into the database.
     pub fn import(
         name: &str,
         public_key: Key,
@@ -110,7 +97,6 @@ impl SeriesOwner {
         Ok(owner)
     }
 
-    /// Retrieves a series owner from the database using the internal series name.
     pub fn get(name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
         let maybe_serialized = db().get_cf(Table::SeriesOwners.get(), name.as_bytes())?;
         if let Some(serialized) = maybe_serialized {
@@ -121,22 +107,18 @@ impl SeriesOwner {
         }
     }
 
-    /// Gets all series owners in this node.
     pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
         db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start)
             .map(|(_, value)| Ok(bincode::deserialize(&value)?))
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
-    /// Retrieves the series reference for this series owner.
     pub fn series(&self) -> SeriesRef {
         SeriesRef {
             public_key: Key::new(self.keypair.public),
         }
     }
 
-    /// Creates a new edition by signing a collection reference. If the supplied
-    /// time-to-leave is `None`, the default TTL will be used.
     fn sign(&self, collection: CollectionRef, ttl: Option<Duration>) -> Edition {
         Edition {
             signed: Signed::new(
@@ -152,7 +134,6 @@ impl SeriesOwner {
         }
     }
 
-    /// Advances the series by creating a new edition and inserting it into the database.
     pub fn advance(
         &self,
         collection: CollectionRef,
@@ -190,10 +171,8 @@ impl SeriesOwner {
     }
 }
 
-/// A reference to a series.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesRef {
-    /// The public key that defines this series.
     pub public_key: Key,
 }
 
@@ -226,23 +205,18 @@ impl FromStr for SeriesRef {
 // }
 
 impl SeriesRef {
-    /// Creates a new series reference from a given public key.
     pub fn new(public_key: Key) -> SeriesRef {
         SeriesRef { public_key }
     }
 
-    /// The public key that defines this series.
     pub fn public_key(&self) -> Key {
         self.public_key.clone()
     }
 
-    /// The public key that defines this series, as binary data.
     pub fn key(&self) -> &[u8] {
         self.public_key.as_bytes()
     }
 
-    /// Runs through the database looking for a series that matches the supplied riddle.
-    /// Returns `Ok(None)` if none is found.
     pub fn find(riddle: &Riddle) -> Option<SeriesRef> {
         let it = db().iterator_cf(Table::Series.get(), IteratorMode::Start);
 
@@ -347,7 +321,6 @@ impl SeriesRef {
         Ok(editions)
     }
 
-    /// Advances the series with the supplied edition, if the edition is valid.
     pub fn advance(&self, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {
             return Err(crate::Error::InvalidEdition);
@@ -378,7 +351,6 @@ impl SeriesRef {
         Ok(())
     }
 
-    /// Gets all the series references in the database.
     pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
         db().iterator_cf(Table::Series.get(), IteratorMode::Start)
             .map(|(_, value)| Ok(bincode::deserialize(&value)?))
@@ -386,64 +358,45 @@ impl SeriesRef {
     }
 }
 
-/// The content of an edition. This is the data that is assured by the signature of the
-/// edition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EditionContent {
-    /// The collection reference of this edition. This includes the root hash of the
-    /// collection.
     collection: CollectionRef,
-    /// The timestamp at which this collection was created, allegedly. More recent
-    /// editions supeseed less recent editions.
     timestamp: chrono::DateTime<chrono::Utc>,
-    /// The recommended time-to-leave for this edition.
     #[serde(with = "humantime_serde")]
     ttl: Duration,
 }
 
-/// An edition of a series.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edition {
-    /// The signed content of this edition.
     signed: Signed<EditionContent>,
-    /// The public key that signed this edition.
     public_key: Key,
-    /// Whether this edition is a draft. Draft editions are not shared with the
-    /// Samizdat network.
     #[serde(default)]
     is_draft: bool,
 }
 
 impl Edition {
-    /// The collection pointed by this edition.
     pub fn collection(&self) -> CollectionRef {
         self.signed.collection.clone()
     }
 
-    /// Whether this edition is a draft. Draft editions are not shared with the
-    /// Samizdat network.
     pub fn is_draft(&self) -> bool {
         self.is_draft
     }
 
-    /// Whether the signature is verified by the supplied key in the edition.
     pub fn is_valid(&self) -> bool {
         self.signed.verify(self.public_key.as_ref())
     }
 
-    /// The public key associated with this edition.
     pub fn public_key(&self) -> &Key {
         &self.public_key
     }
 
-    /// The series reference associated with this edition.
     pub fn series(&self) -> SeriesRef {
         SeriesRef {
             public_key: self.public_key.clone(),
         }
     }
 
-    /// The key of this edition in the database.
     #[inline(always)]
     fn key(&self) -> Vec<u8> {
         [
@@ -453,15 +406,11 @@ impl Edition {
         .concat()
     }
 
-    /// The timestamp at which this collection was created, allegedly. More recent
-    /// editions supeseed less recent editions.
     #[inline(always)]
     pub fn timestamp(&self) -> chrono::DateTime<chrono::Utc> {
         self.signed.timestamp
     }
 
-    /// Creates an announcement for this edition. Announcements can be shared with the
-    /// Samizdat network without revealing the public key associated with it.
     pub fn announcement(&self) -> EditionAnnouncement {
         let rand = Hash::rand();
         let content_hash = self.public_key.hash();
@@ -476,7 +425,6 @@ impl Edition {
         }
     }
 
-    /// Gets all the editions currently in the database.
     pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
         db().iterator_cf(Table::Editions.get(), IteratorMode::Start)
             .map(|(_, value)| Ok(bincode::deserialize(&value)?))

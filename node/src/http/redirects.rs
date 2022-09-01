@@ -1,4 +1,4 @@
-//! Redirects for the HTTP API.
+//! HTTP API for the Samizdat Node.
 
 use warp::Filter;
 

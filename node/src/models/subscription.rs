@@ -1,6 +1,3 @@
-//! A subscription is an active effort from the node to keep the full state of a given
-//! series as up-to-date as possible.
-
 use futures::prelude::*;
 use futures::stream;
 use rocksdb::{IteratorMode, WriteBatch};
@@ -16,37 +13,31 @@ use crate::hubs;
 
 use super::{Droppable, Edition, Inventory};
 
-/// The regimen of this subscription. Currently, only downloading the full inventory of
-/// the most current edition is supported.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SubscriptionKind {
-    /// Download the full inventory of the edition, as described in the
-    /// [`super::collection::Inventory`].
-    #[default]
     FullInventory,
 }
 
-/// A subscription is an active effort from the node to keep the full state of a given
-/// series as up-to-date as possible.
+impl Default for SubscriptionKind {
+    fn default() -> SubscriptionKind {
+        SubscriptionKind::FullInventory
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Subscription {
-    /// The public key corresponding to the series to be listened to.
     public_key: Key,
-    /// The regimen of this subscription.
     kind: SubscriptionKind,
 }
 
 impl Subscription {
-    /// Creates a new subscription.
     pub fn new(public_key: Key, kind: SubscriptionKind) -> Subscription {
         Subscription { public_key, kind }
     }
 }
 
-/// A reference to a subscription.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscriptionRef {
-    /// The public key corresponding to the series to be listened to.
     pub public_key: Key,
 }
 
@@ -64,7 +55,6 @@ impl Droppable for SubscriptionRef {
 }
 
 impl SubscriptionRef {
-    /// Creates a new subscription reference from a given series public key.
     pub fn new(public_key: Key) -> SubscriptionRef {
         SubscriptionRef { public_key }
     }
@@ -73,12 +63,10 @@ impl SubscriptionRef {
     //     self.public_key.clone()
     // }
 
-    /// The key of this subscription in the database.
     pub fn key(&self) -> &[u8] {
         self.public_key.as_bytes()
     }
 
-    /// Creates a subscription and inserts it into the database.
     pub fn build(subscription: Subscription) -> Result<SubscriptionRef, crate::Error> {
         let mut batch = rocksdb::WriteBatch::default();
 
@@ -95,8 +83,6 @@ impl SubscriptionRef {
         })
     }
 
-    /// Gets the subscription corresponding to this reference in the database, if it
-    /// exists.
     pub fn get(&self) -> Result<Option<Subscription>, crate::Error> {
         let maybe_value = db().get_cf(Table::Subscriptions.get(), &self.key())?;
         Ok(maybe_value
@@ -104,15 +90,12 @@ impl SubscriptionRef {
             .transpose()?)
     }
 
-    /// Gets all subscriptions currently in the database.
     pub fn get_all() -> Result<Vec<Subscription>, crate::Error> {
         db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start)
             .map(|(_, value)| Ok(bincode::deserialize(&value)?))
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
-    /// Runs through the database looking for a subscription the matches the supplied
-    /// riddle. Returns `None` if no subscription matches the riddle.
     pub fn find(riddle: &Riddle) -> Option<SubscriptionRef> {
         let it = db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start);
 

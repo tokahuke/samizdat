@@ -1,5 +1,3 @@
-//! Series API.
-
 use serde_derive::Deserialize;
 use std::time::Duration;
 use warp::path::Tail;

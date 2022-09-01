@@ -18,13 +18,9 @@ use rocksdb::WriteBatch;
 
 use crate::db;
 
-/// An object that must be correctly removed from the DB.
 pub trait Droppable {
-    /// Writes the operations to safely remove the object from the database into the
-    /// [`WriteBatch`]. This method should not change the state of the database directly.
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error>;
 
-    /// Safely drops the object from the database.
     fn drop_if_exists(&self) -> Result<(), crate::Error> {
         let mut batch = WriteBatch::default();
         self.drop_if_exists_with(&mut batch)?;
