@@ -89,3 +89,12 @@ fn get_identities() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
         .map(|| Identity::get_all())
         .map(api_reply)
 }
+
+// fn delete_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+//     warp::path!("_identities" / IdentityRef)
+//         .and(warp::delete())
+//         .and(authenticate([AccessRight::ManageIdentities]))
+//         .map(|identity| {
+
+//         }).map(api_reply)
+// }
