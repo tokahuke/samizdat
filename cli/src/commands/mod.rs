@@ -23,7 +23,7 @@ use crate::html::maybe_proxy_page;
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
-    println!("{}", Table::new(t).with(tabled::Style::github_markdown()))
+    println!("{}", Table::new(t).with(tabled::Style::markdown()))
 }
 
 pub async fn upload(
