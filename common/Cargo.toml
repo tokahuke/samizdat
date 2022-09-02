@@ -29,7 +29,7 @@ tokio-stream = { version = "0.1.9", features = ["net"] }
 sha3 = "0.10.2"
 warp = { version = "0.3.2", default-features = false }
 getrandom = "0.2.7"
-quinn = "0.8.5"
+quinn = "=0.8.2" # do NOT upgrade until quinn bugfix!
 rustls = { version = "0.20.6", default-features = false, features = ["quic", "dangerous_configuration"] }
 webpki = "0.22.0"
 rcgen = "0.9.3"

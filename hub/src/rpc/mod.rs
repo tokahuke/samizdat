@@ -275,7 +275,7 @@ pub async fn run_direct(
     stream::iter(all_incoming)
         .flatten()
         .filter_map(|connecting| async move {
-            let remote_addr = connecting.remote_address();
+            let remote_addr = utils::socket_to_canonical(connecting.remote_address());
             connecting
                 .await
                 .map_err(|err| log::warn!("failed to establish QUIC connection with {remote_addr}: {err}"))
