@@ -1,0 +1,15 @@
+##
+# Run from project root with
+# ```
+# docker-compose --file install/docker-compose.yaml up --build
+# ```
+##
+
+version: "3"
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Build.dockerfile
+    volumes:
+      - ..:/build
