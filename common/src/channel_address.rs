@@ -3,7 +3,6 @@
 //! in the same connection. Remember that we cannot create connections from,
 //! e.g., ephemeral ports because NATs/Firewalls.
 
-
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 use std::net::SocketAddr;

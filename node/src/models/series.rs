@@ -124,7 +124,10 @@ impl SeriesOwner {
     /// Gets all series owners in this node.
     pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
         db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start)
-            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .map(|item| {
+                let (_, value) = item?;
+                Ok(bincode::deserialize(&value)?)
+            })
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
@@ -243,15 +246,16 @@ impl SeriesRef {
 
     /// Runs through the database looking for a series that matches the supplied riddle.
     /// Returns `Ok(None)` if none is found.
-    pub fn find(riddle: &Riddle) -> Option<SeriesRef> {
+    pub fn find(riddle: &Riddle) -> Result<Option<SeriesRef>, crate::Error> {
         let it = db().iterator_cf(Table::Series.get(), IteratorMode::Start);
 
-        for (key, value) in it {
+        for item in it {
+            let (key, value) = item?;
             match Key::from_bytes(&key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
                         match bincode::deserialize(&value) {
-                            Ok(series) => return Some(series),
+                            Ok(series) => return Ok(Some(series)),
                             Err(err) => {
                                 log::warn!("{}", err);
                                 break;
@@ -266,13 +270,14 @@ impl SeriesRef {
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Whether there is a local "series owner" for this series.
     pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
-        for (_, owner) in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
+        for item in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
+            let (_, owner) = item?;
             let owner: SeriesOwner = bincode::deserialize(&owner)?;
             if self.public_key.as_ref() == &owner.keypair.public {
                 return Ok(true);
@@ -335,7 +340,8 @@ impl SeriesRef {
         let prefix = self.key();
         let mut editions = db()
             .prefix_iterator_cf(Table::Editions.get(), prefix)
-            .map(|(_key, value)| {
+            .map(|item| {
+                let (_key, value) = item?;
                 let edition: Edition = bincode::deserialize(&value)?;
                 Ok(edition)
             })
@@ -381,7 +387,10 @@ impl SeriesRef {
     /// Gets all the series references in the database.
     pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
         db().iterator_cf(Table::Series.get(), IteratorMode::Start)
-            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .map(|item| {
+                let (_, value) = item?;
+                Ok(bincode::deserialize(&value)?)
+            })
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 }
@@ -479,7 +488,10 @@ impl Edition {
     /// Gets all the editions currently in the database.
     pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
         db().iterator_cf(Table::Editions.get(), IteratorMode::Start)
-            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .map(|item| {
+                let (_, value) = item?;
+                Ok(bincode::deserialize(&value)?)
+            })
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 }

@@ -164,9 +164,9 @@ impl Droppable for CollectionItem {
 
 impl CollectionItem {
     /// Checks whether a collection item is valid, that is
-    /// 
+    ///
     /// 1. If the inclusion proof is valid for the claimed collection.
-    /// 2. If the clamed name corresponds to the claimed key hash in the inclusion proof. 
+    /// 2. If the clamed name corresponds to the claimed key hash in the inclusion proof.
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
         let key = Hash::hash(self.name.0.as_bytes());
@@ -207,7 +207,8 @@ impl CollectionItem {
     pub fn find(content_riddle: &Riddle) -> Result<Option<CollectionItem>, crate::Error> {
         let iter = db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start);
 
-        for (key, value) in iter {
+        for item in iter {
+            let (key, value) = item?;
             let hash: Hash = match key.as_ref().try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
@@ -262,7 +263,7 @@ pub struct CollectionRef {
 impl Droppable for CollectionRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         for name in self.list() {
-            if let Some(item) = self.get(name.as_path())? {
+            if let Some(item) = self.get(name?.as_path())? {
                 item.drop_if_exists_with(batch)?;
             }
         }
@@ -377,10 +378,11 @@ impl CollectionRef {
 
     /// Returns an iterator over all the item paths for the current collection that
     /// currently exist in the database.
-    pub fn list(&'_ self) -> impl '_ + Iterator<Item = ItemPathBuf> {
+    pub fn list(&'_ self) -> impl '_ + Iterator<Item = Result<ItemPathBuf, crate::Error>> {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
-            .map(move |(key, _)| {
-                ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..]))
+            .map(move |item| {
+                let (key, _) = item?;
+                Ok(ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..])))
             })
     }
 
@@ -388,11 +390,14 @@ impl CollectionRef {
     /// currently exist in the database.
     pub fn list_objects(&'_ self) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
         self.list().filter_map(move |name| {
-            let locator = Locator {
+            name.and_then(|name| {
+                let locator = Locator {
                 collection: self.clone(),
                 name: name.as_path(),
-            };
-            locator.get_object().transpose()
+                };
+
+                locator.get_object()
+            }).transpose()
         })
     }
 }

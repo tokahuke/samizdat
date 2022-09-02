@@ -1,7 +1,7 @@
 //! Defines the standard use of a symmetric cypher, using `AES256-GCM-SIV`.
 
-use aes_gcm_siv::aead::{AeadInPlace, NewAead};
-use aes_gcm_siv::{Aes256GcmSiv, Key, Nonce};
+use aes_gcm_siv::aead::{AeadInPlace, KeyInit};
+use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::fmt::Debug;
@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use crate::Hash;
 
-/// A simmetric cypher for coding data using `AES256-GCM-SIV`.
+/// A symmetric cypher for coding data using `AES256-GCM-SIV`.
 pub struct TransferCipher {
     /// A nonce for the cipher.
     nonce: Nonce,
@@ -31,8 +31,7 @@ impl TransferCipher {
         }
 
         let hash_ext = extend(&content_hash.0);
-        let key = Key::from_slice(&hash_ext);
-        let cipher = Aes256GcmSiv::new(key);
+        let cipher = Aes256GcmSiv::new_from_slice(&hash_ext).expect("slice has correct key size");
 
         let nonce = *Nonce::from_slice(&nonce[..12]);
 
@@ -108,7 +107,7 @@ where
 }
 
 /// An encrypted piece of information, with type information on the encrypted content
-/// errased.
+/// erased.
 #[derive(Clone, SerdeSerialize, SerdeDeserialize)]
 pub struct OpaqueEncrypted {
     data: Vec<u8>,

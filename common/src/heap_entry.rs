@@ -4,8 +4,8 @@
 use std::cmp;
 
 /// A helper `struct` to be used in conjunction with [`std::collections::BinaryHeap`] in
-/// order to make it behave like a map. 
-/// 
+/// order to make it behave like a map.
+///
 /// The ordering of the [`HeapEntry`] is the same as the ordering of `P`.
 #[derive(Debug)]
 pub struct HeapEntry<P, T> {

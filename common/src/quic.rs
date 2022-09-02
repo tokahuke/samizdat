@@ -14,7 +14,7 @@ const DEFAULT_SERVER_NAME: &str = "spartacus";
 
 /// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
 /// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
-/// 
+///
 /// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
 struct SkipServerVerification;
 
