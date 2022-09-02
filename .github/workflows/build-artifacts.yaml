@@ -19,7 +19,9 @@ jobs:
         toolchain: nightly
         default: true
         profile: minimal
-        target: x86_64-unknown-linux-gnu aarch64-apple-darwin
+
+    - name: Install Rust Targets
+      run: rustup target add x86_64-unknown-linux-gnu && rustup target add aarch64-apple-darwin
 
     - name: Running cache
       uses: Swatinem/rust-cache@v1
