@@ -1,3 +1,5 @@
+//! Authentication API for web applications.
+
 use askama::Template;
 use rocksdb::IteratorMode;
 use serde_derive::Deserialize;
@@ -23,6 +25,8 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     )
 }
 
+/// Gets the access rights for a given entity. This can only be called from a trusted
+/// context.
 fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth" / ..)
         .and(warp::path::tail())
@@ -42,6 +46,8 @@ fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
         .map(api_reply)
 }
 
+/// Gets the access rights for the current entity (current entity is decided based on
+/// the `Referer` header).
 fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     warp::path!("_auth" / "_current")
@@ -60,6 +66,7 @@ fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         .map(api_reply)
 }
 
+/// Gets the list of all entities and all associated access rights.
 fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth")
         .and(warp::get())
@@ -80,6 +87,8 @@ fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .map(api_reply)
 }
 
+/// Changes (or sets) the access rights for a given entity. This can only be called from
+/// a trusted context.
 fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Debug, Deserialize)]
     struct Request {
@@ -115,6 +124,7 @@ fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
         .map(api_reply)
 }
 
+/// Revokes all access rights for a given entity.
 fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_auth" / ..)
         .and(warp::path::tail())
@@ -135,11 +145,19 @@ fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
 /// Authentication header was sent, but token was invalid.
 #[derive(Debug)]
 pub enum Forbidden {
+    /// The token format is wrong.
     BadToken(String),
+    /// The origin of the `Referer` header does not corresponds to the Samizdat origin.
     BadOrigin(url::Origin),
+    /// The `Referer` header path does not corresponds to an entity.
     NotAnEntity(String),
+    /// The call was expected to be done only from an untrusted context, but it was done
+    /// from a trusted context.
     TrustedContext(Url),
+    /// The call was expected to be done only from a trusted context, but it was done
+    /// from an untrusted context.
     NotTrustedContext(Url),
+    /// Not enough privilege to perform the call.
     InsufficientPrivilege,
 }
 
@@ -167,7 +185,10 @@ impl Display for Forbidden {
 /// Authentication header was not sent and must be sent.
 #[derive(Debug, Clone, Copy)]
 pub enum Unauthorized {
+    /// The call has no `Referer` header.
     MissingReferer,
+    /// The call has no `Bearer` token in the `Authorization` header or `Authorization`
+    /// header is missing.
     Unauthorized,
 }
 
@@ -235,6 +256,8 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
     })
 }
 
+/// Authenticates a call using bearer authorization using the access token. This is
+/// intended for use of local applications (e.g, the Samizdat CLI).
 fn authenticate_authorization(
 ) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Authorization")
@@ -252,6 +275,8 @@ fn authenticate_authorization(
         })
 }
 
+/// Authenticates a call using the `Referer` header to extract the entity and checking
+/// if the entity has any of the required rights.
 fn authenticate_security_scope<const N: usize>(
     required_rights: [AccessRight; N],
 ) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
@@ -283,6 +308,7 @@ fn authenticate_security_scope<const N: usize>(
     })
 }
 
+/// Authenticates a call from a trusted context.
 fn authenticate_trusted_context(
 ) -> impl Filter<Extract = (Option<Forbidden>,), Error = warp::Rejection> + Clone {
     warp::header("Referer").map(|referer: Url| {
@@ -294,7 +320,7 @@ fn authenticate_trusted_context(
     })
 }
 
-/// Authenticate to the private part of the API.
+/// Authenticate to the private part of the API using any of the authentication methods.
 pub fn authenticate<const N: usize>(
     required_rights: [AccessRight; N],
 ) -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
@@ -324,6 +350,8 @@ pub fn authenticate_only_trusted() -> impl Filter<Extract = (), Error = warp::Re
         .untuple_one()
 }
 
+/// Renders the registration page, where web applications can ask the user for special
+/// access rights to the local Samizdat node.
 #[derive(askama::Template)]
 #[template(path = "register.html")]
 struct RegisterTemplate<'a> {
@@ -331,6 +359,7 @@ struct RegisterTemplate<'a> {
     rights: &'a [AccessRight],
 }
 
+/// Gets the registration page.
 fn get_register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_register")
         .and(security_scope())

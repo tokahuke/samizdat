@@ -1,3 +1,7 @@
+//! Objects are files in the Samizdat network that are uniquely identified by their
+//! hash. Objects are powered by Merkle trees to allow torrent-like download and better
+//! storage of similar content.
+
 use chrono::{DateTime, Utc};
 use futures::prelude::*;
 use rocksdb::{IteratorMode, WriteBatch};
@@ -12,6 +16,7 @@ use super::{Bookmark, BookmarkType, Droppable};
 
 /// The size of a chunk. An object consists of a sequence of chunks, the hash
 /// of which are used to create the Merkle tree whose root hash is the object
+/// hash.
 pub const CHUNK_SIZE: usize = 256_000;
 
 /// The first section before the actual content of the object. The header is
@@ -29,6 +34,7 @@ pub struct ObjectHeader {
 }
 
 impl ObjectHeader {
+    /// Creates a new object header.
     pub fn new(content_type: String, is_draft: bool) -> Result<ObjectHeader, crate::Error> {
         Ok(ObjectHeader {
             content_type,
@@ -37,14 +43,20 @@ impl ObjectHeader {
         })
     }
 
+    /// The MIME type of this object.
     pub fn content_type(&self) -> &str {
         &self.content_type
     }
 
+    /// Whether this is a draft object or not. Draft objects cannot be shared
+    /// publicly.
     pub fn is_draft(&self) -> bool {
         self.is_draft
     }
 
+    /// Creates a new object header that contains the same information as the current
+    /// header, but changes the nonce. This allows objects of the same content to be
+    /// issued under different hashes.
     pub fn reissue(&self) -> ObjectHeader {
         ObjectHeader {
             content_type: self.content_type.clone(),
