@@ -6,30 +6,30 @@ on:
       - main
 
 jobs:
-  build:
-    name: Build
-    runs-on: macos-latest
-    steps:
-    - name: Check out repository code
-      uses: actions/checkout@v2
+  build: {}
+    # name: Build
+    # runs-on: macos-latest
+    # steps:
+    # - name: Check out repository code
+    #   uses: actions/checkout@v2
     
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        default: true
-        profile: minimal
+    # - name: Install Rust
+    #   uses: actions-rs/toolchain@v1
+    #   with:
+    #     toolchain: nightly
+    #     default: true
+    #     profile: minimal
 
-    - name: Install Rust Targets
-      run: rustup target add x86_64-unknown-linux-gnu && rustup target add aarch64-apple-darwin
+    # - name: Install Rust Targets
+    #   run: rustup target add x86_64-unknown-linux-gnu && rustup target add aarch64-apple-darwin
 
-    - name: Running cache
-      uses: Swatinem/rust-cache@v1
-      with:
-        cache-on-failure: true
+    # - name: Running cache
+    #   uses: Swatinem/rust-cache@v1
+    #   with:
+    #     cache-on-failure: true
     
-    - name: Running build
-      run: ./install/build.sh 'aarch64-apple-darwin x86_64-unknown-linux-gnu'
+    # - name: Running build
+    #   run: ./install/build.sh 'aarch64-apple-darwin x86_64-unknown-linux-gnu'
 
-    - name: Done
-      run: echo Done
+    # - name: Done
+    #   run: echo Done
