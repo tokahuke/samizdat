@@ -1,3 +1,5 @@
+//! Defines the standard hash format that is used in the whole Samizdat codebase.
+
 use serde_derive::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_224};
 use std::convert::{TryFrom, TryInto};
@@ -5,6 +7,7 @@ use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::FromStr;
 
+/// The standard hash format that is used in Samizdat.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Hash(pub [u8; 28]);
 
@@ -64,17 +67,25 @@ impl From<i64> for Hash {
 }
 
 impl Hash {
+    /// Creates a [`struct@Hash`] object from a binary hash value, which has to be 28
+    /// bytes long.
+    /// 
     /// # Panics
     ///
-    /// If the received slice does not have the correct length of 64 bytes.
+    /// If the received slice does not have the correct length of 28 bytes.
     pub fn new(x: impl AsRef<[u8]>) -> Hash {
         Hash(x.as_ref().try_into().expect("bad hash value"))
     }
 
+    /// Hashes a given piece of binary data.
     pub fn hash(thing: impl AsRef<[u8]>) -> Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
     }
 
+    /// Creates a random hash value, without any associated binary information.
+    /// 
+    /// This function uses [`getrandom`] to create a hash value. If creating a lot of
+    /// hashes, consider using [`Hash::rand_with`] instead.
     pub fn rand() -> Hash {
         let mut rand = [0; 28];
         getrandom::getrandom(&mut rand).expect("getrandom failed");
@@ -82,7 +93,7 @@ impl Hash {
         Hash(rand)
     }
 
-    /// Just like [`rand`], but allows for a local RNG (better throughput).
+    /// Just like [`Hash::rand`], but allows for a local RNG (better throughput).
     pub fn rand_with<R: rand::Rng>(rng: &mut R) -> Hash {
         let mut rand = [0; 28];
 
@@ -93,10 +104,14 @@ impl Hash {
         Hash(rand)
     }
 
+    /// Calculates the hash of the concatenation of `self` with another supplied hash.
+    /// This operation is the backbone of the Merkle tree implementations.
     pub fn rehash(&self, rand: &Hash) -> Hash {
         Hash::hash([rand.0, self.0].concat())
     }
 
+    /// Checks whether this hash value is contained in a Merkle tree with root hash `root`,
+    /// given an inclusion proof.
     pub fn is_proved_by(&self, root: &Hash, proof: &InclusionProof) -> bool {
         let mut mask = 1;
         let mut current = *self;
@@ -120,7 +135,9 @@ impl Hash {
     }
 }
 
+/// A Merkle tree implementation that orders hashes in a list. Hashes are thus keyed by their index in the list. For a map-like implementation of a Merkle tree, see the [`crate::PatriciaMap`] implementation.
 pub struct MerkleTree {
+    /// The binary tree. Each item of the vector corresponds to a level of a tree.
     tree: Vec<Vec<Hash>>,
 }
 
@@ -154,23 +171,28 @@ impl From<Vec<Hash>> for MerkleTree {
 }
 
 impl MerkleTree {
+    /// Returns the root hash of the tree.
     pub fn root(&self) -> Hash {
         self.tree[0][0]
     }
 
+    /// The number of items in this Merkle tree.
     pub fn len(&self) -> usize {
         self.tree.last().expect("not empty").len()
     }
 
+    /// Whether this Merkle tree is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the list of hashes for this Merkle tree.
     pub fn hashes(&self) -> &[Hash] {
         self.tree.last().expect("not empty")
     }
 
-    /// Returns `None` if `index` out of range.
+    /// Builds the inclusion proof for a given item in the tree. Returns `None` if `index`
+    /// out of range.
     pub fn proof_for(&self, index: usize) -> Option<InclusionProof> {
         if index > self.len() {
             return None;
@@ -182,6 +204,7 @@ impl MerkleTree {
             .tree
             .iter()
             .map(|level| {
+                // `n-1` if `n` is odd, `n+1` is `n` is even. 
                 let sibling_index = level_index ^ 1;
                 level_index >>= 1;
 
@@ -198,13 +221,18 @@ impl MerkleTree {
     }
 }
 
+/// An inclusion proof for a given position in a Merkle tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InclusionProof {
+    /// The completing hashes in the Merkle tree.
     pub path: Box<[Hash]>,
+    /// The claimed index in the Merkle tree.
     pub index: usize,
 }
 
 impl InclusionProof {
+    /// Checks if this inclusion proof actually proves the inclusion of a given hash in a
+    /// given tree, represented by its root hash.
     pub fn proves(&self, root: &Hash, hash: &Hash) -> bool {
         hash.is_proved_by(root, self)
     }

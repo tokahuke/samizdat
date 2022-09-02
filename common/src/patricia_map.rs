@@ -6,6 +6,7 @@ use crate::Hash;
 use serde_derive::{Deserialize, Serialize};
 use std::iter::FromIterator;
 
+/// Returns an iterator over the bits of the supplied hash.
 fn bits(hash: &'_ Hash) -> impl '_ + DoubleEndedIterator<Item = Side> {
     hash.0.iter().flat_map(|byte| {
         (0..8).map(move |i| {
@@ -18,6 +19,7 @@ fn bits(hash: &'_ Hash) -> impl '_ + DoubleEndedIterator<Item = Side> {
     })
 }
 
+/// The side of the binary tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
     Left = 1,
@@ -25,6 +27,7 @@ enum Side {
 }
 
 impl Side {
+    /// Inverts the given side.
     fn other(self) -> Side {
         match self {
             Side::Left => Side::Right,
@@ -39,13 +42,18 @@ enum FollowStatus {
     FoundLeaf,
 }
 
+/// A segment is an edge in the Patricia tree graph. It contains a slice of binary data.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Segment {
+    /// The slice of binary data. Because the key of the Patricia tree is a [`Hash`], we
+    /// can use a [`Hash`] to contain the segment of the key here.
     slice: Hash,
+    /// The length of the segment.
     len: u8,
 }
 
 impl Segment {
+    /// Creates a segment from bits, encoded as binary tree sides.
     fn from_bits(it: impl Iterator<Item = Side>) -> Segment {
         let mut len = 0;
         let mut slice = Hash::default();
@@ -62,6 +70,8 @@ impl Segment {
         Segment { slice, len }
     }
 
+    /// Returns an iterator over the bits in this segment, represented as binary tree
+    /// sides.
     fn bits(&'_ self) -> impl '_ + Iterator<Item = Side> {
         bits(&self.slice).take(self.len as usize)
     }
@@ -88,6 +98,7 @@ impl Segment {
         }
     }
 
+    /// Split a segment into two segments at the requested position.
     fn split_at(&self, split_at: u8) -> (Segment, Segment) {
         let prefix = Segment::from_bits(self.bits().take(split_at as usize));
         let suffix = Segment::from_bits(self.bits().skip((split_at + 1) as usize));
@@ -96,28 +107,39 @@ impl Segment {
     }
 }
 
+/// A node in the Patricia tree.
 #[derive(Debug, Default)]
 struct Node {
+    /// The has of the current node.
     hash: Hash,
+    /// Wheter this node is up to date. This is used during tree updates.
     is_up_to_date: bool,
+    /// The children of this node. If the child does not exist, then it is
+    /// represented by `None`.
     children: [Option<Child>; 2],
 }
 
+/// A child of a node in the Patricia tree.
 #[derive(Debug, Default)]
 struct Child {
+    /// The segment that leads to the next node.
     segment: Segment,
+    /// The node that is next in line.
     next: Option<Box<Node>>,
 }
 
 impl Child {
+    /// A mutable reference to the next node.
     fn next_mut(&mut self) -> &mut Node {
         self.next.as_mut().expect("should be not none")
     }
 
+    /// A reference to the next node.
     fn next(&self) -> &Node {
         self.next.as_ref().expect("should be not none")
     }
 
+    /// The hash that is seen by the node that has this child.
     fn hash(&self) -> Hash {
         let mut current = self.next.as_ref().expect("should be not none").hash;
 
@@ -136,6 +158,7 @@ impl Child {
         current
     }
 
+    /// Updates the hash value of the next node, returning the updated hash.
     fn update(&mut self) -> Hash {
         self.next_mut().update();
         self.hash()
@@ -143,6 +166,7 @@ impl Child {
 }
 
 impl Node {
+    /// Creates a leaf node with a given hash.
     fn leaf(hash: Hash) -> Node {
         Node {
             children: [None, None],
@@ -151,6 +175,7 @@ impl Node {
         }
     }
 
+    /// Gets a mutable reference to a side of the node.
     fn get_mut(&mut self, side: Side) -> &mut Option<Child> {
         match (side, &mut self.children) {
             (Side::Left, [left, _]) => left,
@@ -158,6 +183,7 @@ impl Node {
         }
     }
 
+    /// Gets a reference to a side of the node.
     fn get(&self, side: Side) -> &Option<Child> {
         match (side, &self.children) {
             (Side::Left, [left, _]) => left,
@@ -165,6 +191,7 @@ impl Node {
         }
     }
 
+    /// Recursively updates this node if it is not already up to date.
     fn update(&mut self) {
         // Nothing to do; avoid unnecessary recursion.
         if self.is_up_to_date {
@@ -188,8 +215,21 @@ impl Node {
     }
 }
 
+/// A Patricia tree implementation.
+/// 
+/// A Patricia tree works just like a Merkle tree. However, while the items in the Merkle
+/// tree were indexed by a [`usize`], the items in the Patricia tree are indexed by a
+/// [`struct@Hash`]. Because a [`struct@Hash`] is much longer than a [`usize`], the size
+/// of a Merkle tree would be too big for a reasonable implementation. The Patricia tree,
+/// however, takes advantage of the sparseness inherent to a Merkle tree with big key,
+/// compressing the many unoccupied nodes into "segments" and storing them in the _edges_ 
+/// of the tree. This helps to reduce the tree to a manageable size.
+/// 
+/// For more information in Patricia trees, see 
+/// [Wikipedia](https://en.wikipedia.org/wiki/Radix_tree).
 #[derive(Debug, Default)]
 pub struct PatriciaMap {
+    /// The root node of the tree.
     root: Node,
 }
 
@@ -215,14 +255,18 @@ impl<'a> IntoIterator for &'a PatriciaMap {
 }
 
 impl PatriciaMap {
+    /// Creates an empty Patricia tree.
     pub fn new() -> PatriciaMap {
         PatriciaMap::default()
     }
 
+    /// Returns the root node of this tree.
     pub fn root(&self) -> &Hash {
         &self.root.hash
     }
 
+    /// Inserts a new entry into the Patricia tree, returning the old value associated to
+    /// the key, if it already existed in the tree.
     pub fn insert(&mut self, key: Hash, value: Hash) -> Option<Hash> {
         let mut bits = bits(&key);
 
@@ -306,6 +350,8 @@ impl PatriciaMap {
         old_hash
     }
 
+    /// Creates the inclusion proof fot a given key in the tree. This function returns
+    /// [`None`] if the key is not included in the tree. 
     pub fn proof_for(&self, key: Hash) -> Option<PatriciaProof> {
         let mut bits = bits(&key);
 
@@ -355,8 +401,10 @@ impl PatriciaMap {
             claimed_value: hash,
             path,
         })
+
     }
 
+    /// An iterator over the entries in this tree.
     pub fn iter(&self) -> Iter {
         Iter {
             stack: vec![&self.root],
@@ -366,6 +414,7 @@ impl PatriciaMap {
     }
 }
 
+/// An inclusion proof for a given entry in a given tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatriciaProof {
     claimed_key: Hash,
@@ -375,14 +424,18 @@ pub struct PatriciaProof {
 }
 
 impl PatriciaProof {
+    /// The value claimed to be in the tree.
     pub fn claimed_value(&self) -> &Hash {
         &self.claimed_value
     }
 
+    /// The key claimed to be in tree.
     pub fn claimed_key(&self) -> &Hash {
         &self.claimed_key
     }
 
+    /// Checks wheter the inclusion proof is valid for a Patricia tree with a given root
+    /// hash.
     pub fn is_in(&self, root: &Hash) -> bool {
         // Check if proof is the right length:
         // (`usize` mitigates overflow shenanigans).
@@ -423,6 +476,7 @@ impl PatriciaProof {
     }
 }
 
+/// An iterator over the entries in a Patricia tree.
 pub struct Iter<'a> {
     stack: Vec<&'a Node>,
     choice_stack: Vec<Side>,
@@ -430,6 +484,8 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iter<'a> {
+    /// This function is used to walk the iterator over tree. It tries to find a sibling
+    /// for the current node and, if none is found, backtracks to the previous level.
     fn sibling_or_backtrack(&mut self) {
         let _top = self.stack.pop();
 
