@@ -275,9 +275,10 @@ pub async fn run_direct(
     stream::iter(all_incoming)
         .flatten()
         .filter_map(|connecting| async move {
+            let remote_addr = connecting.remote_address();
             connecting
                 .await
-                .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
+                .map_err(|err| log::warn!("failed to establish QUIC connection with {remote_addr}: {err}"))
                 .ok()
         })
         .map(|new_connection| {
