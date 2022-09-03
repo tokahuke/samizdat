@@ -10,7 +10,7 @@ use crate::{Hash, MessageRiddle, Riddle};
 /// The channel id to be used when initiating a connection with a candidate peer.
 pub type CandidateChannelId = u32;
 
-/// The kind of a query, i.e., whether the sent content hash corresponds to an object 
+/// The kind of a query, i.e., whether the sent content hash corresponds to an object
 /// hash or to an item hash.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QueryKind {

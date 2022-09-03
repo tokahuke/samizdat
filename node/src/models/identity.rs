@@ -99,15 +99,16 @@ impl Droppable for Identity {
 impl Identity {
     /// Runs through the database trying to find an identity that fits to the supplied
     /// content riddle. Returns `Ok(None)` if no matching item is found.
-    pub fn find(riddle: &Riddle) -> Option<Identity> {
+    pub fn find(riddle: &Riddle) -> Result<Option<Identity>, crate::Error> {
         let it = db().iterator_cf(Table::Identities.get(), IteratorMode::Start);
 
-        for (key, value) in it {
+        for item in it {
+            let (key, value) = item?;
             match Hash::try_from(&*key) {
                 Ok(hash) => {
                     if riddle.resolves(&hash) {
                         match bincode::deserialize(&value) {
-                            Ok(identity) => return Some(identity),
+                            Ok(identity) => return Ok(Some(identity)),
                             Err(err) => {
                                 log::warn!("{err}");
                                 break;
@@ -122,7 +123,7 @@ impl Identity {
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Retrieves an identity from the database for a given identity reference.
@@ -136,7 +137,10 @@ impl Identity {
     /// Lists all the identities currently in the database.
     pub fn get_all() -> Result<Vec<Identity>, crate::Error> {
         db().iterator_cf(Table::Identities.get(), IteratorMode::Start)
-            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .map(|item| {
+                let (_, value) = item?;
+                Ok(bincode::deserialize(&value)?)
+            })
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
@@ -160,7 +164,7 @@ impl Identity {
     }
 
     /// Checks whether this identity is valid, that is
-    /// 
+    ///
     /// 1. If the handle is valid.
     /// 2. If the proof-of-work matches the provided handle and public key.
     /// 3. If the work done is at least the minimum amount required.
@@ -180,10 +184,10 @@ impl Identity {
         self.proof.work_done()
     }
 
-    /// Creates a new identity. 
-    /// 
+    /// Creates a new identity.
+    ///
     /// # Note
-    /// 
+    ///
     /// This function can be very computationally intense. Besides, it is single-threaded.
     /// To create real-world identities, use the CLI instead.
     fn forge(identity: IdentityRef, series: SeriesRef, work_target: f64) -> Identity {
@@ -206,9 +210,9 @@ impl Identity {
     }
 
     /// Creates a new identity and inserts it into the database.
-    /// 
+    ///
     /// # Note
-    /// 
+    ///
     /// This function can be very computationally intense. Besides, it is single-threaded.
     /// To create real-world identities, use the CLI instead.
     pub fn create(

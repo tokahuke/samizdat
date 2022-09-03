@@ -26,7 +26,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
 /// Creates a cryptographically safe pseudo-random number generatros using [`getrandom`] to
-/// generate the seed. 
+/// generate the seed.
 pub fn csprng() -> ChaChaRng {
     let mut seed = [0; 8];
     getrandom::getrandom(&mut seed).expect("getrandom failed");

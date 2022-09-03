@@ -84,7 +84,8 @@ pub fn clear() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .map(|entity: Entity| {
             let mut batch = WriteBatch::default();
 
-            for (key, _) in db().iterator_cf(Table::KVStore.get(), IteratorMode::Start) {
+            for item in db().iterator_cf(Table::KVStore.get(), IteratorMode::Start) {
+                let (key, _) = item?;
                 let (key_entity, _): (Entity, String) = bincode::deserialize(&*key)?;
                 if entity == key_entity {
                     batch.delete_cf(Table::KVStore.get(), &key);

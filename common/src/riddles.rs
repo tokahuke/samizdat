@@ -29,7 +29,7 @@ impl<T> Message<T> {
 
 /// Riddles are cryptographic challenges use to test whether an agent knows a given
 /// information without revealing the information itself.
-/// 
+///
 /// More specificly, a riddle is a cryptographic riddle for a hidden value. It basically
 /// asks: which [`struct@Hash`] `h` has `H(h || nonce)` equal to `X`? If `H` is a sound
 /// hashing function, then the only ones who can solve this riddle are the ones who know

@@ -69,7 +69,7 @@ impl From<i64> for Hash {
 impl Hash {
     /// Creates a [`struct@Hash`] object from a binary hash value, which has to be 28
     /// bytes long.
-    /// 
+    ///
     /// # Panics
     ///
     /// If the received slice does not have the correct length of 28 bytes.
@@ -83,7 +83,7 @@ impl Hash {
     }
 
     /// Creates a random hash value, without any associated binary information.
-    /// 
+    ///
     /// This function uses [`getrandom`] to create a hash value. If creating a lot of
     /// hashes, consider using [`Hash::rand_with`] instead.
     pub fn rand() -> Hash {
@@ -204,7 +204,7 @@ impl MerkleTree {
             .tree
             .iter()
             .map(|level| {
-                // `n-1` if `n` is odd, `n+1` is `n` is even. 
+                // `n-1` if `n` is odd, `n+1` is `n` is even.
                 let sibling_index = level_index ^ 1;
                 level_index >>= 1;
 

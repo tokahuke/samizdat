@@ -1,4 +1,4 @@
-//! A channel that can be multiplexed with a key. 
+//! A channel that can be multiplexed with a key.
 
 use futures::{channel::mpsc, Stream, StreamExt};
 use std::{
@@ -40,10 +40,10 @@ impl<T: Clone> KeyedChannel<T> {
             .map(|sender| sender.unbounded_send(value));
     }
 
-    /// Listens to a given key. 
-    /// 
+    /// Listens to a given key.
+    ///
     /// # Note
-    /// 
+    ///
     /// If there already exists a listener on that key, the existing listener will be
     /// dropped.
     pub fn recv_stream(&self, key: CandidateChannelId) -> RecvStream<T> {

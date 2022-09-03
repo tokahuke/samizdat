@@ -312,10 +312,11 @@ impl ObjectRef {
     }
 
     /// Tries to resolve a content riddle against all objects currently in the database.
-    pub fn find(content_riddle: &Riddle) -> Option<ObjectRef> {
+    pub fn find(content_riddle: &Riddle) -> Result<Option<ObjectRef>, crate::Error> {
         let iter = db().iterator_cf(Table::Objects.get(), IteratorMode::Start);
 
-        for (key, _) in iter {
+        for item in iter {
+            let (key, _) = item?;
             let hash: Hash = match key.as_ref().try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
@@ -325,11 +326,11 @@ impl ObjectRef {
             };
 
             if content_riddle.resolves(&hash) {
-                return Some(ObjectRef { hash });
+                return Ok(Some(ObjectRef { hash }));
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Build a new object from data coming from a _trusted_ source.

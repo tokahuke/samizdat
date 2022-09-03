@@ -74,7 +74,8 @@ fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .map(|| {
             let all_auths = db()
                 .iterator_cf(Table::AccessRights.get(), IteratorMode::Start)
-                .map(|(key, value)| {
+                .map(|item| {
+                    let (key, value) = item?;
                     let entity = bincode::deserialize(&key)?;
                     let granted_rights = bincode::deserialize(&value)?;
 

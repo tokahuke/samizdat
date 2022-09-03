@@ -216,16 +216,16 @@ impl Node {
 }
 
 /// A Patricia tree implementation.
-/// 
+///
 /// A Patricia tree works just like a Merkle tree. However, while the items in the Merkle
 /// tree were indexed by a [`usize`], the items in the Patricia tree are indexed by a
 /// [`struct@Hash`]. Because a [`struct@Hash`] is much longer than a [`usize`], the size
 /// of a Merkle tree would be too big for a reasonable implementation. The Patricia tree,
 /// however, takes advantage of the sparseness inherent to a Merkle tree with big key,
-/// compressing the many unoccupied nodes into "segments" and storing them in the _edges_ 
+/// compressing the many unoccupied nodes into "segments" and storing them in the _edges_
 /// of the tree. This helps to reduce the tree to a manageable size.
-/// 
-/// For more information in Patricia trees, see 
+///
+/// For more information in Patricia trees, see
 /// [Wikipedia](https://en.wikipedia.org/wiki/Radix_tree).
 #[derive(Debug, Default)]
 pub struct PatriciaMap {
@@ -351,7 +351,7 @@ impl PatriciaMap {
     }
 
     /// Creates the inclusion proof fot a given key in the tree. This function returns
-    /// [`None`] if the key is not included in the tree. 
+    /// [`None`] if the key is not included in the tree.
     pub fn proof_for(&self, key: Hash) -> Option<PatriciaProof> {
         let mut bits = bits(&key);
 
@@ -401,7 +401,6 @@ impl PatriciaMap {
             claimed_value: hash,
             path,
         })
-
     }
 
     /// An iterator over the entries in this tree.

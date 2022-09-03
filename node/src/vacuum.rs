@@ -35,7 +35,8 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 
     // Test whether you should vacuum:
     let mut total_size = 0;
-    for (_, value) in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
+    for item in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
+        let (_, value) = item?;
         let statistics: ObjectStatistics = bincode::deserialize(&value)?;
         total_size += statistics.size();
     }
@@ -53,7 +54,8 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     let use_prior = UsePrior::default();
 
     // Test what is good and what isn't:
-    for (key, value) in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
+    for item in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
+        let (key, value) = item?;
         let statistics: ObjectStatistics = bincode::deserialize(&value)?;
         heap.push(HeapEntry {
             priority: Reverse(NotNan::from(statistics.byte_usefulness(&use_prior))),
@@ -85,7 +87,8 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     log::debug!("to drop: {:#?}", dropped);
 
     // Prune items:
-    for (_, value) in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
+    for item in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
+        let (_, value) = item?;
         let item: CollectionItem = bincode::deserialize(&value)?;
         if dropped.contains(item.inclusion_proof.claimed_value()) {
             item.drop_if_exists_with(&mut batch)?;

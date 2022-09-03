@@ -22,7 +22,7 @@ pub struct NodeServer {
 
 impl NodeServer {
     async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
-        log::info!("got object {:?}", resolution);
+        log::info!("got object {resolution:?}");
 
         let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
             content_riddle
@@ -30,13 +30,17 @@ impl NodeServer {
             return ResolutionResponse::EmptyResolution;
         };
         let object = match ObjectRef::find(content_riddle) {
-            Some(object) if !object.is_draft().unwrap_or(true) => object,
-            Some(_) => {
+            Ok(Some(object)) if !object.is_draft().unwrap_or(true) => object,
+            Ok(Some(_)) => {
                 log::info!("Hash found but object is draft");
                 return ResolutionResponse::NotFound;
             }
-            None => {
+            Ok(None) => {
                 log::info!("Hash not found for resolution");
+                return ResolutionResponse::NotFound;
+            },
+            Err(err) => {
+                log::error!("Error while looking for object {resolution:?}: {err}");
                 return ResolutionResponse::NotFound;
             }
         };
@@ -165,8 +169,8 @@ impl Node for NodeServer {
     ) -> Vec<EditionResponse> {
         log::info!("got {latest:?}");
 
-        let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle) {
-            let editions = series.get_editions();
+        let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
+            let editions = series.and_then(|s| s.get_editions());
             match editions.as_ref().map(|editions| editions.first()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,
@@ -181,7 +185,7 @@ impl Node for NodeServer {
                     })
                 }
                 Err(err) => {
-                    log::warn!("{}", err);
+                    log::error!("error resolving edition for {latest:?}: {err}");
                     None
                 }
             }
@@ -200,8 +204,11 @@ impl Node for NodeServer {
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
         log::info!("Got announcement from hub");
-        if let Some(subscription) = SubscriptionRef::find(&announcement.key_riddle) {
-            let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
+        match SubscriptionRef::find(&announcement.key_riddle) {
+            Err(err) => log::error!("error processing {announcement:?}: {err}"),
+            Ok(None) => {},
+            Ok(Some(subscription)) => {
+                let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 
             let try_refresh = async move {
                 let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
@@ -226,6 +233,7 @@ impl Node for NodeServer {
                     log::warn!("{}", err);
                 }
             });
+            }
         }
     }
 
@@ -236,20 +244,27 @@ impl Node for NodeServer {
     ) -> Vec<IdentityResponse> {
         log::info!("Got identity request from hub: {request:?}");
 
-        let maybe_response = if let Some(identity) = Identity::find(&request.identity_riddle) {
-            let cipher_key = identity.identity().hash();
-            let rand = Hash::rand();
-            let cipher = TransferCipher::new(&cipher_key, &rand);
+        let maybe_response = match Identity::find(&request.identity_riddle) {
+            Err(err) => {
+                log::error!("Error while processing {request:?}: {err}");
+                None
+            },
+            Ok(None) => {
+                log::info!("No identity found for request");
+                None
+            },
+            Ok(Some(identity)) => {
+                let cipher_key = identity.identity().hash();
+                let rand = Hash::rand();
+                let cipher = TransferCipher::new(&cipher_key, &rand);
 
-            log::info!("Found identity {}", identity.identity().handle());
+                log::info!("Found identity {}", identity.identity().handle());
 
-            Some(IdentityResponse {
-                rand,
-                identity: cipher.encrypt_opaque(&identity),
-            })
-        } else {
-            log::info!("No identity found for request");
-            None
+                Some(IdentityResponse {
+                    rand,
+                    identity: cipher.encrypt_opaque(&identity),
+                })
+            },
         };
 
         maybe_response.into_iter().collect()

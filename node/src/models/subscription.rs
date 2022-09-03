@@ -107,21 +107,25 @@ impl SubscriptionRef {
     /// Gets all subscriptions currently in the database.
     pub fn get_all() -> Result<Vec<Subscription>, crate::Error> {
         db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start)
-            .map(|(_, value)| Ok(bincode::deserialize(&value)?))
+            .map(|item| {
+                let (_, value) = item?;
+                Ok(bincode::deserialize(&value)?)
+            })
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
     /// Runs through the database looking for a subscription the matches the supplied
     /// riddle. Returns `None` if no subscription matches the riddle.
-    pub fn find(riddle: &Riddle) -> Option<SubscriptionRef> {
+    pub fn find(riddle: &Riddle) -> Result<Option<SubscriptionRef>, crate::Error> {
         let it = db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start);
 
-        for (key, value) in it {
+        for item in it {
+            let (key, value) = item?;
             match Key::from_bytes(&key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
                         match bincode::deserialize(&value) {
-                            Ok(subscription) => return Some(subscription),
+                            Ok(subscription) => return Ok(Some(subscription)),
                             Err(err) => {
                                 log::warn!("{}", err);
                                 break;
@@ -136,7 +140,7 @@ impl SubscriptionRef {
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Reserved for future use.
