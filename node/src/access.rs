@@ -47,7 +47,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
 
     // Set static:
     unsafe {
-        ACCESS_TOKEN = Some(access_token);
+        ACCESS_TOKEN = Some(dbg!(access_token));
     }
 
     Ok(())

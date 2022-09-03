@@ -8,6 +8,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
+Environment=RUST_BACKTRACE=1
 ExecStart=/usr/local/bin/samizdat-hub --data /var/lib/samizdat/hub
 
 [Install]

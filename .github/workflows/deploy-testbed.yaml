@@ -52,13 +52,13 @@ jobs:
           ./target/release/samizdat-hub \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
         rsync -avz \
-          ./hub/samizdat-hub.service \
+          ./install/hub/x86_64-unknown-linux-gnu/samizdat-hub.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
         rsync -avz \
           ./target/release/samizdat-node \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
         rsync -avz \
-          ./node/samizdat-node.service \
+          ./install/node/x86_64-unknown-linux-gnu/samizdat-node.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
         rsync -avz \
           ./target/release/samizdat-proxy \

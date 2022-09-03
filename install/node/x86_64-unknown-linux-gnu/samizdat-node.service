@@ -8,6 +8,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
+Environment=RUST_BACKTRACE=1
 ExecStart=/usr/local/bin/samizdat-node --data /var/lib/samizdat/node/ --hubs testbed.hubfederation.com
 
 [Install]
