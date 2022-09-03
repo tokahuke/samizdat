@@ -49,8 +49,8 @@ impl HubServer {
         F: 'a + Send + FnOnce(&'a Self) -> Fut,
         Fut: 'a + Future<Output = T>,
     {
-        // First, make sure we are not being trolled:
-        self.0.call_throttle.lock().await.tick().await;
+        // // First, make sure we are not being trolled:
+        // self.0.call_throttle.lock().await.tick().await;
         let permit = self
             .0
             .call_semaphore
