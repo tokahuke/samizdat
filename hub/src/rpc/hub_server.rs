@@ -50,7 +50,7 @@ impl HubServer {
         Fut: 'a + Future<Output = T>,
     {
         // // First, make sure we are not being trolled:
-        // self.0.call_throttle.lock().await.tick().await;
+        self.0.call_throttle.lock().await.tick().await;
         let permit = self
             .0
             .call_semaphore
