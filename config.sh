@@ -1,3 +1,9 @@
+###
+#
+# Configuration for a Ubuntu VPS to be able to run a Samizdat Hub for the open
+# Web.
+#
+###
 
 apt update && apt upgrade -y &&
 yes | ufw enable &&

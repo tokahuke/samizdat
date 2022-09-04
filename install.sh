@@ -1,5 +1,11 @@
 #! /usr/bin/env bash
 
+###
+#
+# Installation of the Samizdat Node and CLI with compilation from source.
+#
+###
+
 if [ "$(uname)" == "Darwin" ]; then
     cargo build --release --bin samizdat-node &&
     sudo cp target/release/samizdat-node /usr/local/bin/samizdat-node &&

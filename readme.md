@@ -14,8 +14,9 @@ If you support this work, consider donating using crypto
 
 | Currency | Address                                      |
 |----------|----------------------------------------------|
-| `ETH`    | `0xba89B660eB6f5D894830C9273a5Dfb8dDc170cff` |
+| `XMR`    | `86YcEFJSQXfZbPhjpDpabb5raQjVLWAfji3eMGebbj6QJnk1wXfgfqx9pgqURUWqMbjW7mNTC79guNEEsGPKJbRGKxEkrAN` |
 | `BTC`    | `bc1qseae89zr4z2lkl82nvvr6c9sl97agshapzeag5` |
+| `ETH`    | `0xba89B660eB6f5D894830C9273a5Dfb8dDc170cff` |
 
 
 ## Introduction
@@ -81,6 +82,17 @@ they will be abe to access it.
 
 This is just the tip of the iceberg, however! Check out more [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/docs).
 
+
+## Repository structure
+
+* `common`: Rust lib defining common code shared by other Samizdat crates. You will find here RPC definitions, Merkle tree implementation, etc...
+* `hub`: the Samizdat Hub crate. 
+* `node`: the Samizdat Node crate.
+* `cli`: the Samizdat CLI crate.
+* `proxy`: a proxy to bridge a Samizdat Node to the open Web, used in [https://proxy.hubfederation.com](https://proxy.hubfederation.com).
+* `js`: the SamizdatJS library, with enables Web applications to interface with the local Samizdat node. 
+* `install`: installation artifacts for end users in different platforms.
+* `blockchain`: tentative smart contract for Samizdat identity. 
 
 ## Licensing
 

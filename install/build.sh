@@ -1,9 +1,24 @@
 #! /usr/bin/env bash
 
+###
+#
+# Builds the Samizdat installers for a given set of architectures (in `$1`; all
+# architecture if not set).
+#
+###
+
 set -e
 
+# Do not run this in any branch other than stable:
+if [ $(git branch --show-current) != 'stable' ]
+then
+    echo 'Not in `stable` branch. Stopping...'
+    exit 1
+fi
+
+# Deciding which architectures should be installed.
 if [ -z $1 ]; then
-    archs=$(ls ./install/node)
+    archs=$(ls ./install/node) # All architecture from Node, if not set.
 else
     archs=$1
 fi
@@ -18,12 +33,15 @@ do
 done
 
 
+# This is the version name that is going to be the output directory prefix.
 version="latest"
 
+# Clean the `dist` directory.
 rm -rf ./dist
 mkdir -p ./dist
 
 
+# Pesky configurations for MacOS.
 if [ $(uname) == "Darwin" ]
 then
     echo

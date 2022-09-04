@@ -6,3 +6,4 @@
 
 .Samizdat.priv
 dist/
+.xwin-cache
