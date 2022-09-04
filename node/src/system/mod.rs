@@ -10,7 +10,6 @@ pub use reconnect::Reconnect;
 
 use futures::prelude::*;
 use futures::stream;
-use samizdat_common::ChannelAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -22,6 +21,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::time::{timeout_at, Duration};
 
+use samizdat_common::address::{ChannelAddr, HubAddr};
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::quic;
@@ -83,14 +83,15 @@ impl HubConnectionInner {
         );
         let handler = tokio::spawn(server_task);
 
+        log::info!("aosndas");
+
         Ok(handler)
     }
 
     /// Creates the two connections between hub and node: RPC from node to hub and RPC from
     /// hub to node.
     async fn connect(
-        direct_addr: SocketAddr,
-        reverse_addr: SocketAddr,
+        hub_addr: HubAddr,
     ) -> Result<(HubConnectionInner, impl Future<Output = ()>), crate::Error> {
         // Connect and create connection manager:
         let (endpoint, incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
@@ -103,9 +104,9 @@ impl HubConnectionInner {
         let channel_manager = Arc::new(ChannelManager::new(connection_manager.clone()));
         let candidate_channels = KeyedChannel::new();
         let (client, client_reset_recv) =
-            Self::connect_direct(dbg!(direct_addr), connection_manager.clone()).await?;
+            Self::connect_direct(hub_addr.direct_addr(), connection_manager.clone()).await?;
         let server_reset_recv = Self::connect_reverse(
-            reverse_addr,
+            hub_addr.reverse_addr(),
             connection_manager.clone(),
             candidate_channels.clone(),
         )
@@ -135,13 +136,12 @@ impl HubConnection {
     /// Creates a connection to the hub.
     pub async fn connect(
         name: &'static str,
-        direct_addr: SocketAddr,
-        reverse_addr: SocketAddr,
+        hub_addr: HubAddr,
     ) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
             name,
             inner: Reconnect::init(
-                move || HubConnectionInner::connect(direct_addr, reverse_addr),
+                move || HubConnectionInner::connect(hub_addr),
                 || {
                     reconnect::exponential_backoff(
                         Duration::from_millis(100),
@@ -364,14 +364,10 @@ impl Hubs {
     /// Initiates the set of all hub connections.
     pub async fn init<I>(addrs: I) -> Result<Hubs, crate::Error>
     where
-        I: IntoIterator<Item = (&'static str, SocketAddr)>,
+        I: IntoIterator<Item = (&'static str, HubAddr)>,
     {
         let hubs = stream::iter(addrs)
-            .map(|(name, addr)| {
-                let direct_addr = addr;
-                let reverse_addr = (addr.ip(), addr.port() + 1).into();
-                HubConnection::connect(name, direct_addr, reverse_addr)
-            })
+            .map(|(name, addr)| HubConnection::connect(name, addr))
             .buffer_unordered(10) // 'cause 10!
             .map(|outcome| outcome.map(Arc::new))
             .try_collect::<Vec<_>>()

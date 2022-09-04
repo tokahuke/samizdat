@@ -12,8 +12,11 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time;
 
+use samizdat_common::address::{AddrToResolve, HubAddr};
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
+
+use crate::CLI;
 
 use super::{
     announce_edition, candidates_for_resolution, edition_for_request, get_identity,
@@ -220,13 +223,17 @@ async fn connect_reverse(
 /// Connects a new hub-as-node to a partner hub.
 async fn connect(
     endpoint: &Endpoint,
-    direct_addr: SocketAddr,
-    reverse_addr: SocketAddr,
+    hub_addr: HubAddr,
 ) -> Result<impl Future<Output = Result<(), JoinError>>, crate::Error> {
     let candidate_channels = KeyedChannel::new();
-    let (client, client_reset_recv) = connect_direct(direct_addr, endpoint).await?;
-    let server_reset_recv =
-        connect_reverse(reverse_addr, endpoint, client, candidate_channels.clone()).await?;
+    let (client, client_reset_recv) = connect_direct(hub_addr.direct_addr(), endpoint).await?;
+    let server_reset_recv = connect_reverse(
+        hub_addr.reverse_addr(),
+        endpoint,
+        client,
+        candidate_channels.clone(),
+    )
+    .await?;
 
     let reset_trigger =
         future::select(server_reset_recv, client_reset_recv).map(|selected| match selected {
@@ -238,17 +245,16 @@ async fn connect(
 }
 
 /// Runs a hub-as-node server forever.
-pub async fn run(partner: &crate::cli::AddrToResolve, endpoint: &Endpoint) {
+pub async fn run(partner: &AddrToResolve, endpoint: &Endpoint) {
+    // TODO: resolve _all_ possible addresses:
     // Set up addresses
-    let (_, partner) = match partner.resolve().await {
-        Ok(resolved) => resolved,
+    let (_, partner) = match partner.resolve(CLI.resolution_mode).await {
+        Ok(mut resolved) => resolved.next().expect("iterator not empty"),
         Err(err) => {
             log::error!("Failed to connect to partner {partner}: {err}");
             return;
         }
     };
-    let direct_addr = partner;
-    let reverse_addr = (partner.ip(), partner.port() + 1).into();
 
     // Set up exponential backoff
     let start = Duration::from_millis(100);
@@ -257,7 +263,7 @@ pub async fn run(partner: &crate::cli::AddrToResolve, endpoint: &Endpoint) {
 
     // Exponential backoff
     loop {
-        match connect(endpoint, direct_addr, reverse_addr).await {
+        match connect(endpoint, partner).await {
             Ok(handle) => match handle.await {
                 Ok(()) => {
                     log::info!("Hub-as-node server finished for {partner}");

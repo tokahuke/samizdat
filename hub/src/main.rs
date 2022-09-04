@@ -44,10 +44,18 @@ async fn main() -> Result<(), crate::Error> {
     // Spawn services:
     let candidate_channels = KeyedChannel::new();
     let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(
-        CLI.direct_addresses.clone(),
+        CLI.addresses
+            .iter()
+            .map(|addr| addr.direct_addr())
+            .collect(),
         candidate_channels.clone(),
     ));
-    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(CLI.reverse_addresses.clone()));
+    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(
+        CLI.addresses
+            .iter()
+            .map(|addr| addr.reverse_addr())
+            .collect(),
+    ));
     let partners = tokio::spawn(crate::rpc::run_partners());
     let http_server = tokio::spawn(http::serve());
 

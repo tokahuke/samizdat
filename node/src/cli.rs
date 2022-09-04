@@ -1,10 +1,9 @@
 //! Command line interface for the Samizdat node.
 
-use std::net::SocketAddr;
-use std::num::ParseIntError;
 use std::path::PathBuf;
-use std::str::FromStr;
 use structopt::StructOpt;
+
+use samizdat_common::address::{AddrResolutionMode, AddrToResolve};
 
 /// The CLI parameters.
 #[derive(Debug, StructOpt)]
@@ -67,134 +66,4 @@ pub fn init_cli() -> Result<(), crate::Error> {
 /// Returns a handle to the CLI arguments. Only use this after initialization.
 pub fn cli<'a>() -> &'a Cli {
     unsafe { CLI.as_ref().expect("cli not initialized") }
-}
-
-/// The way addresses are resolved from DNS.
-#[derive(Debug, Clone, Copy)]
-pub enum AddrResolutionMode {
-    /// Only use IPv6 addresses and ignore IPv4 entries.
-    EnsureIpv6,
-    /// Only use IPv4 addresses and ignore IPv6 entries.
-    EnsureIpv4,
-    /// Use IPv6 addresses when possible, but default to an IPv4 if necessary.
-    PreferIpv6,
-    /// Use IPv4 addresses when possible, but default to an IPv6 if necessary.
-    PreferIpv4,
-    /// Use both IPv6 and IPv4 addresses. If both are present, two addresses will be
-    /// resolved for the same name.
-    UseBoth,
-}
-
-impl FromStr for AddrResolutionMode {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ensure-ipv4" => Ok(Self::EnsureIpv4),
-            "ensure-ipv6" => Ok(Self::EnsureIpv6),
-            "prefer-ipv4" => Ok(Self::PreferIpv4),
-            "prefer-ipv6" => Ok(Self::PreferIpv6),
-            "use-both" => Ok(Self::UseBoth),
-            invalid => Err(format!("Invalid address resolution mode `{invalid}`")),
-        }
-    }
-}
-
-impl AddrResolutionMode {
-    /// Choose from a list of addresses which ones to use.
-    fn filter_hosts(self, hosts: &[SocketAddr]) -> Vec<SocketAddr> {
-        // Iterator factory (makes IPs canonical).
-        let iter_hosts = || {
-            hosts
-                .iter()
-                .map(|addr| (addr.ip().to_canonical(), addr.port()))
-                .map(SocketAddr::from)
-        };
-
-        match self {
-            Self::EnsureIpv6 => iter_hosts().filter(SocketAddr::is_ipv6).take(1).collect(),
-            Self::EnsureIpv4 => iter_hosts().filter(SocketAddr::is_ipv4).take(1).collect(),
-            Self::PreferIpv6 => iter_hosts()
-                .max_by_key(|addr| if addr.is_ipv6() { 1 } else { 0 })
-                .into_iter()
-                .collect(),
-            Self::PreferIpv4 => iter_hosts()
-                .max_by_key(|addr| if addr.is_ipv4() { 1 } else { 0 })
-                .into_iter()
-                .collect(),
-            Self::UseBoth => {
-                let an_ipv6 = iter_hosts().filter(SocketAddr::is_ipv6).take(1);
-                // Loopbacks are coerced to IPv6.
-                let an_ipv4 = iter_hosts()
-                    .filter(SocketAddr::is_ipv4)
-                    .filter(|socket| !socket.ip().is_loopback())
-                    .take(1);
-
-                an_ipv4.chain(an_ipv6).collect()
-            }
-        }
-    }
-}
-
-/// A flexible representation of an address in the internet.
-#[derive(Debug)]
-pub enum AddrToResolve {
-    /// A raw `ip:port` address.
-    SocketAddr(SocketAddr),
-    /// A `domain:port` (or `domain`, only) address.
-    DomainAndPort(String, u16),
-}
-
-impl FromStr for AddrToResolve {
-    type Err = ParseIntError;
-    fn from_str(s: &str) -> Result<Self, ParseIntError> {
-        if let Ok(socket_addr) = s.parse::<SocketAddr>() {
-            Ok(AddrToResolve::SocketAddr(socket_addr))
-        } else if let Some(pos) = s.find(':') {
-            Ok(AddrToResolve::DomainAndPort(
-                s[0..pos].to_owned(),
-                s[pos + 1..].parse::<u16>()?,
-            ))
-        } else {
-            Ok(AddrToResolve::DomainAndPort(s.to_owned(), 4511))
-        }
-    }
-}
-
-impl AddrToResolve {
-    /// Gets the string representation of this address (TODO: perhaps implement
-    /// [`std::fmt::Display`]?).
-    fn name(&self) -> String {
-        match self {
-            AddrToResolve::SocketAddr(addr) => addr.to_string(),
-            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => domain.to_owned(),
-            AddrToResolve::DomainAndPort(domain, port) => format!("{}:{}", domain, port),
-        }
-    }
-
-    /// Resolve this address into an iterator of socket addresses.
-    pub async fn resolve(
-        &self,
-        resolution_mode: AddrResolutionMode,
-    ) -> Result<impl Iterator<Item = (&'static str, SocketAddr)>, crate::Error> {
-        let name: &'static str = Box::leak(self.name().into_boxed_str());
-
-        let addrs = match self {
-            AddrToResolve::SocketAddr(addr) => vec![*addr],
-            AddrToResolve::DomainAndPort(domain, port) => {
-                let hosts = resolution_mode.filter_hosts(
-                    &tokio::net::lookup_host((&**domain, *port))
-                        .await?
-                        .collect::<Vec<_>>(),
-                );
-
-                if hosts.is_empty() {
-                    return Err(format!("no such host {}", domain).into());
-                } else {
-                    hosts
-                }
-            }
-        };
-
-        Ok(addrs.into_iter().map(move |addr| (name, addr)))
-    }
 }

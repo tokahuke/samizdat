@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
-use samizdat_common::ChannelAddr;
+use samizdat_common::address::ChannelAddr;
 
 use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;

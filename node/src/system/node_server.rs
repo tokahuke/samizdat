@@ -4,10 +4,11 @@ use futures::prelude::*;
 use std::sync::Arc;
 use tarpc::context;
 
+use samizdat_common::address::ChannelAddr;
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
-use samizdat_common::{ChannelAddr, Hash, Riddle};
+use samizdat_common::{Hash, Riddle};
 
 use crate::models::{CollectionItem, Edition, Identity, ObjectRef, SeriesRef, SubscriptionRef};
 

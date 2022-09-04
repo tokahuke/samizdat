@@ -3,7 +3,9 @@
 **/node_modules
 **/dist
 **/bin
+**/__pycache__
 
 .Samizdat.priv
 dist/
 .xwin-cache
+network.json

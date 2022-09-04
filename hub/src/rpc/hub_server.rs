@@ -6,8 +6,8 @@ use tarpc::context;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
+use samizdat_common::address::ChannelAddr;
 use samizdat_common::rpc::*;
-use samizdat_common::ChannelAddr;
 
 use crate::rpc::ROOM;
 use crate::CLI;

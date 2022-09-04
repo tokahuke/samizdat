@@ -1,8 +1,6 @@
-use std::fmt::{self, Display};
-use std::net::SocketAddr;
-use std::num::ParseIntError;
-use std::str::FromStr;
 use structopt::StructOpt;
+
+use samizdat_common::address::{AddrResolutionMode, AddrToResolve, HubAddr};
 
 #[derive(StructOpt)]
 pub struct Cli {
@@ -10,11 +8,8 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_VERBOSE", long, short = "v")]
     pub verbose: bool,
     /// The socket addresses for nodes to connect as clients.
-    #[structopt(env = "SAMIZDAT_DIRECT_ADDRESSES", long, default_value = "[::]:4511")]
-    pub direct_addresses: Vec<SocketAddr>,
-    /// The port for nodes to connect as servers.
-    #[structopt(env = "SAMIZDAT_REVERSE_ADDRESSES", long, default_value = "[::]:4512")]
-    pub reverse_addresses: Vec<SocketAddr>,
+    #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
+    pub addresses: Vec<HubAddr>,
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
     /// Maximum number of simultaneous connections.
@@ -36,70 +31,12 @@ pub struct Cli {
     /// Other servers to which to listen to.
     #[structopt(env = "SAMIZDAT_PARTNERS", long)]
     pub partners: Option<Vec<AddrToResolve>>,
+    /// The mode of resolution to be used with domain names. Must be one of `ensure-ipv4`,
+    /// `ensure-ipv6`, `prefer-ipv6`, `prefer-ipv4` or `use-both`. Note that the `prefer-*` options
+    /// will resolve to the other IP version if no address is available for the current version.
+    #[structopt(env = "SAMIZDAT_RESOLUTION_MODE", long, default_value = "use-both")]
+    pub resolution_mode: AddrResolutionMode,
     /// The port for the monitoring http server.
     #[structopt(env = "SAMIZDAT_HTTP_PORT", long, default_value = "45180")]
     pub http_port: u16,
-}
-
-/// A flexible representation of an address in the internet.
-#[derive(Debug, Clone)]
-pub enum AddrToResolve {
-    /// A raw `ip:port` address.
-    SocketAddr(SocketAddr),
-    /// A `domain:port` (or `domain`, only) address.
-    DomainAndPort(String, u16),
-}
-
-impl FromStr for AddrToResolve {
-    type Err = ParseIntError;
-    fn from_str(s: &str) -> Result<Self, ParseIntError> {
-        if let Ok(socket_addr) = s.parse::<SocketAddr>() {
-            Ok(AddrToResolve::SocketAddr(socket_addr))
-        } else if let Some(pos) = s.find(':') {
-            Ok(AddrToResolve::DomainAndPort(
-                s[0..pos].to_owned(),
-                s[pos + 1..].parse::<u16>()?,
-            ))
-        } else {
-            Ok(AddrToResolve::DomainAndPort(s.to_owned(), 4511))
-        }
-    }
-}
-
-impl Display for AddrToResolve {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AddrToResolve::SocketAddr(addr) => write!(f, "{addr}"),
-            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => write!(f, "{domain}"),
-            AddrToResolve::DomainAndPort(domain, port) => write!(f, "{}:{}", domain, port),
-        }
-    }
-}
-
-impl AddrToResolve {
-    fn name(&self) -> String {
-        match self {
-            AddrToResolve::SocketAddr(addr) => addr.to_string(),
-            AddrToResolve::DomainAndPort(domain, port) if *port == 4511 => domain.to_owned(),
-            AddrToResolve::DomainAndPort(domain, port) => format!("{}:{}", domain, port),
-        }
-    }
-
-    pub async fn resolve(&self) -> Result<(&'static str, SocketAddr), crate::Error> {
-        fn prefer_ipv6(it: impl IntoIterator<Item = SocketAddr>) -> Option<SocketAddr> {
-            it.into_iter()
-                .max_by_key(|addr| if addr.is_ipv6() { 1 } else { 0 })
-        }
-
-        let name = Box::leak(self.name().into_boxed_str());
-        let addr = match self {
-            AddrToResolve::SocketAddr(addr) => *addr,
-            AddrToResolve::DomainAndPort(domain, port) => {
-                prefer_ipv6(tokio::net::lookup_host((&**domain, *port)).await?)
-                    .ok_or_else(|| format!("no such host {}", domain))?
-            }
-        };
-
-        Ok((name, addr))
-    }
 }
