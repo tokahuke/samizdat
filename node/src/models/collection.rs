@@ -382,7 +382,9 @@ impl CollectionRef {
         db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
             .map(move |item| {
                 let (key, _) = item?;
-                Ok(ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..])))
+                Ok(ItemPathBuf::from(&*String::from_utf8_lossy(
+                    &key[self.hash.as_ref().len()..],
+                )))
             })
     }
 
@@ -392,12 +394,13 @@ impl CollectionRef {
         self.list().filter_map(move |name| {
             name.and_then(|name| {
                 let locator = Locator {
-                collection: self.clone(),
-                name: name.as_path(),
+                    collection: self.clone(),
+                    name: name.as_path(),
                 };
 
                 locator.get_object()
-            }).transpose()
+            })
+            .transpose()
         })
     }
 }

@@ -29,8 +29,8 @@ impl ReplayResistance {
                 let now = chrono::Utc::now().timestamp();
 
                 // TODO: lazy, lazy! you are just ignoring the error.
-                for (key, val) in
-                    db().iterator_cf(Table::RecentNonces.get(), rocksdb::IteratorMode::Start)
+                for (key, val) in db()
+                    .iterator_cf(Table::RecentNonces.get(), rocksdb::IteratorMode::Start)
                     .filter_map(|item| item.ok())
                 {
                     let then =

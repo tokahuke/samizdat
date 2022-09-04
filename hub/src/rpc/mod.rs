@@ -278,7 +278,9 @@ pub async fn run_direct(
             let remote_addr = utils::socket_to_canonical(connecting.remote_address());
             connecting
                 .await
-                .map_err(|err| log::warn!("failed to establish QUIC connection with {remote_addr}: {err}"))
+                .map_err(|err| {
+                    log::warn!("failed to establish QUIC connection with {remote_addr}: {err}")
+                })
                 .ok()
         })
         .map(|new_connection| {

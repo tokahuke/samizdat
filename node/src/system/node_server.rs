@@ -38,7 +38,7 @@ impl NodeServer {
             Ok(None) => {
                 log::info!("Hash not found for resolution");
                 return ResolutionResponse::NotFound;
-            },
+            }
             Err(err) => {
                 log::error!("Error while looking for object {resolution:?}: {err}");
                 return ResolutionResponse::NotFound;
@@ -206,33 +206,34 @@ impl Node for NodeServer {
         log::info!("Got announcement from hub");
         match SubscriptionRef::find(&announcement.key_riddle) {
             Err(err) => log::error!("error processing {announcement:?}: {err}"),
-            Ok(None) => {},
+            Ok(None) => {}
             Ok(Some(subscription)) => {
-                let cipher = TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
+                let cipher =
+                    TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 
-            let try_refresh = async move {
-                let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
+                let try_refresh = async move {
+                    let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
 
-                if !edition.is_valid() {
-                    log::warn!("an invalid edition was announced: {:?}", edition);
-                    return Ok(());
-                }
+                    if !edition.is_valid() {
+                        log::warn!("an invalid edition was announced: {:?}", edition);
+                        return Ok(());
+                    }
 
-                if subscription.must_refresh()? {
-                    subscription.refresh(edition).await
-                } else {
-                    Ok(())
-                }
-            };
+                    if subscription.must_refresh()? {
+                        subscription.refresh(edition).await
+                    } else {
+                        Ok(())
+                    }
+                };
 
-            tokio::spawn(async move {
-                // Sleep a random amount so as not for everybody to ask for the same items at
-                // the same time.
-                tokio::time::sleep(std::time::Duration::from_secs_f32(rand::random())).await;
-                if let Err(err) = try_refresh.await {
-                    log::warn!("{}", err);
-                }
-            });
+                tokio::spawn(async move {
+                    // Sleep a random amount so as not for everybody to ask for the same items at
+                    // the same time.
+                    tokio::time::sleep(std::time::Duration::from_secs_f32(rand::random())).await;
+                    if let Err(err) = try_refresh.await {
+                        log::warn!("{}", err);
+                    }
+                });
             }
         }
     }
@@ -248,11 +249,11 @@ impl Node for NodeServer {
             Err(err) => {
                 log::error!("Error while processing {request:?}: {err}");
                 None
-            },
+            }
             Ok(None) => {
                 log::info!("No identity found for request");
                 None
-            },
+            }
             Ok(Some(identity)) => {
                 let cipher_key = identity.identity().hash();
                 let rand = Hash::rand();
@@ -264,7 +265,7 @@ impl Node for NodeServer {
                     rand,
                     identity: cipher.encrypt_opaque(&identity),
                 })
-            },
+            }
         };
 
         maybe_response.into_iter().collect()
