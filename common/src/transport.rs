@@ -1,6 +1,6 @@
 use futures::future::Fuse;
 use futures::prelude::*;
-use quinn::{Connection, ConnectionError, IncomingUniStreams, ReadToEndError};
+use quinn::{Connection, ReadToEndError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
@@ -15,8 +15,6 @@ use tokio::task::JoinHandle;
 pub struct BincodeOverQuic<S, R> {
     /// The QUIC connection
     connection: Connection,
-    /// The incoming QUIC streams from the peer
-    incoming: IncomingUniStreams,
     /// The current ongoing send operation.
     ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
     /// The current ongoing receive operation.
@@ -37,12 +35,10 @@ where
     /// Creates a new [`BincodeOverQuic`] over an existing connection.
     pub fn new(
         connection: Connection,
-        incoming: IncomingUniStreams,
         max_length: usize,
     ) -> BincodeOverQuic<S, R> {
         BincodeOverQuic {
             connection,
-            incoming,
             ongoing_recv: None,
             ongoing_send: None,
             max_length,
@@ -52,14 +48,33 @@ where
     }
 
     /// Restores the underlying connection.
-    pub fn into_inner(self) -> (Connection, IncomingUniStreams) {
-        (self.connection, self.incoming)
+    pub fn into_inner(self) -> Connection {
+        self.connection
     }
 }
 
 /// Transforms a bincode error into an [`io::Error`].
 fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
+}
+
+/// Receives a single bincode message:
+async fn recv_message<R>(connection: Connection, max_length: usize) -> Result<R, io::Error> 
+where
+    R: for<'a> Deserialize<'a>,
+{
+    let recv_stream = connection.accept_uni().await?;
+    let serialized = recv_stream.read_to_end(max_length).await;
+
+    match serialized {
+        Ok(serialized) => {
+            bincode::deserialize(&serialized).map_err(bincode_error_to_io)
+        }
+        Err(ReadToEndError::TooLong) => {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "too long"))
+        }
+        Err(ReadToEndError::Read(read)) => Err(read.into()),
+    }
 }
 
 impl<S, R> Stream for BincodeOverQuic<S, R>
@@ -73,42 +88,24 @@ where
         let this = self.get_mut();
 
         if let Some(mut ongoing_recv) = this.ongoing_recv.as_mut() {
+            // Poll existing task:
             Pin::new(&mut ongoing_recv).poll(cx).map(|outcome| {
                 this.ongoing_recv = None;
                 Some(outcome.expect("recv task panicked"))
             })
         } else {
-            match Pin::new(&mut this.incoming).poll_next(cx) {
-                Poll::Ready(Some(Ok(recv_stream))) => {
-                    let max_length = this.max_length;
-                    let recv_task = tokio::spawn(async move {
-                        let serialized = recv_stream.read_to_end(max_length).await;
+            // Create new task:
+            let mut recv_task = tokio::spawn(recv_message(this.connection.clone(), this.max_length)).fuse();
+            // Then poll:
+            let polled = Pin::new(&mut recv_task).poll(cx).map(|outcome| {
+                this.ongoing_recv = None;
+                Some(outcome.expect("recv task panicked"))
+            });
 
-                        match serialized {
-                            Ok(serialized) => {
-                                bincode::deserialize(&serialized).map_err(bincode_error_to_io)
-                            }
-                            Err(ReadToEndError::TooLong) => {
-                                Err(io::Error::new(io::ErrorKind::InvalidData, "too long"))
-                            }
-                            Err(ReadToEndError::Read(read)) => Err(read.into()),
-                        }
-                    })
-                    .fuse();
+            // Set new task as existing task:
+            this.ongoing_recv = Some(recv_task);
 
-                    this.ongoing_recv = Some(recv_task);
-
-                    Pin::new(this).poll_next(cx)
-                }
-                Poll::Ready(Some(Err(ConnectionError::ApplicationClosed(close))))
-                    if close.error_code.into_inner() == 0 =>
-                {
-                    Poll::Ready(None)
-                }
-                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
-                Poll::Ready(None) => Poll::Ready(None),
-                Poll::Pending => Poll::Pending,
-            }
+            polled
         }
     }
 }
@@ -136,10 +133,10 @@ where
         log::trace!("starting to send");
 
         let this = self.get_mut();
-        let open_uni = this.connection.open_uni();
+        let connection = this.connection.clone();
 
         let send_task = async move {
-            let mut send_stream = open_uni.await?;
+            let mut send_stream = connection.open_uni().await?;
             let serialized = bincode::serialize(&item).expect("can serialize");
             send_stream.write_all(&serialized).await?;
             send_stream.finish().await?;

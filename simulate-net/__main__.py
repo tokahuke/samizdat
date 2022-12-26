@@ -5,7 +5,7 @@ import subprocess
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 
 class PortBroker:

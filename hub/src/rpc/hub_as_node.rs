@@ -168,16 +168,15 @@ async fn connect_direct(
     direct_addr: SocketAddr,
     endpoint: &Endpoint,
 ) -> Result<(HubClient, oneshot::Receiver<()>), crate::Error> {
-    let new_connection = samizdat_common::quic::connect(endpoint, direct_addr).await?;
+    let connection = samizdat_common::quic::connect(endpoint, direct_addr).await?;
 
     log::info!(
         "hub-as-node connected to hub (as client) at {}",
-        new_connection.connection.remote_address()
+        connection.remote_address()
     );
 
     let transport = BincodeOverQuic::new(
-        new_connection.connection.clone(),
-        new_connection.uni_streams,
+        connection.clone(),
         MAX_TRANSFER_SIZE,
     );
 
@@ -201,16 +200,15 @@ async fn connect_reverse(
     client: HubClient,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<JoinHandle<()>, crate::Error> {
-    let new_connection = samizdat_common::quic::connect(endpoint, reverse_addr).await?;
+    let connection = samizdat_common::quic::connect(endpoint, reverse_addr).await?;
 
     log::info!(
         "hub-as-node connected to hub (as server) at {}",
-        new_connection.connection.remote_address()
+        connection.remote_address()
     );
 
     let transport = BincodeOverQuic::new(
-        new_connection.connection.clone(),
-        new_connection.uni_streams,
+        connection.clone(),
         MAX_TRANSFER_SIZE,
     );
 

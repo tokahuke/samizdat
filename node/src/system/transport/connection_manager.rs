@@ -1,6 +1,5 @@
 use futures::future::join;
-use futures::prelude::*;
-use quinn::{Connecting, Endpoint, Incoming, NewConnection};
+use quinn::{Connecting, Endpoint, Connection};
 use samizdat_common::{quic, BincodeOverQuic};
 use std::net::SocketAddr;
 
@@ -21,12 +20,13 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    pub fn new(endpoint: Endpoint, mut incoming: Incoming) -> ConnectionManager {
+    pub fn new(endpoint: Endpoint,) -> ConnectionManager {
         let matcher: Matcher<SocketAddr, Connecting> = Matcher::default();
 
         let matcher_task = matcher.clone();
+        let endpoint_task = endpoint.clone();
         tokio::spawn(async move {
-            while let Some(connecting) = incoming.next().await {
+            while let Some(connecting) = endpoint_task.accept().await {
                 let peer_addr = utils::socket_to_canonical(connecting.remote_address());
                 log::info!("{peer_addr} arrived");
                 matcher_task.arrive(peer_addr, connecting).await;
@@ -36,15 +36,15 @@ impl ConnectionManager {
         ConnectionManager { endpoint, matcher }
     }
 
-    pub async fn connect(&self, remote_addr: SocketAddr) -> Result<NewConnection, crate::Error> {
-        let new_connection = quic::connect(&self.endpoint, remote_addr).await?;
-        let remote = new_connection.connection.remote_address();
+    pub async fn connect(&self, remote_addr: SocketAddr) -> Result<Connection, crate::Error> {
+        let connection = quic::connect(&self.endpoint, remote_addr).await?;
+        let remote = connection.remote_address();
         log::info!(
             "client connected to server at {}",
             SocketAddr::from((remote.ip().to_canonical(), remote.port())),
         );
 
-        Ok(new_connection)
+        Ok(connection)
     }
 
     pub async fn transport<S, R>(
@@ -55,11 +55,10 @@ impl ConnectionManager {
         S: 'static + Send + serde::Serialize,
         R: 'static + Send + for<'a> serde::Deserialize<'a>,
     {
-        let new_connection = self.connect(remote_addr).await?;
+        let connection = self.connect(remote_addr).await?;
 
         Ok(BincodeOverQuic::new(
-            new_connection.connection.clone(),
-            new_connection.uni_streams,
+            connection,
             MAX_TRANSFER_SIZE,
         ))
     }
@@ -71,7 +70,7 @@ impl ConnectionManager {
         &self,
         peer_addr: SocketAddr,
         drop_mode: DropMode,
-    ) -> Result<NewConnection, crate::Error> {
+    ) -> Result<Connection, crate::Error> {
         log::info!("punching hole to {peer_addr}");
 
         let incoming = self

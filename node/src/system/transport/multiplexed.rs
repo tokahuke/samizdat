@@ -1,5 +1,5 @@
 use futures::prelude::*;
-use quinn::{Connection, ConnectionError, IncomingUniStreams, NewConnection, RecvStream};
+use quinn::{Connection, ConnectionError, RecvStream};
 use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
@@ -33,12 +33,12 @@ async fn create_channel(
 }
 
 async fn receiver_task(
-    mut incoming: IncomingUniStreams,
+    connection: Connection,
     senders: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<RecvStream>>>>,
     matcher: Matcher<u32, mpsc::UnboundedReceiver<RecvStream>>,
 ) {
-    while let Some(stream) = incoming.next().await {
-        match stream {
+    loop {
+        match connection.accept_uni().await {
             Ok(mut stream) => {
                 let mut id_buf = [0; 4];
 
@@ -80,22 +80,21 @@ async fn receiver_task(
 }
 
 impl Multiplexed {
-    pub fn new(new_connection: NewConnection) -> Multiplexed {
+    pub fn new(connection: Connection) -> Multiplexed {
         let senders = Arc::new(Mutex::new(
             BTreeMap::<_, mpsc::UnboundedSender<RecvStream>>::new(),
         ));
-        let incoming = new_connection.uni_streams;
         let matcher = Matcher::default();
         let is_closed = Arc::new(AtomicBool::new(false));
         let set_closed = is_closed.clone();
 
         tokio::spawn(
-            receiver_task(incoming, senders.clone(), matcher.clone())
+            receiver_task(connection.clone(), senders.clone(), matcher.clone())
                 .map(move |_| set_closed.store(true, Ordering::Relaxed)),
         );
 
         Multiplexed {
-            connection: new_connection.connection,
+            connection,
             senders,
             matcher,
             is_closed,

@@ -2,7 +2,7 @@
 //! with security. Therefore, much of the complexity involving security in QUIC can be igonred.
 
 use quinn::{
-    ClientConfig, Endpoint, IdleTimeout, Incoming, NewConnection, ServerConfig, TransportConfig,
+    ClientConfig, Endpoint, IdleTimeout, Connection, ServerConfig, TransportConfig,
     VarInt,
 };
 use std::net::SocketAddr;
@@ -57,7 +57,7 @@ fn client_config() -> ClientConfig {
         .with_no_client_auth();
 
     let mut client_config = ClientConfig::new(Arc::new(crypto));
-    client_config.transport = Arc::new(transport_config());
+    client_config.transport_config(Arc::new(transport_config()));
 
     client_config
 }
@@ -76,19 +76,19 @@ fn server_config() -> ServerConfig {
 }
 
 /// Opens a new QUIC listener on `bind_addr`.
-pub fn new_default(bind_addr: SocketAddr) -> (Endpoint, Incoming) {
-    let (mut endpoint, incoming) =
+pub fn new_default(bind_addr: SocketAddr) -> Endpoint {
+    let mut endpoint =
         Endpoint::server(server_config(), bind_addr).expect("can bind endpoint");
     endpoint.set_default_client_config(client_config());
 
-    (endpoint, incoming)
+    endpoint
 }
 
 /// Connects to a remote host using an [`Endpoint`].
 pub async fn connect(
     endpoint: &Endpoint,
     remote_addr: SocketAddr,
-) -> Result<NewConnection, crate::Error> {
+) -> Result<Connection, crate::Error> {
     Ok(endpoint
         .connect(remote_addr, DEFAULT_SERVER_NAME)
         .expect("failed to start connecting")

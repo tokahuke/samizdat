@@ -262,18 +262,25 @@ pub async fn run_direct(
     addrs: Vec<impl Into<SocketAddr>>,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<(), io::Error> {
-    let all_incoming = addrs
+    let all_endpoints = addrs
         .into_iter()
         .map(|addr| {
-            let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+            let endpoint = samizdat_common::quic::new_default(addr.into());
             log::info!("Direct server started at {}", endpoint.local_addr()?);
 
-            Ok(incoming)
+            Ok(endpoint)
         })
         .collect::<Result<Vec<_>, io::Error>>()?;
 
-    stream::iter(all_incoming)
-        .flatten()
+    stream::iter(all_endpoints)
+        .flat_map(|endpoint| {
+            futures::stream::unfold(endpoint, |endpoint| async move {
+                endpoint
+                    .accept()
+                    .await
+                    .map(|connecting| (connecting, endpoint))
+            })
+        })
         .filter_map(|connecting| async move {
             let remote_addr = utils::socket_to_canonical(connecting.remote_address());
             connecting
@@ -283,20 +290,13 @@ pub async fn run_direct(
                 })
                 .ok()
         })
-        .map(|new_connection| {
+        .map(|connection| {
             // Get peer address:
-            let client_addr =
-                utils::socket_to_canonical(new_connection.connection.remote_address());
-
+            let client_addr = utils::socket_to_canonical(connection.remote_address());
             log::debug!("Incoming connection from {client_addr}");
 
-            let transport = BincodeOverQuic::new(
-                new_connection.connection,
-                new_connection.uni_streams,
-                MAX_LENGTH,
-            );
-
             // Set up server:
+            let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
             let server = HubServer::new(client_addr, candidate_channels.clone());
             let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
 
@@ -317,31 +317,37 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
     let all_incoming = addrs
         .into_iter()
         .map(|addr| {
-            let (endpoint, incoming) = samizdat_common::quic::new_default(addr.into());
+            let endpoint = samizdat_common::quic::new_default(addr.into());
             log::info!("Reverse server started at {}", endpoint.local_addr()?);
 
-            Ok(incoming)
+            Ok(endpoint)
         })
         .collect::<Result<Vec<_>, io::Error>>()?;
 
     stream::iter(all_incoming)
-        .flatten()
+        .flat_map(|endpoint| {
+            futures::stream::unfold(endpoint, |endpoint| async move {
+                endpoint
+                    .accept()
+                    .await
+                    .map(|connecting| (connecting, endpoint))
+            })
+        })
         .filter_map(|connecting| async move {
             connecting
                 .await
                 .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
                 .ok()
         })
-        .for_each_concurrent(Some(CLI.max_connections), |new_connection| async move {
+        .for_each_concurrent(Some(CLI.max_connections), |connection| async move {
             // Get peer address:
             let client_addr =
-                utils::socket_to_canonical(new_connection.connection.remote_address());
+                utils::socket_to_canonical(connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 
             let transport = BincodeOverQuic::new(
-                new_connection.connection,
-                new_connection.uni_streams,
+                connection,
                 MAX_LENGTH,
             );
 
@@ -370,7 +376,7 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
 }
 
 pub async fn run_partners() {
-    let (endpoint, _incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
+    let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
 
     log::info!(
         "Hub-as-node server started at {}",

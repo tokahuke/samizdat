@@ -4,5 +4,5 @@ members = ["common", "node", "hub", "cli", "proxy"]
 
 [profile.release]
 
-opt-level = "s"
-lto = "fat"
+# opt-level = "s"
+# lto = "fat"

@@ -94,13 +94,13 @@ impl HubConnectionInner {
         hub_addr: HubAddr,
     ) -> Result<(HubConnectionInner, impl Future<Output = ()>), crate::Error> {
         // Connect and create connection manager:
-        let (endpoint, incoming) = quic::new_default("[::]:0".parse().expect("valid address"));
+        let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
 
         if let Ok(local_addr) = endpoint.local_addr() {
             log::info!("Hub connection bound to {local_addr}");
         }
 
-        let connection_manager = Arc::new(ConnectionManager::new(endpoint, incoming));
+        let connection_manager = Arc::new(ConnectionManager::new(endpoint));
         let channel_manager = Arc::new(ChannelManager::new(connection_manager.clone()));
         let candidate_channels = KeyedChannel::new();
         let (client, client_reset_recv) =
