@@ -17,7 +17,7 @@ use crate::models::{CollectionItem, ObjectRef};
 use super::transport::{ChannelReceiver, ChannelSender};
 
 /// The maximum number of bytes allowed for a header.
-const MAX_HEADER_LENGTH: usize = 4_0960000;
+const MAX_HEADER_LENGTH: usize = CHUNK_SIZE;
 /// The maximum size of the stream.
 const MAX_STREAM_SIZE: usize = crate::models::CHUNK_SIZE * 2;
 
