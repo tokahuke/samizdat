@@ -2,22 +2,22 @@
 
 use brotli::{CompressorReader, Decompressor};
 use futures::prelude::*;
-use futures::stream;
+use samizdat_common::MerkleTree;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
-use std::sync::Arc;
 
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::Hash;
 
 use crate::cli;
+use crate::models::CHUNK_SIZE;
 use crate::models::{CollectionItem, ObjectRef};
 
 use super::transport::{ChannelReceiver, ChannelSender};
 
 /// The maximum number of bytes allowed for a header.
-const MAX_HEADER_LENGTH: usize = 4_096;
+const MAX_HEADER_LENGTH: usize = 4_0960000;
 /// The maximum size of the stream.
 const MAX_STREAM_SIZE: usize = crate::models::CHUNK_SIZE * 2;
 
@@ -123,7 +123,7 @@ impl ItemMessage {
 #[derive(Debug, Serialize, Deserialize)]
 struct ObjectMessage {
     nonce: Hash,
-    content_size: usize,
+    hashes: Vec<Hash>,
 }
 
 impl Message for ObjectMessage {}
@@ -139,7 +139,7 @@ impl ObjectMessage {
 
         Ok(ObjectMessage {
             nonce: Hash::rand(),
-            content_size: metadata.content_size,
+            hashes: metadata.hashes,
         })
     }
 
@@ -149,56 +149,54 @@ impl ObjectMessage {
         receiver: &mut ChannelReceiver,
         hash: Hash,
     ) -> Result<ObjectRef, crate::Error> {
-        let cipher = Arc::new(TransferCipher::new(&hash, &self.nonce));
+        let merkle_tree = MerkleTree::from(self.hashes.clone());
+
+        // Check if content actually corresponds to advertized hash:
+        if merkle_tree.root() != hash {
+            return Err(format!(
+                "bad content from peer: expected {}, got {}",
+                hash,
+                merkle_tree.root(),
+            )
+            .into());
+        }
 
         // Refuse if content is too big:
-        if self.content_size > cli().max_content_size * 1_000_000 {
+        let minimum_content_size = (self.hashes.len() - 1) * CHUNK_SIZE;
+        if minimum_content_size > cli().max_content_size * 1_000_000 {
             return Err(format!(
-                "content too big: max size is {}, advertised was {}",
-                cli().max_content_size * 1_000_000,
-                self.content_size
+                "content too big: max size is {}Mb, but content no smaller than {}Mb",
+                cli().max_content_size,
+                minimum_content_size / 1_000_000,
             )
             .into());
         }
 
         // Stream content
-        let content_stream = receiver
-            .recv_many(MAX_STREAM_SIZE)
-            .map_ok(|mut buffer| {
-                cipher.decrypt(&mut buffer);
-                let reader = Decompressor::new(Cursor::new(buffer), 4096);
-                stream::iter(
-                    reader
-                        .bytes()
-                        .map(|byte| Ok(byte.expect("never error")) as Result<_, crate::Error>),
-                )
-            })
-            .try_flatten();
+        let cipher = TransferCipher::new(&hash, &self.nonce);
+        let content_stream =
+            receiver
+                .recv_many(MAX_STREAM_SIZE)
+                .and_then(|mut compressed_chunk| {
+                    // Decrypt and decompress:
+                    cipher.decrypt(&mut compressed_chunk);
+
+                    async move {
+                        // Decompress chunk:
+                        let mut chunk = Vec::with_capacity(CHUNK_SIZE);
+                        Decompressor::new(Cursor::new(compressed_chunk), 4096)
+                            .read_to_end(&mut chunk)?;
+
+                        Ok(chunk)
+                    }
+                });
 
         // Build content from stream (this limits content size to the advertised amount)
-        let object = ObjectRef::import(self.content_size, false, Box::pin(content_stream)).await?;
-        let metadata = object.metadata()?.expect("object exists");
+        let object = ObjectRef::import(merkle_tree, Box::pin(content_stream)).await?;
 
         log::info!("done building object");
 
-        // Check if the peer is up to any extra sneaky tricks.
-        if metadata.content_size != self.content_size {
-            Err(format!(
-                "actual data length did not match content-size: expected {}, got {}",
-                metadata.content_size, self.content_size
-            )
-            .into())
-        } else if *object.hash() != hash {
-            Err(format!(
-                "bad content from peer: expected {}, got {}",
-                hash,
-                object.hash(),
-            )
-            .into())
-        } else {
-            log::info!("received valid object from peer");
-            Ok(object)
-        }
+        Ok(object)
     }
 
     /// Use this header to send the object to the peer.

@@ -83,8 +83,6 @@ impl HubConnectionInner {
         );
         let handler = tokio::spawn(server_task);
 
-        log::info!("aosndas");
-
         Ok(handler)
     }
 

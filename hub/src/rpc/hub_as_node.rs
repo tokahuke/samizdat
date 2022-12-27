@@ -175,10 +175,7 @@ async fn connect_direct(
         connection.remote_address()
     );
 
-    let transport = BincodeOverQuic::new(
-        connection.clone(),
-        MAX_TRANSFER_SIZE,
-    );
+    let transport = BincodeOverQuic::new(connection.clone(), MAX_TRANSFER_SIZE);
 
     let (client_reset_trigger, client_reset_recv) = oneshot::channel();
     let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
@@ -207,10 +204,7 @@ async fn connect_reverse(
         connection.remote_address()
     );
 
-    let transport = BincodeOverQuic::new(
-        connection.clone(),
-        MAX_TRANSFER_SIZE,
-    );
+    let transport = BincodeOverQuic::new(connection.clone(), MAX_TRANSFER_SIZE);
 
     let server_task = server::BaseChannel::with_defaults(transport)
         .execute(HubAsNodeServer::new(reverse_addr, client, candidate_channels).serve());

@@ -33,10 +33,7 @@ where
     R: 'static + Send + for<'a> Deserialize<'a>,
 {
     /// Creates a new [`BincodeOverQuic`] over an existing connection.
-    pub fn new(
-        connection: Connection,
-        max_length: usize,
-    ) -> BincodeOverQuic<S, R> {
+    pub fn new(connection: Connection, max_length: usize) -> BincodeOverQuic<S, R> {
         BincodeOverQuic {
             connection,
             ongoing_recv: None,
@@ -59,7 +56,7 @@ fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
 }
 
 /// Receives a single bincode message:
-async fn recv_message<R>(connection: Connection, max_length: usize) -> Result<R, io::Error> 
+async fn recv_message<R>(connection: Connection, max_length: usize) -> Result<R, io::Error>
 where
     R: for<'a> Deserialize<'a>,
 {
@@ -67,12 +64,8 @@ where
     let serialized = recv_stream.read_to_end(max_length).await;
 
     match serialized {
-        Ok(serialized) => {
-            bincode::deserialize(&serialized).map_err(bincode_error_to_io)
-        }
-        Err(ReadToEndError::TooLong) => {
-            Err(io::Error::new(io::ErrorKind::InvalidData, "too long"))
-        }
+        Ok(serialized) => bincode::deserialize(&serialized).map_err(bincode_error_to_io),
+        Err(ReadToEndError::TooLong) => Err(io::Error::new(io::ErrorKind::InvalidData, "too long")),
         Err(ReadToEndError::Read(read)) => Err(read.into()),
     }
 }
@@ -95,7 +88,8 @@ where
             })
         } else {
             // Create new task:
-            let mut recv_task = tokio::spawn(recv_message(this.connection.clone(), this.max_length)).fuse();
+            let mut recv_task =
+                tokio::spawn(recv_message(this.connection.clone(), this.max_length)).fuse();
             // Then poll:
             let polled = Pin::new(&mut recv_task).poll(cx).map(|outcome| {
                 this.ongoing_recv = None;

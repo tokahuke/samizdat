@@ -1,5 +1,5 @@
 use futures::future::join;
-use quinn::{Connecting, Endpoint, Connection};
+use quinn::{Connecting, Connection, Endpoint};
 use samizdat_common::{quic, BincodeOverQuic};
 use std::net::SocketAddr;
 
@@ -20,7 +20,7 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    pub fn new(endpoint: Endpoint,) -> ConnectionManager {
+    pub fn new(endpoint: Endpoint) -> ConnectionManager {
         let matcher: Matcher<SocketAddr, Connecting> = Matcher::default();
 
         let matcher_task = matcher.clone();
@@ -57,10 +57,7 @@ impl ConnectionManager {
     {
         let connection = self.connect(remote_addr).await?;
 
-        Ok(BincodeOverQuic::new(
-            connection,
-            MAX_TRANSFER_SIZE,
-        ))
+        Ok(BincodeOverQuic::new(connection, MAX_TRANSFER_SIZE))
     }
 
     /// TODO: very basic NAT/firewall traversal stuff that works well in IPv6,

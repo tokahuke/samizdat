@@ -403,48 +403,62 @@ impl ObjectRef {
         Ok(ObjectRef { hash })
     }
 
-    /// Imports an existing object in the database from an external data.
+    /// Imports an existing object in the database from an external _already validated_ data source.
     pub async fn import(
-        expected_content_size: usize,
-        bookmark: bool,
-        source: impl Unpin + Stream<Item = Result<u8, crate::Error>>,
+        merkle_tree: MerkleTree,
+        chunks: impl Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
     ) -> Result<ObjectRef, crate::Error> {
         let mut content_size = 0;
-        let mut buffer = Vec::with_capacity(CHUNK_SIZE);
-        let mut hashes = Vec::new();
+        let mut chunk_id = 0;
         let mut maybe_header = None;
+        let mut limited_chunks = chunks.take(merkle_tree.len());
 
-        let mut limited_source = source.take(expected_content_size);
+        while let Some(chunk) = limited_chunks.next().await.transpose()? {
+            // Check if hash actually corresponds to hash in merkle tree.
+            let expected_hash = merkle_tree.hashes()[chunk_id];
+            let received_hash = Hash::hash(&chunk);
 
-        loop {
-            // Extend buffer until (a) source stops (b) error (c) reaches limit.
-            while let Some(byte) = limited_source.next().await {
-                buffer.push(byte?);
-                content_size += 1;
-
-                if buffer.len() == CHUNK_SIZE {
-                    break;
-                }
+            if expected_hash != received_hash {
+                return Err(format!(
+                    "Received chunk has hash {received_hash}; expected {expected_hash}"
+                )
+                .into());
             }
 
-            let chunk_hash = Hash::hash(&buffer);
-            db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
-            hashes.push(chunk_hash);
-
-            if maybe_header.is_none() {
-                let (_read, header) = ObjectHeader::read(buffer.iter().copied().map(Ok))?;
+            // Extract object header in first iteration:
+            if chunk_id == 0 {
+                let (_, header) = ObjectHeader::read(chunk.iter().copied().map(Ok))?;
                 maybe_header = Some(header);
             }
 
-            // Buffer not fille to the brim: it's over!
-            if buffer.len() < CHUNK_SIZE {
-                break;
+            // Warn of incompatible chunk size (big chunks are dealt with somehwere else):
+            if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
+                log::warn!(
+                    "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
+                    sized chunks might become illegal in the future.",
+                    chunk.len() / 1_000
+                );
             }
 
-            buffer.clear();
+            // Put chunk in the database
+            db().put_cf(Table::ObjectChunks.get(), &received_hash, &chunk)?;
+
+            // Next chunk!
+            chunk_id += 1;
+            content_size += chunk.len();
         }
 
-        let merkle_tree = MerkleTree::from(hashes);
+        // Check if _all_ chunks were ingested
+        if chunk_id != merkle_tree.len() {
+            return Err(format!(
+                "Insuficient chunks for object {} received: expected {}, got only {}",
+                merkle_tree.root(),
+                merkle_tree.len(),
+                chunk_id
+            )
+            .into());
+        }
+
         let hash = merkle_tree.root();
         let metadata = ObjectMetadata {
             hashes: merkle_tree.hashes().to_vec(),
@@ -453,8 +467,6 @@ impl ObjectRef {
             received_at: chrono::Utc::now(),
         };
         let statistics = ObjectStatistics::new(content_size);
-
-        log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
         let mut batch = rocksdb::WriteBatch::default();
         batch.put_cf(Table::Objects.get(), &hash, &[]);
@@ -468,12 +480,9 @@ impl ObjectRef {
             &hash,
             bincode::serialize(&statistics).expect("can serialize"),
         );
-
-        if bookmark {
-            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark_with(&mut batch);
-        }
-
         db().write(batch)?;
+
+        log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
         Ok(ObjectRef { hash })
     }

@@ -46,8 +46,9 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     };
 
     // Set static:
+    log::info!("Node access token is {access_token:?}");
     unsafe {
-        ACCESS_TOKEN = Some(dbg!(access_token));
+        ACCESS_TOKEN = Some(access_token);
     }
 
     Ok(())

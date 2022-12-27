@@ -341,15 +341,11 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
         })
         .for_each_concurrent(Some(CLI.max_connections), |connection| async move {
             // Get peer address:
-            let client_addr =
-                utils::socket_to_canonical(connection.remote_address());
+            let client_addr = utils::socket_to_canonical(connection.remote_address());
 
             log::debug!("Incoming connection from {client_addr}");
 
-            let transport = BincodeOverQuic::new(
-                connection,
-                MAX_LENGTH,
-            );
+            let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
 
             // Set up client (remember to drop it when connection is severed):
             let uninstrumented_client =
