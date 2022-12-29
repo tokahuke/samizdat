@@ -1,11 +1,11 @@
 //! Implementation of the node behavior in the Samizdat network, both with hubs and with
 //! other nodes.
 
-mod file_transfer;
 mod node_server;
 mod reconnect;
 mod transport;
 
+pub use file_transfer::ReceivedObject;
 pub use reconnect::Reconnect;
 
 use futures::prelude::*;
@@ -31,10 +31,10 @@ use samizdat_common::{Hash, Riddle};
 use crate::cli;
 use crate::models::Identity;
 use crate::models::IdentityRef;
-use crate::models::{Edition, ObjectRef, SeriesRef};
+use crate::models::{Edition, SeriesRef};
 
 use self::node_server::NodeServer;
-use self::transport::{ChannelManager, ConnectionManager};
+use self::transport::{file_transfer, ChannelManager, ConnectionManager};
 
 /// A single connection instance, which will be recreated by [`Reconnect`] on connection loss.
 pub struct HubConnectionInner {
@@ -156,7 +156,7 @@ impl HubConnection {
         &self,
         content_hash: Hash,
         kind: QueryKind,
-    ) -> Result<ObjectRef, crate::Error> {
+    ) -> Result<ReceivedObject, crate::Error> {
         // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
             .map(|_| Riddle::new(&content_hash))
@@ -265,7 +265,10 @@ impl HubConnection {
             }
         };
 
-        log::info!("Query done: {kind:?} {content_hash} {outcome:?}");
+        log::info!(
+            "Query done: {kind:?} {content_hash} {:?}",
+            outcome.as_ref().map(|tee| tee.object_ref())
+        );
 
         outcome
     }
@@ -375,7 +378,7 @@ impl Hubs {
     }
 
     /// Makes a query to all inscribed hubs.
-    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ObjectRef> {
+    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ReceivedObject> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);

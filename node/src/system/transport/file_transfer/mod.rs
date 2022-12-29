@@ -1,6 +1,7 @@
 //! Protocol for information transfer between peers.
 
 use brotli::{CompressorReader, Decompressor};
+use chrono::TimeZone;
 use futures::prelude::*;
 use samizdat_common::MerkleTree;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
@@ -11,14 +12,15 @@ use samizdat_common::cipher::TransferCipher;
 use samizdat_common::Hash;
 
 use crate::cli;
-use crate::models::CHUNK_SIZE;
-use crate::models::{CollectionItem, ObjectRef};
+use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
+use crate::models::{ContentStream, CHUNK_SIZE};
 
-use super::transport::{ChannelReceiver, ChannelSender};
+use super::{ChannelReceiver, ChannelSender};
 
-/// The maximum number of bytes allowed for a header.
+/// The maximum number of bytes allowed for a header. This puts a hard cap on the maximum file size
+/// at around 2.34GB.
 const MAX_HEADER_LENGTH: usize = CHUNK_SIZE;
-/// The maximum size of the stream.
+/// The maximum size of the stream, with plenty of room for errors.
 const MAX_STREAM_SIZE: usize = crate::models::CHUNK_SIZE * 2;
 
 /// A header that can be sent from the sender to the receiver _before_ the stream starts.
@@ -123,7 +125,7 @@ impl ItemMessage {
 #[derive(Debug, Serialize, Deserialize)]
 struct ObjectMessage {
     nonce: Hash,
-    hashes: Vec<Hash>,
+    metadata: ObjectMetadata,
 }
 
 impl Message for ObjectMessage {}
@@ -135,21 +137,24 @@ impl ObjectMessage {
     ///
     /// If object does not exist locally.
     fn for_object(object: &ObjectRef) -> Result<ObjectMessage, crate::Error> {
-        let metadata = object.metadata()?.expect("object exists");
+        let mut metadata = object.metadata()?.expect("object exists");
+
+        // Need to omit some details before sending through the wire:
+        metadata.received_at = chrono::Utc.timestamp_nanos(0);
 
         Ok(ObjectMessage {
             nonce: Hash::rand(),
-            hashes: metadata.hashes,
+            metadata,
         })
     }
 
     /// Use this header to receive the object from the peer.
-    pub async fn recv_data(
+    pub fn recv_data(
         self,
-        receiver: &mut ChannelReceiver,
+        receiver: ChannelReceiver,
         hash: Hash,
-    ) -> Result<ObjectRef, crate::Error> {
-        let merkle_tree = MerkleTree::from(self.hashes.clone());
+    ) -> Result<ContentStream, crate::Error> {
+        let merkle_tree = MerkleTree::from(self.metadata.hashes.clone());
 
         // Check if content actually corresponds to advertized hash:
         if merkle_tree.root() != hash {
@@ -162,22 +167,23 @@ impl ObjectMessage {
         }
 
         // Refuse if content is too big:
-        let minimum_content_size = (self.hashes.len() - 1) * CHUNK_SIZE;
-        if minimum_content_size > cli().max_content_size * 1_000_000 {
+        if self.metadata.content_size > cli().max_content_size * 1_000_000 {
             return Err(format!(
-                "content too big: max size is {}Mb, but content no smaller than {}Mb",
+                "content too big: max size is {}Mb, but content is {}Mb",
                 cli().max_content_size,
-                minimum_content_size / 1_000_000,
+                self.metadata.content_size / 1_000_000,
             )
             .into());
         }
 
         // Stream content
         let cipher = TransferCipher::new(&hash, &self.nonce);
+        let content_size = self.metadata.content_size;
+        let mut transfered_size = 0;
         let content_stream =
             receiver
                 .recv_many(MAX_STREAM_SIZE)
-                .and_then(|mut compressed_chunk| {
+                .and_then(move |mut compressed_chunk| {
                     // Decrypt and decompress:
                     cipher.decrypt(&mut compressed_chunk);
 
@@ -187,16 +193,26 @@ impl ObjectMessage {
                         Decompressor::new(Cursor::new(compressed_chunk), 4096)
                             .read_to_end(&mut chunk)?;
 
-                        Ok(chunk)
+                        transfered_size += chunk.len();
+
+                        if transfered_size <= content_size {
+                            Ok(chunk)
+                        } else {
+                            Err(format!(
+                                "Transfered size of {transfered_size} exceeds advertized size \
+                                of {content_size}"
+                            )
+                            .into())
+                        }
                     }
                 });
 
         // Build content from stream (this limits content size to the advertised amount)
-        let object = ObjectRef::import(merkle_tree, Box::pin(content_stream)).await?;
+        let tee = ObjectRef::import(merkle_tree, self.metadata, Box::pin(content_stream));
 
         log::info!("done building object");
 
-        Ok(object)
+        Ok(tee)
     }
 
     /// Use this header to send the object to the peer.
@@ -206,17 +222,21 @@ impl ObjectMessage {
         object: &ObjectRef,
     ) -> Result<(), crate::Error> {
         let cipher = TransferCipher::new(object.hash(), &self.nonce);
+        let chunks = stream::iter(object.iter_content()?.expect("object exits"));
 
-        for chunk in object.chunks()?.expect("object exits") {
-            let chunk = chunk?;
-            log::debug!("stream for data opened");
-            let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
-                .bytes()
-                .collect::<Result<Vec<_>, _>>()
-                .expect("never error");
-            cipher.encrypt(&mut compressed);
-            sender.send(&compressed).await?;
-        }
+        // TODO play with concurrent streams later.
+        chunks
+            .try_for_each_concurrent(Some(1), |chunk| {
+                log::debug!("stream for data opened");
+                let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                    .bytes()
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("never error");
+                cipher.encrypt(&mut compressed);
+
+                async move { sender.send(&compressed).await }
+            })
+            .await?;
 
         log::info!(
             "finished sending {} to {}",
@@ -228,21 +248,47 @@ impl ObjectMessage {
     }
 }
 
+pub struct ReceivedObject {
+    /// The received and not verified metadata.
+    metadata: ObjectMetadata,
+    content_stream: ContentStream,
+    object_ref: ObjectRef,
+}
+
+impl ReceivedObject {
+    pub fn into_content_stream(self) -> ContentStream {
+        self.content_stream
+    }
+
+    pub fn object_ref(&self) -> ObjectRef {
+        self.object_ref.clone()
+    }
+
+    pub fn metadata(&self) -> &ObjectMetadata {
+        &self.metadata
+    }
+}
+
 /// Receives the object from a channel.
 pub async fn recv_object(
     mut receiver: ChannelReceiver,
     hash: Hash,
-) -> Result<ObjectRef, crate::Error> {
+) -> Result<ReceivedObject, crate::Error> {
     log::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash).await?;
     log::info!("receiving object header");
     let header = ObjectMessage::recv(&mut receiver, &transfer_cipher).await?;
+    let metadata = header.metadata.clone();
     log::info!("receiving data");
-    let object = header.recv_data(&mut receiver, hash).await?;
+    let content_stream = header.recv_data(receiver, hash)?;
 
     log::info!("done receiving object");
 
-    Ok(object)
+    Ok(ReceivedObject {
+        metadata,
+        content_stream,
+        object_ref: ObjectRef::new(hash),
+    })
 }
 
 /// Sends an object to a channel.
@@ -272,7 +318,7 @@ pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(
 pub async fn recv_item(
     mut receiver: ChannelReceiver,
     locator_hash: Hash,
-) -> Result<ObjectRef, crate::Error> {
+) -> Result<ReceivedObject, crate::Error> {
     log::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
     log::info!("receiving item header");
@@ -288,19 +334,23 @@ pub async fn recv_item(
     }
 
     // This checks proof validity:
-    let object = header.item.object()?;
+    let object_ref = header.item.object()?;
 
     header.item.insert()?;
 
     log::info!("receiving data");
-    header
+    let metadata = header.object_header.metadata.clone();
+    let content_stream = header
         .object_header
-        .recv_data(&mut receiver, *object.hash())
-        .await?;
+        .recv_data(receiver, *object_ref.hash())?;
 
     log::info!("done receiving item");
 
-    Ok(object)
+    Ok(ReceivedObject {
+        metadata,
+        content_stream,
+        object_ref,
+    })
 }
 
 /// Sends a collection item to a channel.

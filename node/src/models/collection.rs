@@ -185,7 +185,7 @@ impl CollectionItem {
     }
 
     /// Returns an object reference if item is valid. Else, returns
-    /// `Ok(Error::InvalidCollectionItem)`.
+    /// `Err(Error::InvalidCollectionItem)`.
     pub fn object(&self) -> Result<ObjectRef, crate::Error> {
         if self.is_valid() {
             Ok(ObjectRef::new(*self.inclusion_proof.claimed_value()))

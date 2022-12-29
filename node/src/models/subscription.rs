@@ -158,7 +158,9 @@ impl SubscriptionRef {
         series.refresh()?;
 
         if let Some(item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
-            if let Some(content) = item.content()? {
+            let object = item.object_ref();
+
+            if let Some(content) = object.content()? {
                 let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
                     crate::Error::from(format!(
                         "failed to deserialize inventory for edition {:?}: {}",

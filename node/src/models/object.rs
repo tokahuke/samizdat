@@ -6,7 +6,11 @@ use chrono::{DateTime, Utc};
 use futures::prelude::*;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
-use std::convert::TryInto;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::{collections::BTreeMap, convert::TryInto};
+use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, MerkleTree, Riddle};
 
@@ -21,7 +25,7 @@ pub const CHUNK_SIZE: usize = 256_000;
 
 /// The first section before the actual content of the object. The header is
 /// encoded as a null-escaped byte sequence in the beginning of the first chunk.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectHeader {
     /// The MIME type of this object.
     content_type: String,
@@ -134,7 +138,7 @@ fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
 
 /// Information about the object that is "out of band", that is, does not compose the hash
 /// directly. This is used for internal bookkeeping inside the node.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectMetadata {
     /// The hashes of each chunk in the order that they appear.
     pub hashes: Vec<Hash>,
@@ -143,21 +147,23 @@ pub struct ObjectMetadata {
     pub header: ObjectHeader,
     /// Sum of the sizes of all chunks. This includes the header size.
     pub content_size: usize,
-    /// The timestamp this object was received on.
+    /// The timestamp this object was received on. This field is not transmitted through the network.
     pub received_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// An iterator over the bytes of an object, including its header.
-pub struct ContentIter {
+pub struct BytesIter {
     /// An iterator over hashes.
     hashes: std::vec::IntoIter<Hash>,
     /// An iterator over the current chunk.
     current_chunk: Option<std::vec::IntoIter<u8>>,
     /// Indicates whether an error has occurred.
     is_error: bool,
+    /// Indicates whether an object header must be skipped for the next chunk.
+    skip_header: bool,
 }
 
-impl Iterator for ContentIter {
+impl Iterator for BytesIter {
     type Item = Result<u8, crate::Error>;
     fn next(&mut self) -> Option<Result<u8, crate::Error>> {
         // Fused on error:
@@ -177,7 +183,16 @@ impl Iterator for ContentIter {
             match get_chunk(hash) {
                 // Found chunk? Load an try again!
                 Ok(chunk) => {
-                    self.current_chunk = Some(chunk.into_iter());
+                    let mut iter = chunk.into_iter();
+
+                    // If an object header must be skipped, then skip it!
+                    if self.skip_header {
+                        let (_, _) = ObjectHeader::read((&mut iter).map(Ok)).unwrap();
+                        self.skip_header = false;
+                    }
+
+                    self.current_chunk = Some(iter);
+
                     return self.next();
                 }
                 // Found error? Return error and fuse.
@@ -194,14 +209,14 @@ impl Iterator for ContentIter {
 }
 
 /// An iterator over the chunks of an object.
-pub struct ChunkIter {
+pub struct ContentIter {
     /// An iterator over hashes.
     hashes: std::vec::IntoIter<Hash>,
     /// Indicates whether an error has occurred.
     is_error: bool,
 }
 
-impl Iterator for ChunkIter {
+impl Iterator for ContentIter {
     type Item = Result<Vec<u8>, crate::Error>;
     fn next(&mut self) -> Option<Result<Vec<u8>, crate::Error>> {
         // Fused on error:
@@ -226,6 +241,49 @@ impl Iterator for ChunkIter {
 
         // Exhausted
         None
+    }
+}
+
+pub struct ContentStream {
+    hashes: Pin<Box<dyn Send + Stream<Item = Result<Hash, crate::Error>>>>,
+    is_error: bool,
+    skip_header: bool,
+}
+
+impl Stream for ContentStream {
+    type Item = Result<Vec<u8>, crate::Error>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Fused on error:
+        if self.is_error {
+            return Poll::Ready(None);
+        }
+
+        // Try getting new chunk.
+        let polled_chunk = Pin::new(&mut self.hashes)
+            .poll_next(cx)
+            .map(|hash| hash.map(|hash| hash.and_then(get_chunk)));
+
+        match polled_chunk {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(Some(Err(err))) => {
+                self.is_error = true;
+                Poll::Ready(Some(Err(err)))
+            }
+            Poll::Ready(Some(Ok(chunk))) => {
+                // If an object header must be skipped, then skip it!
+                let chunk = if self.skip_header {
+                    let mut iter = chunk.into_iter();
+                    ObjectHeader::read((&mut iter).map(Ok))?;
+                    self.skip_header = false;
+                    iter.collect()
+                } else {
+                    chunk
+                };
+
+                Poll::Ready(Some(Ok(chunk)))
+            }
+        }
     }
 }
 
@@ -269,6 +327,13 @@ impl ObjectRef {
     /// Returns the hash associated with this object.
     pub fn hash(&self) -> &Hash {
         &self.hash
+    }
+
+    /// Returns whether an object exists in the database or not;
+    pub fn exists(&self) -> Result<bool, crate::Error> {
+        Ok(db()
+            .get_cf(Table::ObjectMetadata.get(), &self.hash)?
+            .is_some())
     }
 
     /// Returns the metadata on this object. This function returns `Ok(None)` if the object
@@ -403,31 +468,100 @@ impl ObjectRef {
         Ok(ObjectRef { hash })
     }
 
-    /// Imports an existing object in the database from an external _already validated_ data source.
-    pub async fn import(
+    /// Imports an existing object in the database from an external _already validated_ data source,
+    /// returning a _ContentStream_ to the incoming validated bytes.
+    pub fn import(
         merkle_tree: MerkleTree,
+        supplied_metadata: ObjectMetadata,
+        chunks: impl 'static + Send + Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
+    ) -> ContentStream {
+        let (send, recv) = mpsc::unbounded_channel();
+        let task_send = send.clone();
+        let mut next_to_send = 0usize;
+        let mut arrived_chunks = BTreeMap::new();
+
+        // Spawn importing task
+        tokio::spawn(async move {
+            if let Err(err) =
+                ObjectRef::do_import(merkle_tree, supplied_metadata, send, chunks).await
+            {
+                task_send.send(Err(err)).ok();
+            }
+        });
+
+        // Create a stream that will stream the received data _from the database_ contiguously
+        // (chunks may arrive out of order).
+        let hashes = stream::try_unfold(recv, |mut recv| async move {
+            let yielded = recv.recv().await.transpose()?;
+            Ok(yielded.map(|y| (y, recv))) as Result<_, crate::Error>
+        })
+        .map_ok(move |(chunk_id, hash)| {
+            arrived_chunks.insert(chunk_id, hash);
+            let mut contiguous_hashes = vec![];
+
+            while let Some(&hash) = arrived_chunks.get(&next_to_send) {
+                contiguous_hashes.push(hash);
+                next_to_send += 1;
+            }
+
+            stream::iter(contiguous_hashes.into_iter().map(Ok))
+        })
+        .try_flatten();
+
+        ContentStream {
+            hashes: Box::pin(hashes),
+            is_error: false,
+            skip_header: true,
+        }
+    }
+
+    /// Imports an existing object in the database from an external _already validated_ data source.
+    async fn do_import(
+        merkle_tree: MerkleTree,
+        supplied_metadata: ObjectMetadata,
+        sender: mpsc::UnboundedSender<Result<(usize, Hash), crate::Error>>,
         chunks: impl Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
-    ) -> Result<ObjectRef, crate::Error> {
+    ) -> Result<(), crate::Error> {
+        // Having a map allows us to receive chunks out of order.
+        let hash = merkle_tree.root();
+        let hashes = Arc::new(
+            merkle_tree
+                .hashes()
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(chunk_id, chunk_hash)| (chunk_hash, chunk_id))
+                .collect::<BTreeMap<_, _>>(),
+        );
+
+        // Start receiving chunks:
+        let mut arrived_chunks = vec![false; merkle_tree.len()];
         let mut content_size = 0;
-        let mut chunk_id = 0;
         let mut maybe_header = None;
         let mut limited_chunks = chunks.take(merkle_tree.len());
 
         while let Some(chunk) = limited_chunks.next().await.transpose()? {
             // Check if hash actually corresponds to hash in merkle tree.
-            let expected_hash = merkle_tree.hashes()[chunk_id];
             let received_hash = Hash::hash(&chunk);
-
-            if expected_hash != received_hash {
+            let Some(chunk_id) = hashes.get(&received_hash).copied() else {
                 return Err(format!(
-                    "Received chunk has hash {received_hash}; expected {expected_hash}"
+                    "Received chunk has hash {received_hash}; which was not expected"
                 )
                 .into());
-            }
+            };
 
-            // Extract object header in first iteration:
+            // Extract object header in the first chunk:
             if chunk_id == 0 {
                 let (_, header) = ObjectHeader::read(chunk.iter().copied().map(Ok))?;
+
+                if header != supplied_metadata.header {
+                    return Err(format!(
+                        "Supplied object header {:?} is not equal to transmitted header {:?}",
+                        supplied_metadata.header, header
+                    )
+                    .into());
+                }
+
                 maybe_header = Some(header);
             }
 
@@ -443,23 +577,32 @@ impl ObjectRef {
             // Put chunk in the database
             db().put_cf(Table::ObjectChunks.get(), &received_hash, &chunk)?;
 
+            // Emit received chunk:
+            log::info!("Chunk {chunk_id} for object {hash} received");
+            sender.send(Ok((chunk_id, received_hash))).ok();
+
             // Next chunk!
-            chunk_id += 1;
             content_size += chunk.len();
+            arrived_chunks[chunk_id] = true;
         }
 
         // Check if _all_ chunks were ingested
-        if chunk_id != merkle_tree.len() {
+        let not_arrived = arrived_chunks
+            .into_iter()
+            .enumerate()
+            .filter(|&(_, x)| !x)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        if !not_arrived.is_empty() {
             return Err(format!(
-                "Insuficient chunks for object {} received: expected {}, got only {}",
+                "Insuficient chunks for object {} received: missing {:?}",
                 merkle_tree.root(),
-                merkle_tree.len(),
-                chunk_id
+                not_arrived,
             )
             .into());
         }
 
-        let hash = merkle_tree.root();
+        // Build object:
         let metadata = ObjectMetadata {
             hashes: merkle_tree.hashes().to_vec(),
             header: maybe_header.ok_or(crate::Error::NoHeaderRead)?,
@@ -484,13 +627,13 @@ impl ObjectRef {
 
         log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
-        Ok(ObjectRef { hash })
+        Ok(())
     }
 
     /// Create a copy of this object, but with a different nonce header value. This new object
     /// will have a new content hash.
     pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
-        if let Some(mut iter) = self.iter_content()? {
+        if let Some(mut iter) = self.iter_bytes(false)? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
             let reissued = ObjectRef::build(header.reissue(), bookmark, iter)?;
 
@@ -500,8 +643,48 @@ impl ObjectRef {
         }
     }
 
-    /// Streams the contents of an object, including the header part. To skip it, see
-    /// [`ObjectRef::iter_skip_header`].
+    /// Iterates through the contents of an object, optionally including the header part
+    /// if `skip_header` is set.
+    ///
+    /// This function returns `Ok(None)` if the object does not actually exist.
+    ///  
+    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
+    pub fn iter_bytes(&self, skip_header: bool) -> Result<Option<BytesIter>, crate::Error> {
+        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+            metadata
+        } else {
+            return Ok(None);
+        };
+
+        Ok(Some(BytesIter {
+            hashes: metadata.hashes.into_iter(),
+            current_chunk: None,
+            is_error: false,
+            skip_header,
+        }))
+    }
+
+    /// Streams the contents of an object, optionally including the header part if `skip_header`
+    /// is set.
+    ///
+    /// This function returns `Ok(None)` if the object does not actually exist.
+    ///  
+    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
+    pub fn stream_content(&self, skip_header: bool) -> Result<Option<ContentStream>, crate::Error> {
+        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+            metadata
+        } else {
+            return Ok(None);
+        };
+
+        Ok(Some(ContentStream {
+            hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
+            is_error: false,
+            skip_header,
+        }))
+    }
+
+    /// Streams the contents of an object.
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
     ///  
@@ -515,39 +698,6 @@ impl ObjectRef {
 
         Ok(Some(ContentIter {
             hashes: metadata.hashes.into_iter(),
-            current_chunk: None,
-            is_error: false,
-        }))
-    }
-
-    /// Streams the contents of an object, skipping the header part.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
-    ///  
-    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
-    pub fn iter_skip_header(&self) -> Result<Option<ContentIter>, crate::Error> {
-        if let Some(mut iter) = self.iter_content()? {
-            let (_read, _header) = ObjectHeader::read(&mut iter)?;
-            Ok(Some(iter))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Streams the contents of an object.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
-    ///  
-    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
-    pub fn chunks(&self) -> Result<Option<ChunkIter>, crate::Error> {
-        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
-            metadata
-        } else {
-            return Ok(None);
-        };
-
-        Ok(Some(ChunkIter {
-            hashes: metadata.hashes.into_iter(),
             is_error: false,
         }))
     }
@@ -559,7 +709,7 @@ impl ObjectRef {
     /// Be careful when using this method. If the file is too big, you might get out of
     /// memory!
     pub fn content(&self) -> Result<Option<Vec<u8>>, crate::Error> {
-        if let Some(iter) = self.iter_skip_header()? {
+        if let Some(iter) = self.iter_bytes(true)? {
             Ok(Some(iter.collect::<Result<Vec<_>, _>>()?))
         } else {
             Ok(None)

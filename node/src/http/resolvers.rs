@@ -1,6 +1,6 @@
 //! Bridges from the Samizdat world to the HTTP world.
 
-use futures::stream;
+use futures::TryStreamExt;
 use http::Response;
 use hyper::Body;
 use rocksdb::WriteBatch;
@@ -10,20 +10,22 @@ use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
 use crate::models::{IdentityRef, ItemPath, Locator, ObjectRef, SeriesRef};
+use crate::system::ReceivedObject;
 
 pub struct Resolved {
     body: Body,
     content_type: String,
-    content_size: usize,
     ext_headers: Vec<(&'static str, String)>,
 }
 
 impl TryInto<Response<Body>> for Resolved {
     type Error = http::Error;
     fn try_into(self) -> Result<Response<Body>, http::Error> {
-        let mut builder = http::Response::builder()
-            .header("Content-Type", self.content_type)
-            .header("Content-Size", self.content_size);
+        let mut builder = http::Response::builder().header("Content-Type", self.content_type);
+
+        // if let Some(content_size) = self.content_size {
+        //     builder = builder.header("Content-Size", content_size);
+        // }
 
         for (header, value) in self.ext_headers {
             builder = builder.header(header, value);
@@ -50,52 +52,76 @@ impl TryInto<Response<Body>> for NotResolved {
     }
 }
 
+async fn resolve_new_object(
+    received_object: ReceivedObject,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+) -> Result<Resolved, crate::Error> {
+    let object = received_object.object_ref();
+    let header = received_object.metadata().header.clone();
+    let content_stream = received_object.into_content_stream();
+
+    Ok(Resolved {
+        content_type: header.content_type().to_owned(),
+        ext_headers: ext_headers
+            .into_iter()
+            .chain([
+                // New objects are never bookmarked
+                ("X-Samizdat-Bookmark", "false".to_owned()),
+                // ("X-Samizdat-Is-Draft", header.is_draft().to_string()),
+                ("X-Samizdat-Object", object.hash().to_string()),
+            ])
+            .collect(),
+        body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
+    })
+}
+
+fn resolve_existing_object(
+    object: ObjectRef,
+    ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+) -> Result<Resolved, crate::Error> {
+    let metadata = object.metadata()?.expect("object exists");
+    let content_stream = object.stream_content(true)?.expect("object exists");
+
+    Ok(Resolved {
+        content_type: metadata.header.content_type().to_owned(),
+        ext_headers: ext_headers
+            .into_iter()
+            .chain([
+                ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
+                (
+                    "X-Samizdat-Is-Draft",
+                    metadata.header.is_draft().to_string(),
+                ),
+                ("X-Samizdat-Object", object.hash().to_string()),
+            ])
+            .collect(),
+        body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
+    })
+}
+
 /// Tries to find an object, asking the Samizdat network if necessary.
 pub async fn resolve_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {object:?}");
-
-    let iter = if let Some(iter) = object.iter_skip_header()? {
+    if object.exists()? {
         log::info!("Found local hash {}", object.hash());
-        Some(iter)
-    } else {
-        log::info!("Hash {} not found locally. Querying hubs", object.hash());
-        hubs().query(*object.hash(), QueryKind::Object).await;
-        object.iter_skip_header()?
+        return Ok(resolve_existing_object(object, ext_headers)?.try_into());
+    }
+
+    log::info!("Hash {} not found locally. Querying hubs", object.hash());
+    if let Some(received_object) = hubs().query(*object.hash(), QueryKind::Object).await {
+        return Ok(resolve_new_object(received_object, ext_headers)
+            .await?
+            .try_into());
+    }
+
+    let not_resolved = NotResolved {
+        message: format!("Object {} not found", object.hash()),
     };
 
-    // Respond with found or not found.
-    if let Some((metadata, iter)) = object.metadata()?.zip(iter) {
-        object.touch()?;
-        let resolved = Resolved {
-            content_type: metadata.header.content_type().to_owned(),
-            content_size: metadata.content_size,
-            ext_headers: ext_headers
-                .into_iter()
-                .chain([
-                    ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
-                    (
-                        "X-Samizdat-Is-Draft",
-                        metadata.header.is_draft().to_string(),
-                    ),
-                    ("X-Samizdat-Object", object.hash().to_string()),
-                ])
-                .collect(),
-            body: Body::wrap_stream(stream::iter(
-                crate::utils::chunks(1000, iter).map(|thing| thing.map_err(|err| err.to_string())),
-            )),
-        };
-
-        Ok(resolved.try_into())
-    } else {
-        let not_resolved = NotResolved {
-            message: format!("Object {} not found", object.hash()),
-        };
-
-        Ok(not_resolved.try_into())
-    }
+    Ok(not_resolved.try_into())
 }
 
 /// Tries to find an object as a collection item, asking the Samizdat network if
@@ -104,34 +130,31 @@ pub async fn resolve_item(
     locator: Locator<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    // Add extra headers for item:
+    let ext_headers = ext_headers.into_iter().chain([(
+        "X-Samizdat-Collection",
+        locator.collection().hash().to_string(),
+    )]);
+
     log::info!("Resolving item {locator}");
-
-    let maybe_item = if let Some(item) = locator.get()? {
+    if let Some(item) = locator.get()? {
         log::info!("Found item {locator} locally. Resolving object.");
-        Some(item)
-    } else {
-        log::info!("Item not found locally. Querying hubs.");
-        hubs().query(locator.hash(), QueryKind::Item).await;
+        let object = item.object().expect("found invalid object for item");
+        return Ok(resolve_existing_object(object, ext_headers)?.try_into());
+    }
 
-        locator.get()?
+    log::info!("Item not found locally. Querying hubs.");
+    if let Some(received_object) = hubs().query(locator.hash(), QueryKind::Item).await {
+        return Ok(resolve_new_object(received_object, ext_headers)
+            .await?
+            .try_into());
+    }
+
+    let not_resolved = NotResolved {
+        message: format!("Item {locator} not found"),
     };
 
-    if let Some(item) = maybe_item {
-        resolve_object(
-            item.object()?,
-            ext_headers.into_iter().chain([(
-                "X-Samizdat-Collection",
-                locator.collection().hash().to_string(),
-            )]),
-        )
-        .await
-    } else {
-        let not_resolved = NotResolved {
-            message: format!("Item {locator} not found"),
-        };
-
-        Ok(not_resolved.try_into())
-    }
+    Ok(not_resolved.try_into())
 }
 
 /// Tries to find an object as an item the collection corresponding to the latest

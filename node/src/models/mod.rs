@@ -10,7 +10,9 @@ mod subscription;
 pub use bookmark::{Bookmark, BookmarkType};
 pub use collection::{CollectionItem, CollectionRef, Inventory, ItemPath, ItemPathBuf, Locator};
 pub use identity::{Identity, IdentityRef};
-pub use object::{ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE};
+pub use object::{
+    ContentStream, ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE,
+};
 pub use series::{Edition, SeriesOwner, SeriesRef};
 pub use subscription::{Subscription, SubscriptionKind, SubscriptionRef};
 
