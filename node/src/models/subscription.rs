@@ -2,7 +2,6 @@
 //! series as up-to-date as possible.
 
 use futures::prelude::*;
-use futures::stream;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -157,26 +156,26 @@ impl SubscriptionRef {
         series.advance(&edition)?;
         series.refresh()?;
 
-        if let Some(item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
-            let object = item.object_ref();
+        if let Some(received_object) = hubs().query(inventory_content_hash, QueryKind::Item).await {
+            let content = received_object
+                .into_content_stream()
+                .collect_content()
+                .await?;
 
-            if let Some(content) = object.content()? {
-                let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
-                    crate::Error::from(format!(
-                        "failed to deserialize inventory for edition {:?}: {}",
-                        edition, err
-                    ))
-                })?;
+            let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
+                crate::Error::from(format!(
+                    "failed to deserialize inventory for edition {:?}: {}",
+                    edition, err
+                ))
+            })?;
 
-                stream::iter(inventory.iter())
-                    .for_each_concurrent(None, |(item_path, _hash)| {
-                        let content_hash = collection.locator_for(item_path.as_path()).hash();
-                        hubs().query(content_hash, QueryKind::Item).map(|_| ())
-                    })
-                    .await;
-
-                return Ok(());
+            // Make the necessary calls indiscriminately:
+            for (item_path, _hash) in &inventory {
+                let content_hash = collection.locator_for(item_path.as_path()).hash();
+                tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
             }
+
+            return Ok(());
         }
 
         Err(crate::Error::from(format!(

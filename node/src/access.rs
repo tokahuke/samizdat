@@ -51,6 +51,18 @@ pub fn init_access_token() -> Result<(), crate::Error> {
         ACCESS_TOKEN = Some(access_token);
     }
 
+    // ... and also piggyback writing port here. I know this is hacky, but...
+    let port_path = format!(
+        "{}/port",
+        cli().data.to_str().expect("path is not a string")
+    );
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(port_path)?;
+    file.write(cli().port.to_string().as_bytes())?;
+
     Ok(())
 }
 

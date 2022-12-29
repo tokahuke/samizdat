@@ -290,7 +290,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     println!();
     println!(
         "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
-        crate::cli::cli().port,
+        crate::access_token::port(),
         private_manifest.public_key_debug
     );
     println!();

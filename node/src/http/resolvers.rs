@@ -69,6 +69,7 @@ async fn resolve_new_object(
         ext_headers: ext_headers
             .into_iter()
             .chain([
+                ("ETag", format!("\"{}\"", object.hash())),
                 // New objects are never bookmarked
                 ("X-Samizdat-Bookmark", "false".to_owned()),
                 // ("X-Samizdat-Is-Draft", header.is_draft().to_string()),
@@ -93,6 +94,7 @@ fn resolve_existing_object(
         ext_headers: ext_headers
             .into_iter()
             .chain([
+                ("ETag", format!("\"{}\"", object.hash())),
                 ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
                 (
                     "X-Samizdat-Is-Draft",
@@ -229,6 +231,8 @@ pub async fn resolve_series(
     Ok(not_resolved.try_into())
 }
 
+/// Tries to find an item in a collection, accessed by an identity handle, asking the
+/// Samizdat network if necessary.
 pub async fn resolve_identity(
     identity_ref: IdentityRef,
     name: ItemPath<'_>,

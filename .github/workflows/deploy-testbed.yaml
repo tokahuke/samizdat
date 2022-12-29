@@ -78,7 +78,12 @@ jobs:
            systemctl disable --now samizdat-hub &&
            systemctl enable --now samizdat-hub &&
            systemctl enable --now samizdat-node &&
-           systemctl enable --now samizdat-proxy"
+           systemctl enable --now samizdat-proxy &&
+           # Get Samizdat:
+           samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM &&
+           # Samizdat blog:
+           samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
+           "
     
     - name: Done
       run: echo Done

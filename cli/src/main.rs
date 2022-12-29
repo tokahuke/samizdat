@@ -22,6 +22,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let _ = logger::init_logger(cli::cli().verbose);
 
     access_token::init_access_token()?;
+    access_token::init_port()?;
 
     api::validate_node_is_up().await?;
     if let Err(err) = cli::cli().clone().command.execute().await {

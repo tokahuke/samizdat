@@ -24,7 +24,7 @@ pub fn cli<'a>() -> &'a Cli {
 }
 
 pub fn server() -> String {
-    format!("http://localhost:{}", cli().port)
+    format!("http://localhost:{}", crate::access_token::port())
 }
 
 #[derive(Clone, Debug, StructOpt)]
@@ -38,8 +38,9 @@ pub struct Cli {
     pub data: PathBuf,
     #[structopt(long, short = "v", env = "SAMIZDAT_VERBOSE")]
     pub verbose: bool,
-    #[structopt(long, short, env = "SAMIZDAT_PORT", default_value = "4510")]
-    pub port: u16,
+    // DEPRECATED
+    // #[structopt(long, short, env = "SAMIZDAT_PORT", default_value = "4510")]
+    // pub port: u16,
     #[structopt(subcommand)]
     pub command: Command,
 }

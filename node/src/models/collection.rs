@@ -132,6 +132,16 @@ impl Inventory {
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
         self.into_iter()
     }
+
+    /// The number of entries in this inventory.
+    pub fn len(&self) -> usize {
+        self.inventory.len()
+    }
+
+    /// Whether this inventory has any items at all.
+    pub fn is_empty(&self) -> bool {
+        self.inventory.is_empty()
+    }
 }
 
 /// An item inside a collection.

@@ -291,6 +291,19 @@ impl Stream for ContentStream {
     }
 }
 
+impl ContentStream {
+    /// Collects all bytes read for this content stream.
+    pub async fn collect_content(mut self) -> Result<Vec<u8>, crate::Error> {
+        let mut content = vec![];
+
+        while let Some(chunk) = self.next().await.transpose()? {
+            content.extend(chunk);
+        }
+
+        Ok(content)
+    }
+}
+
 /// A handle to an object. The object does not necessarily needs to exist in the database.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ObjectRef {

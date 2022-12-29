@@ -73,9 +73,14 @@ async fn main() -> Result<(), crate::Error> {
     // Init logger:
     let _ = logger::init_logger(cli().verbose);
 
+    log::info!(
+        "Starting SAMIZDAT node in folder {:?}",
+        cli().data.canonicalize()?
+    );
+
     // Init resources:
-    init_access_token()?;
     init_db()?;
+    init_access_token()?;
     init_hubs().await?;
 
     // Start vacuum:
