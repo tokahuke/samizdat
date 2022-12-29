@@ -12,9 +12,13 @@ use crate::hubs;
 use crate::models::{IdentityRef, ItemPath, Locator, ObjectRef, SeriesRef};
 use crate::system::ReceivedObject;
 
+/// Am HTTP response for an object that has been resolved.
 pub struct Resolved {
+    /// The body to be sent to the client, streaming the object's content.
     body: Body,
+    /// The cotent type of this object.
     content_type: String,
+    /// Extra headers to be sent in the HTTP response.
     ext_headers: Vec<(&'static str, String)>,
 }
 
@@ -22,10 +26,6 @@ impl TryInto<Response<Body>> for Resolved {
     type Error = http::Error;
     fn try_into(self) -> Result<Response<Body>, http::Error> {
         let mut builder = http::Response::builder().header("Content-Type", self.content_type);
-
-        // if let Some(content_size) = self.content_size {
-        //     builder = builder.header("Content-Size", content_size);
-        // }
 
         for (header, value) in self.ext_headers {
             builder = builder.header(header, value);
@@ -38,7 +38,9 @@ impl TryInto<Response<Body>> for Resolved {
     }
 }
 
+/// Am HTTP response for an object that has *not* been resolved.
 pub struct NotResolved {
+    /// The message to be relayed to the client.
     message: String,
 }
 
@@ -52,6 +54,8 @@ impl TryInto<Response<Body>> for NotResolved {
     }
 }
 
+/// Creates the HTTP response for an object that has been found outside the node and is
+/// being currently downloaded.
 async fn resolve_new_object(
     received_object: ReceivedObject,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
@@ -75,6 +79,8 @@ async fn resolve_new_object(
     })
 }
 
+/// Creates the HTTP response for an object that has been found in the local database and
+/// does not need to be downloaded.
 fn resolve_existing_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,

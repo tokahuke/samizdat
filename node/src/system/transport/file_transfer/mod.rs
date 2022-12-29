@@ -248,22 +248,31 @@ impl ObjectMessage {
     }
 }
 
+/// Represents an object in the process of being received. The object to which this
+/// struct corresponds most likely does not exist in the database.
 pub struct ReceivedObject {
-    /// The received and not verified metadata.
+    /// The received, but not verified metadata.
     metadata: ObjectMetadata,
+    /// A stream for the incoming content. The content is streamed from the local
+    /// database. Therefore it is "proper for consumption".
     content_stream: ContentStream,
+    /// The object handle for the soon-to-be object.
     object_ref: ObjectRef,
 }
 
 impl ReceivedObject {
+    /// A stream for the incoming content. The content is streamed from the local
+    /// database. Therefore it is "proper for consumption".
     pub fn into_content_stream(self) -> ContentStream {
         self.content_stream
     }
 
+    /// The object handle for the soon-to-be object.
     pub fn object_ref(&self) -> ObjectRef {
         self.object_ref.clone()
     }
 
+    /// The received, but not verified metadata.
     pub fn metadata(&self) -> &ObjectMetadata {
         &self.metadata
     }

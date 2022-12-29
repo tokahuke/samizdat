@@ -1,3 +1,5 @@
+//! Definitions for addresses relevant to Samizdat.
+
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 use std::net::{IpAddr, SocketAddr};
@@ -60,8 +62,11 @@ impl ChannelAddr {
 /// A representation of a hub location.
 #[derive(Clone, Copy)]
 pub struct HubAddr {
+    /// The IP address of the hub.
     ip: IpAddr,
+    /// The port of the node-to-hub RPC.
     direct_port: u16,
+    /// The port of the hub-to-node RPC.
     reverse_port: u16,
 }
 
@@ -119,6 +124,7 @@ impl Debug for HubAddr {
 }
 
 impl HubAddr {
+    /// Create a new [`HubAddr`] from a [`SocketAddr`] and a reverse port (for the hub-to-node RPC).
     pub fn new(addr: SocketAddr, reverse_port: u16) -> Self {
         HubAddr {
             ip: addr.ip(),
@@ -126,6 +132,8 @@ impl HubAddr {
             reverse_port,
         }
     }
+
+    /// Makes the IP of this [`HubAddr`] canonical.
     pub fn to_canonical(&self) -> HubAddr {
         HubAddr {
             ip: self.ip.to_canonical(),
@@ -134,15 +142,19 @@ impl HubAddr {
         }
     }
 
+    /// The full socket address of the node-to-hub RPC.
     pub fn direct_addr(&self) -> SocketAddr {
         (self.ip, self.direct_port).into()
     }
 
+    /// The full socket address of the hub-to-node RPC.
     pub fn reverse_addr(&self) -> SocketAddr {
         (self.ip, self.reverse_port).into()
     }
 }
 
+/// Represents either an `ip:port` style address or a `domain:port` style address. This
+/// is intended to be a flexible representation of an address in the internet.
 #[derive(Debug)]
 pub enum SocketOrDomain {
     /// A raw `ip:port` address.
@@ -168,6 +180,7 @@ impl FromStr for SocketOrDomain {
 }
 
 impl SocketOrDomain {
+    /// The port of this address.
     fn port(&self) -> u16 {
         match self {
             SocketOrDomain::SocketAddr(addr) => addr.port(),
@@ -186,10 +199,13 @@ impl Display for SocketOrDomain {
     }
 }
 
-/// A flexible representation of an address in the internet.
+/// A representation of a double-port address (linking to a Samizdat hub).
 #[derive(Debug)]
 pub struct AddrToResolve {
+    /// The address of the node-to-hub RPC.
     direct_addr: SocketOrDomain,
+    /// The port of the hub-to-node RPC. The IP of this RPC is always the same as of
+    /// `direct_addr`.
     reverse_port: u16,
 }
 

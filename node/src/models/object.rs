@@ -244,9 +244,13 @@ impl Iterator for ContentIter {
     }
 }
 
+/// A stream over the chunks of an object.
 pub struct ContentStream {
+    /// A stream over the chunk hashes, in order.
     hashes: Pin<Box<dyn Send + Stream<Item = Result<Hash, crate::Error>>>>,
+    /// Indicates whether an error has occurred.
     is_error: bool,
+    /// Indicates whether an object header must be skipped for the next chunk.
     skip_header: bool,
 }
 
