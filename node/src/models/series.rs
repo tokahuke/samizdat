@@ -3,7 +3,9 @@
 
 use chrono::SubsecRound;
 use ed25519_dalek::Keypair;
+use futures::prelude::*;
 use rocksdb::{IteratorMode, WriteBatch};
+use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
@@ -12,10 +14,10 @@ use std::time::Duration;
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
-use crate::db;
 use crate::db::Table;
+use crate::{db, hubs};
 
-use super::{BookmarkType, CollectionRef, Droppable};
+use super::{BookmarkType, CollectionRef, Droppable, Inventory};
 
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
@@ -340,8 +342,11 @@ impl SeriesRef {
         let prefix = self.key();
         let mut editions = db()
             .prefix_iterator_cf(Table::Editions.get(), prefix)
-            .map(|item| {
-                let (_key, value) = item?;
+            // TODO: WHAT!? looks like the prefix iterator is iterating over stuff other than
+            // the prefix!?
+            .map(|item| item.expect("cannot fail here. See comment above."))
+            .take_while(|(key, _)| key.starts_with(&prefix))
+            .map(|(_, value)| {
                 let edition: Edition = bincode::deserialize(&value)?;
                 Ok(edition)
             })
@@ -483,6 +488,43 @@ impl Edition {
             key_riddle,
             edition,
         }
+    }
+
+    /// Refresh the underlying series using and *already validated* edition.
+    pub async fn refresh(&self) -> Result<(), crate::Error> {
+        let collection = self.collection();
+        let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
+
+        let series = self.series();
+        series.advance(self)?;
+        series.refresh()?;
+
+        if let Some(received_object) = hubs().query(inventory_content_hash, QueryKind::Item).await {
+            let content = received_object
+                .into_content_stream()
+                .collect_content()
+                .await?;
+
+            let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
+                crate::Error::from(format!(
+                    "failed to deserialize inventory for edition {:?}: {}",
+                    self, err
+                ))
+            })?;
+
+            // Make the necessary calls indiscriminately:
+            for (item_path, _hash) in &inventory {
+                let content_hash = collection.locator_for(item_path.as_path()).hash();
+                tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
+            }
+
+            return Ok(());
+        }
+
+        Err(crate::Error::from(format!(
+            "Inventory not found for edition {:?}. Could not refresh",
+            self
+        )))
     }
 
     /// Gets all the editions currently in the database.

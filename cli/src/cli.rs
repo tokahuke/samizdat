@@ -236,6 +236,8 @@ pub enum SubscriptionCommand {
     /// Subscribe to a series. This tells the node to listen to announcements
     /// and to _actively_ keep in sync with the series.
     New { public_key: String },
+    /// Trigger a manual refresh on this subscription, without waiting from a nudge from the network.
+    Refresh { public_key: String },
     /// Removes an existing subscription.
     Rm { public_key: String },
     // /// Shows details on a particular subscription.
@@ -249,6 +251,9 @@ impl SubscriptionCommand {
         match self {
             SubscriptionCommand::New { public_key } => {
                 commands::subscription::new(public_key).await
+            }
+            SubscriptionCommand::Refresh { public_key } => {
+                commands::subscription::refresh(public_key).await
             }
             SubscriptionCommand::Rm { public_key } => commands::subscription::rm(public_key).await,
             // SubscriptionCommand::Show { public_key } => todo!(),

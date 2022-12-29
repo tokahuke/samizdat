@@ -171,7 +171,7 @@ impl Node for NodeServer {
         log::info!("got {latest:?}");
 
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
-            let editions = series.and_then(|s| s.get_editions());
+            let editions = series.and_then(|s| dbg!(s.get_editions()));
             match editions.as_ref().map(|editions| editions.first()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,
@@ -221,7 +221,7 @@ impl Node for NodeServer {
                     }
 
                     if subscription.must_refresh()? {
-                        subscription.refresh(edition).await
+                        edition.refresh().await
                     } else {
                         Ok(())
                     }

@@ -160,6 +160,11 @@ pub async fn post_subscription(
     post("/_subscriptions", request).await
 }
 
+pub async fn get_subscription_refresh(public_key: &str) -> Result<(), anyhow::Error> {
+    get(format!("/_subscriptions/{public_key}/refresh")).await?;
+    Ok(())
+}
+
 pub async fn delete_subscription(public_key: &str) -> Result<bool, anyhow::Error> {
     delete(format!("/_subscriptions/{public_key}")).await
 }

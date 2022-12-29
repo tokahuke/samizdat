@@ -1,19 +1,17 @@
 //! A subscription is an active effort from the node to keep the full state of a given
 //! series as up-to-date as possible.
 
-use futures::prelude::*;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use tokio::task::JoinHandle;
 
-use samizdat_common::rpc::QueryKind;
 use samizdat_common::{Key, Riddle};
 
-use crate::db;
 use crate::db::Table;
-use crate::hubs;
+use crate::{db, hubs};
 
-use super::{Droppable, Edition, Inventory};
+use super::{Droppable, SeriesRef};
 
 /// The regimen of this subscription. Currently, only downloading the full inventory of
 /// the most current edition is supported.
@@ -72,6 +70,13 @@ impl SubscriptionRef {
     //     self.public_key.clone()
     // }
 
+    /// Whether the subscription exists in the local database.
+    pub fn exists(&self) -> Result<bool, crate::Error> {
+        Ok(db()
+            .get_cf(Table::Subscriptions.get(), &self.public_key.as_bytes())?
+            .is_some())
+    }
+
     /// The key of this subscription in the database.
     pub fn key(&self) -> &[u8] {
         self.public_key.as_bytes()
@@ -89,8 +94,32 @@ impl SubscriptionRef {
 
         db().write(batch)?;
 
-        Ok(SubscriptionRef {
+        let subscription_ref = SubscriptionRef {
             public_key: subscription.public_key,
+        };
+
+        subscription_ref.trigger_manual_refresh();
+
+        Ok(subscription_ref)
+    }
+
+    /// Triggers a manual refresh (one not initiated by the network) _asynchronously_.
+    pub fn trigger_manual_refresh(&self) -> JoinHandle<()> {
+        let series = SeriesRef::new(self.public_key.clone());
+        tokio::spawn(async move {
+            if let Some(latest) = hubs().get_latest(&series).await {
+                latest
+                    .refresh()
+                    .await
+                    .map_err(|err| {
+                        log::error!("While refreshing {series} with {latest:?}, node got: {err}");
+                    })
+                    .ok();
+            } else {
+                log::warn!(
+                    "Subscription for {series} was not able to find any edition for this series"
+                );
+            }
         })
     }
 
@@ -145,42 +174,5 @@ impl SubscriptionRef {
     /// Reserved for future use.
     pub fn must_refresh(&self) -> Result<bool, crate::Error> {
         Ok(true)
-    }
-
-    /// Refresh the underlying series using and *already validated* edition.
-    pub async fn refresh(&self, edition: Edition) -> Result<(), crate::Error> {
-        let collection = edition.collection();
-        let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
-
-        let series = edition.series();
-        series.advance(&edition)?;
-        series.refresh()?;
-
-        if let Some(received_object) = hubs().query(inventory_content_hash, QueryKind::Item).await {
-            let content = received_object
-                .into_content_stream()
-                .collect_content()
-                .await?;
-
-            let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
-                crate::Error::from(format!(
-                    "failed to deserialize inventory for edition {:?}: {}",
-                    edition, err
-                ))
-            })?;
-
-            // Make the necessary calls indiscriminately:
-            for (item_path, _hash) in &inventory {
-                let content_hash = collection.locator_for(item_path.as_path()).hash();
-                tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
-            }
-
-            return Ok(());
-        }
-
-        Err(crate::Error::from(format!(
-            "Inventory not found for edition {:?}. Could not refresh",
-            edition
-        )))
     }
 }

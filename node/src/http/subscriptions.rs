@@ -16,6 +16,7 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     balanced_or_tree!(
         get_subscription(),
         get_subscriptions(),
+        refresh_subscription(),
         post_subscription(),
         delete_subscription(),
     )
@@ -41,6 +42,25 @@ fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                 request.kind,
             ));
             Ok(subscription?.public_key.to_string())
+        })
+        .map(api_reply)
+}
+
+/// Triggers a manual refresh on a subscription.
+fn refresh_subscription(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("_subscriptions" / Key / "refresh")
+        .and(warp::get())
+        .and(authenticate([AccessRight::ManageSubscriptions]))
+        .map(|public_key: Key| {
+            let subscription_ref = SubscriptionRef::new(public_key);
+
+            if subscription_ref.exists()? {
+                subscription_ref.trigger_manual_refresh();
+                Ok(())
+            } else {
+                Err(format!("Node is not subscribed to {subscription_ref}").into())
+            }
         })
         .map(api_reply)
 }

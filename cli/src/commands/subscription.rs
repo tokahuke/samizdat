@@ -15,6 +15,11 @@ pub async fn new(public_key: String) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+pub async fn refresh(public_key: String) -> Result<(), anyhow::Error> {
+    api::get_subscription_refresh(&public_key).await?;
+    Ok(())
+}
+
 pub async fn rm(public_key: String) -> Result<(), anyhow::Error> {
     let removed = api::delete_subscription(&public_key).await?;
 

@@ -286,6 +286,8 @@ impl HubConnection {
         let mut most_recent: Option<Edition> = None;
 
         for candidate in response {
+            dbg!(&candidate);
+            dbg!(series.public_key.hash());
             let cipher = TransferCipher::new(&series.public_key.hash(), &candidate.rand);
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
