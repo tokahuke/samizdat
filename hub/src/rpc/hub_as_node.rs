@@ -168,7 +168,7 @@ async fn connect_direct(
     direct_addr: SocketAddr,
     endpoint: &Endpoint,
 ) -> Result<(HubClient, oneshot::Receiver<()>), crate::Error> {
-    let connection = samizdat_common::quic::connect(endpoint, direct_addr).await?;
+    let connection = samizdat_common::quic::connect(endpoint, direct_addr, true).await?;
 
     log::info!(
         "hub-as-node connected to hub (as client) at {}",
@@ -197,7 +197,7 @@ async fn connect_reverse(
     client: HubClient,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<JoinHandle<()>, crate::Error> {
-    let connection = samizdat_common::quic::connect(endpoint, reverse_addr).await?;
+    let connection = samizdat_common::quic::connect(endpoint, reverse_addr, true).await?;
 
     log::info!(
         "hub-as-node connected to hub (as server) at {}",

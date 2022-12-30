@@ -38,25 +38,30 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
 }
 
 /// Creates a default transport configuration for QUIC.
-fn transport_config() -> TransportConfig {
+fn transport_config(keep_alive: bool) -> TransportConfig {
     const IDLE_TIMEOUT_MS: u32 = 10_000;
 
     let mut transport = TransportConfig::default();
     transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));
-    transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 4)));
+
+    if keep_alive {
+        transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 4)));
+    } else {
+        transport.keep_alive_interval(None);
+    }
 
     transport
 }
 
 /// Creates a default client configuration for QUIC.
-fn client_config() -> ClientConfig {
+fn client_config(keep_alive: bool) -> ClientConfig {
     let crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_custom_certificate_verifier(SkipServerVerification::new())
         .with_no_client_auth();
 
     let mut client_config = ClientConfig::new(Arc::new(crypto));
-    client_config.transport_config(Arc::new(transport_config()));
+    client_config.transport_config(Arc::new(transport_config(keep_alive)));
 
     client_config
 }
@@ -69,7 +74,7 @@ fn server_config() -> ServerConfig {
 
     let mut server_config =
         quinn::ServerConfig::with_single_cert(vec![cert], key).expect("can build server config");
-    server_config.transport = Arc::new(transport_config());
+    server_config.transport = Arc::new(transport_config(true));
 
     server_config
 }
@@ -77,7 +82,7 @@ fn server_config() -> ServerConfig {
 /// Opens a new QUIC listener on `bind_addr`.
 pub fn new_default(bind_addr: SocketAddr) -> Endpoint {
     let mut endpoint = Endpoint::server(server_config(), bind_addr).expect("can bind endpoint");
-    endpoint.set_default_client_config(client_config());
+    endpoint.set_default_client_config(client_config(true));
 
     endpoint
 }
@@ -86,9 +91,10 @@ pub fn new_default(bind_addr: SocketAddr) -> Endpoint {
 pub async fn connect(
     endpoint: &Endpoint,
     remote_addr: SocketAddr,
+    keep_alive: bool,
 ) -> Result<Connection, crate::Error> {
     Ok(endpoint
-        .connect(remote_addr, DEFAULT_SERVER_NAME)
+        .connect_with(client_config(keep_alive), remote_addr, DEFAULT_SERVER_NAME)
         .expect("failed to start connecting")
         .await?)
 }
