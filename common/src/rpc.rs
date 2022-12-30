@@ -8,6 +8,16 @@ use crate::address::ChannelId;
 use crate::cipher::OpaqueEncrypted;
 use crate::{Hash, MessageRiddle, Riddle};
 
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SetPropertyResponse {
+    /// The new value is now in place.
+    Set,
+    /// The requested property is not supported by the hub.
+    Unsuported,
+    /// The set property request is invalid, i.e., a _node side_ error has occured.
+    Error(String),
+}
+
 /// The kind of a query, i.e., whether the sent content hash corresponds to an object
 /// hash or to an item hash.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -102,6 +112,8 @@ pub struct IdentityAnnouncement {}
 /// The Samizdat hub RPC interface.
 #[tarpc::service]
 pub trait Hub {
+    /// Sets a property for the current connection.
+    async fn set_property(key: String, value: serde_json::Value) -> SetPropertyResponse;
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
     /// Sends a candidate for a previously returned redirect for a resolution.
