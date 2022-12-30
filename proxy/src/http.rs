@@ -50,21 +50,23 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                         .get("Content-Type")
                         .cloned()
                         .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
-                    let body = response.bytes().await.unwrap();
 
                     // If web page, do your shenanigans:
                     let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
                     let proxied = if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
-                        proxy_page(body.as_ref(), entity, content_hash)
+                        let body = response.bytes().await.unwrap();
+                        hyper::body::Body::from(
+                            proxy_page(body.as_ref(), entity, content_hash)
+                        )
                     } else {
-                        body
+                        hyper::body::Body::wrap_stream(response.bytes_stream())
                     };
 
                     // Builsd response:
                     http::Response::builder()
                         .status(status)
                         .header("Content-Type", content_type)
-                        .body(hyper::body::Body::from(proxied))
+                        .body(proxied)
                 }
             };
 
