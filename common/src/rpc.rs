@@ -4,11 +4,9 @@ use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use crate::address::ChannelId;
 use crate::cipher::OpaqueEncrypted;
 use crate::{Hash, MessageRiddle, Riddle};
-
-/// The channel id to be used when initiating a connection with a candidate peer.
-pub type CandidateChannelId = u32;
 
 /// The kind of a query, i.e., whether the sent content hash corresponds to an object
 /// hash or to an item hash.
@@ -45,9 +43,9 @@ pub enum QueryResponse {
     /// Query was run and returned and candidates may be following (watch `recv_candidate`).
     Resolved {
         /// The id of the channel through which the candidates will arrive.
-        candidate_channel: CandidateChannelId,
+        candidate_channel: ChannelId,
         /// The channel to be used to to transport the payload.
-        channel_id: u32,
+        channel_id: ChannelId,
     },
 }
 
@@ -107,7 +105,7 @@ pub trait Hub {
     /// Returns a response resolving (or not) the supplied object query.
     async fn query(query: Query) -> QueryResponse;
     /// Sends a candidate for a previously returned redirect for a resolution.
-    async fn recv_candidate(candidate_channel: CandidateChannelId, candidate: Candidate);
+    async fn recv_candidate(candidate_channel: ChannelId, candidate: Candidate);
     /// Gets the latest version of a series.
     async fn get_edition(request: EditionRequest) -> Vec<EditionResponse>;
     /// Announces a new edition of a series to the network.
@@ -145,7 +143,7 @@ pub struct Candidate {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ResolutionResponse {
     Found(Vec<Riddle>),
-    Redirect(CandidateChannelId),
+    Redirect(ChannelId),
     EmptyResolution,
     NotFound,
 }
@@ -156,7 +154,7 @@ pub trait Node {
     /// Tries to resolve an object or item query.
     async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
     /// Receives a candidate to start transferring the contents of a previously run query.
-    async fn recv_candidate(candidate_channel: CandidateChannelId, candidate: Candidate);
+    async fn recv_candidate(candidate_channel: ChannelId, candidate: Candidate);
     /// Tries to resolve the latest edition of a series.
     async fn get_edition(latest_request: Arc<EditionRequest>) -> Vec<EditionResponse>;
     /// Receives the announcement of a new edition.

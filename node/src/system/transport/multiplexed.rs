@@ -1,5 +1,6 @@
 use futures::prelude::*;
 use quinn::{Connection, ConnectionError, RecvStream};
+use samizdat_common::address::ChannelId;
 use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
@@ -12,19 +13,19 @@ use super::matcher::Matcher;
 /// A multiplexer over a QUIC connection, capable of splitting its uni streams into channels.
 pub struct Multiplexed {
     connection: Connection,
-    senders: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<RecvStream>>>>,
+    senders: Arc<Mutex<BTreeMap<ChannelId, mpsc::UnboundedSender<RecvStream>>>>,
     /// TODO: `UnboundedReceiver` needs to be changed to `Receiver` to avoid flooding.
-    matcher: Matcher<u32, mpsc::UnboundedReceiver<RecvStream>>,
+    matcher: Matcher<ChannelId, mpsc::UnboundedReceiver<RecvStream>>,
     is_closed: Arc<AtomicBool>,
 }
 
 async fn create_channel(
-    mut guard: MutexGuard<'_, BTreeMap<u32, mpsc::UnboundedSender<RecvStream>>>,
-    matcher: &Matcher<u32, mpsc::UnboundedReceiver<RecvStream>>,
-    channel_id: u32,
+    mut guard: MutexGuard<'_, BTreeMap<ChannelId, mpsc::UnboundedSender<RecvStream>>>,
+    matcher: &Matcher<ChannelId, mpsc::UnboundedReceiver<RecvStream>>,
+    channel_id: ChannelId,
     stream: RecvStream,
 ) {
-    log::info!("creating new channel {:x}", channel_id);
+    log::info!("creating new channel {}", channel_id);
     let (sender, recv) = mpsc::unbounded_channel();
     sender.send(stream).ok();
     guard.insert(channel_id, sender);
@@ -34,8 +35,8 @@ async fn create_channel(
 
 async fn receiver_task(
     connection: Connection,
-    senders: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<RecvStream>>>>,
-    matcher: Matcher<u32, mpsc::UnboundedReceiver<RecvStream>>,
+    senders: Arc<Mutex<BTreeMap<ChannelId, mpsc::UnboundedSender<RecvStream>>>>,
+    matcher: Matcher<ChannelId, mpsc::UnboundedReceiver<RecvStream>>,
 ) {
     loop {
         match connection.accept_uni().await {
@@ -49,8 +50,8 @@ async fn receiver_task(
                 }
 
                 // Decode id:
-                let channel_id = u32::from_be_bytes(id_buf);
-                log::debug!("stream arrived for channel {:x}", channel_id);
+                let channel_id = u32::from_be_bytes(id_buf).into();
+                log::info!("stream arrived for channel {}", channel_id);
 
                 // Send to the apropriate channel.
                 let guard = senders.lock().await;
@@ -101,35 +102,35 @@ impl Multiplexed {
         }
     }
 
-    pub async fn send(&self, channel_id: u32, payload: &[u8]) -> Result<(), crate::Error> {
+    pub async fn send(&self, channel_id: ChannelId, payload: &[u8]) -> Result<(), crate::Error> {
         let mut stream = self.connection.open_uni().await?;
-        log::debug!("stream opened for {:x}", channel_id);
+        log::debug!("stream opened for {}", channel_id);
 
         stream
-            .write_all(&channel_id.to_be_bytes())
+            .write_all(&u32::from(channel_id).to_be_bytes())
             .await
             .map_err(io::Error::from)?;
-        log::debug!("channel id sent for {:x}", channel_id);
+        log::debug!("channel id sent for {}", channel_id);
 
         stream.write_all(payload).await.map_err(io::Error::from)?;
-        log::debug!("payload streamed for {:x}", channel_id);
+        log::debug!("payload streamed for {}", channel_id);
 
         stream.finish().await.map_err(io::Error::from)?;
-        log::debug!("payload sent for {:x}", channel_id);
+        log::debug!("payload sent for {}", channel_id);
 
         Ok(())
     }
 
-    pub async fn initiate(&self, channel_id: u32) -> mpsc::UnboundedReceiver<RecvStream> {
-        log::info!("initiating channel id {:x}", channel_id);
+    pub async fn initiate(&self, channel_id: ChannelId) -> mpsc::UnboundedReceiver<RecvStream> {
+        log::info!("initiating channel id {}", channel_id);
         let (sender, recv) = mpsc::unbounded_channel();
         let mut guard = self.senders.lock().await;
         guard.insert(channel_id, sender);
         recv
     }
 
-    pub async fn expect(&self, channel_id: u32) -> Option<mpsc::UnboundedReceiver<RecvStream>> {
-        log::info!("expecting channel id {:x}", channel_id);
+    pub async fn expect(&self, channel_id: ChannelId) -> Option<mpsc::UnboundedReceiver<RecvStream>> {
+        log::info!("expecting channel id {}", channel_id);
         self.matcher.expect(channel_id).await
     }
 

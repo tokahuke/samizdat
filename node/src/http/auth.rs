@@ -211,7 +211,7 @@ fn check_origin(referrer: &Url) -> Result<(), Forbidden> {
 
     // Find out if some cross-origin thing is trying ot trick you.
     // TODO: also implement proper CORS.
-    match dbg!(&origin) {
+    match &origin {
         url::Origin::Tuple(http, host, _) if http == "http" || http == "https" => match host {
             Host::Domain(domain) if domain == "localhost" => return Ok(()),
             Host::Ipv4(ip) if ip.is_loopback() => return Ok(()),

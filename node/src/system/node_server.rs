@@ -4,7 +4,7 @@ use futures::prelude::*;
 use std::sync::Arc;
 use tarpc::context;
 
-use samizdat_common::address::ChannelAddr;
+use samizdat_common::address::{ChannelAddr, ChannelId};
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
@@ -157,7 +157,7 @@ impl Node for NodeServer {
     async fn recv_candidate(
         self,
         _: context::Context,
-        candidate_channel: CandidateChannelId,
+        candidate_channel: ChannelId,
         candidate: Candidate,
     ) {
         self.candidate_channels.send(candidate_channel, candidate);
@@ -171,7 +171,7 @@ impl Node for NodeServer {
         log::info!("got {latest:?}");
 
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
-            let editions = series.and_then(|s| dbg!(s.get_editions()));
+            let editions = series.and_then(|s| s.get_editions());
             match editions.as_ref().map(|editions| editions.first()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,

@@ -7,7 +7,7 @@ use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize}
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use crate::Hash;
+use crate::{Hash, HASH_LEN};
 
 /// A symmetric cypher for coding data using `AES256-GCM-SIV`.
 pub struct TransferCipher {
@@ -21,7 +21,7 @@ impl TransferCipher {
     /// Create a new transfer cypher based on a given content hash and a nonce. The content
     /// hash works as the symmetric key.
     pub fn new(content_hash: &Hash, nonce: &Hash) -> TransferCipher {
-        fn extend(a: &[u8; 28]) -> [u8; 32] {
+        fn extend(a: &[u8; HASH_LEN]) -> [u8; 32] {
             let mut ext = [0; 32];
             for (i, byte) in a.iter().enumerate() {
                 ext[i] = *byte;

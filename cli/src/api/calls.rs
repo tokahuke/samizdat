@@ -238,3 +238,25 @@ pub async fn post_identity(request: PostIdentityRequest<'_>) -> Result<bool, any
 pub async fn get_all_identities() -> Result<Vec<GetIdentityResponse>, anyhow::Error> {
     get("/_identities").await
 }
+
+
+// Vacuum:
+
+/// Status for a vacuum task.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum VacuumStatus {
+    /// Storage is within allowed parameters.
+    Unnecessary,
+    /// Removed all disposable content, but could not achieve the desired maximum size.
+    Insufficient,
+    /// Storage has run and was able to reduce the storage size.
+    Done,
+}
+
+pub async fn post_vacuum() -> Result<VacuumStatus, anyhow::Error> {
+    post("/_vacuum", ()).await
+}
+
+pub async fn post_flush_all() -> Result<(), anyhow::Error> {
+    post("/_vacuum/flush-all", ()).await
+}

@@ -6,7 +6,7 @@ use tarpc::context;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
-use samizdat_common::address::ChannelAddr;
+use samizdat_common::address::{ChannelAddr, ChannelId};
 use samizdat_common::rpc::*;
 
 use crate::rpc::ROOM;
@@ -73,7 +73,7 @@ impl Hub for HubServer {
             log::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
-            let channel_id = rand::random();
+            let channel_id = rand::random::<u32>().into();
             let channel_addr = ChannelAddr::new(server.0.addr, channel_id);
 
             // Se if you are not being replayed:
@@ -102,7 +102,7 @@ impl Hub for HubServer {
             };
 
             // And then create a candidate channel to forward candidate peers:
-            let candidate_channel: CandidateChannelId = rand::random();
+            let candidate_channel: ChannelId = rand::random::<u32>().into();
 
             let node = if let Some(node) = ROOM.get(client_addr).await {
                 node
@@ -151,7 +151,7 @@ impl Hub for HubServer {
     async fn recv_candidate(
         self,
         _: context::Context,
-        candidate_channel: CandidateChannelId,
+        candidate_channel: ChannelId,
         candidate: Candidate,
     ) {
         self.throttle(|server| async move {

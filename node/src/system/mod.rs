@@ -204,7 +204,7 @@ impl HubConnection {
         };
 
         log::info!(
-            "Candidate channel for {}: {:x}",
+            "Candidate channel for {}: {}",
             content_hash,
             candidate_channel
         );
@@ -217,7 +217,7 @@ impl HubConnection {
                 // TODO: check if candidate is valid. However, seems to be unnecessary, since
                 // transport will make sure no naughty people are involved.
                 let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
-                log::info!("Got candidate {channel_addr} for channel {candidate_channel:x}");
+                log::info!("Got candidate {channel_addr} for channel {candidate_channel}");
                 let channel_manager = inner.channel_manager.clone();
                 Box::pin(async move {
                     channel_manager
@@ -256,7 +256,7 @@ impl HubConnection {
                     }
                 }
                 Ok(None) => {
-                    log::info!("Candidate channel {candidate_channel:x} dried");
+                    log::info!("Candidate channel {candidate_channel} dried");
                     break Err(crate::Error::AllCandidatesFailed);
                 }
                 Err(_) => {
@@ -286,8 +286,6 @@ impl HubConnection {
         let mut most_recent: Option<Edition> = None;
 
         for candidate in response {
-            dbg!(&candidate);
-            dbg!(series.public_key.hash());
             let cipher = TransferCipher::new(&series.public_key.hash(), &candidate.rand);
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 

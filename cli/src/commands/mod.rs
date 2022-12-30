@@ -115,6 +115,7 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
 
 pub async fn commit(
     ttl: &Option<String>,
+    skip_build: bool,
     is_release: bool,
     no_announce: bool,
 ) -> Result<(), anyhow::Error> {
@@ -166,7 +167,13 @@ pub async fn commit(
     }
 
     let base = &manifest.build.base;
-    manifest.run_build(is_release)?;
+    if !skip_build {
+        log::info!("Starting build");
+        manifest.run_build(is_release)?;
+        log::info!("Build done");
+    } else {
+        log::info!("Skipping build");
+    }
 
     let mut all_files = vec![];
     walk(base, &mut all_files)?;
@@ -298,7 +305,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
     log::info!("Starting rebuild loop");
 
     // Run the commit for the first time.
-    if let Err(err) = commit(ttl, false, true).await {
+    if let Err(err) = commit(ttl, false, false, true).await {
         println!("Error while rebuilding: {err:?}");
     }
 
@@ -312,7 +319,7 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
 
         if watched_files_changed && now > last_exec + MIN_WAIT {
             log::info!("Rebuild triggered");
-            if let Err(err) = commit(ttl, false, true).await {
+            if let Err(err) = commit(ttl, false, false, true).await {
                 println!("Error while rebuilding: {err:?}");
             }
 

@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time;
 
-use samizdat_common::address::{AddrToResolve, HubAddr};
+use samizdat_common::address::{AddrToResolve, HubAddr, ChannelId};
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 
@@ -69,7 +69,7 @@ impl Node for HubAsNodeServer {
             return ResolutionResponse::EmptyResolution;
         }
 
-        let candidate_channel: CandidateChannelId = rand::random();
+        let candidate_channel: ChannelId = rand::random::<u32>().into();
 
         tokio::spawn(async move {
             let candidates = candidates_for_resolution(
@@ -98,7 +98,7 @@ impl Node for HubAsNodeServer {
     async fn recv_candidate(
         self,
         _: context::Context,
-        candidate_channel: CandidateChannelId,
+        candidate_channel: ChannelId,
         candidate: Candidate,
     ) {
         self.candidate_channels.send(candidate_channel, candidate);

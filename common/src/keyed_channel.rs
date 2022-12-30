@@ -8,12 +8,12 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::rpc::CandidateChannelId;
+use crate::address::ChannelId;
 
 /// A channel that can be multiplexed with a key.
 #[derive(Debug)]
 struct KeyedChannelInner<T> {
-    channels: RwLock<BTreeMap<CandidateChannelId, mpsc::UnboundedSender<T>>>,
+    channels: RwLock<BTreeMap<ChannelId, mpsc::UnboundedSender<T>>>,
 }
 
 /// A channel that can be multiplexed with a key.
@@ -31,7 +31,7 @@ impl<T: Clone> KeyedChannel<T> {
 
     /// Sends an item to a specified address. If nobody is listening on the specified key,
     /// nothing happens.
-    pub fn send(&self, key: CandidateChannelId, value: T) {
+    pub fn send(&self, key: ChannelId, value: T) {
         self.0
             .channels
             .read()
@@ -46,7 +46,7 @@ impl<T: Clone> KeyedChannel<T> {
     ///
     /// If there already exists a listener on that key, the existing listener will be
     /// dropped.
-    pub fn recv_stream(&self, key: CandidateChannelId) -> RecvStream<T> {
+    pub fn recv_stream(&self, key: ChannelId) -> RecvStream<T> {
         let (sender, recv) = mpsc::unbounded();
         self.0
             .channels
@@ -68,7 +68,7 @@ pub struct RecvStream<T> {
     /// The keyed channel this stream belongs to.
     channel: KeyedChannel<T>,
     /// The key being listened to.
-    key: CandidateChannelId,
+    key: ChannelId,
 }
 
 impl<T> Drop for RecvStream<T> {

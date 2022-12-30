@@ -85,7 +85,7 @@ fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + C
         identities::api(),
         subscriptions::api(),
         auth::api(),
-        post_vacuum(),
+        vacuum(),
     )
     .recover(|rejection: warp::Rejection| async move {
         if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
@@ -110,11 +110,20 @@ fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + C
 }
 
 /// Triggers a manual vacuum round.
-fn post_vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::post()
-        .and(warp::path!("_vacuum"))
-        .map(|| crate::vacuum::vacuum())
-        .map(api_reply)
+fn vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    balanced_or_tree!(
+        warp::post()
+            .and(warp::path!("_vacuum"))
+            .map(|| crate::vacuum::vacuum())
+            .map(api_reply),
+        warp::post()
+            .and(warp::path!("_vacuum" / "flush-all"))
+            .map(|| {
+                crate::vacuum::flush_all();
+                Ok(())
+            })
+            .map(api_reply)
+    )
 }
 
 /// Runs the HTTP API server.

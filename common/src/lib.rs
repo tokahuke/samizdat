@@ -17,7 +17,7 @@ mod riddles;
 mod transport;
 
 pub use error::Error;
-pub use hash::{Hash, InclusionProof, MerkleTree};
+pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{MessageRiddle, Riddle};

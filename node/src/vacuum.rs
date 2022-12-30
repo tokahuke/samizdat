@@ -153,3 +153,19 @@ pub async fn run_vacuum_daemon() {
         .await;
     }
 }
+
+/// Flushes the whole local cash.
+pub fn flush_all() {
+    // This is slow and inefficient, but at least it will be correct.
+    for item in db().iterator_cf(Table::ObjectMetadata.get(), IteratorMode::Start) {
+        match item {
+            Ok((hash, _)) => {
+                let object = ObjectRef::new(Hash::new(hash));
+                if let Err(err) = object.drop_if_exists() {
+                    log::warn!("Failed to drop {object:?}: {err}");
+                }
+            }
+            Err(err) => log::warn!("Failed to load an object from db for deletion: {err}"),
+        }
+    }
+}

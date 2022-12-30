@@ -7,9 +7,11 @@ use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::FromStr;
 
+pub const HASH_LEN: usize = 28;
+
 /// The standard hash format that is used in Samizdat.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Hash(pub [u8; 28]);
+pub struct Hash(pub [u8; HASH_LEN]);
 
 impl FromStr for Hash {
     type Err = crate::Error;
@@ -48,7 +50,7 @@ impl AsRef<[u8]> for Hash {
 impl<'a> TryFrom<&'a [u8]> for Hash {
     type Error = crate::Error;
     fn try_from(slice: &'a [u8]) -> Result<Hash, crate::Error> {
-        if slice.len() != 28 {
+        if slice.len() != HASH_LEN {
             Err(crate::Error::BadHashLength(slice.len()))
         } else {
             Ok(Hash(slice.try_into().expect("already checked")))
@@ -87,7 +89,7 @@ impl Hash {
     /// This function uses [`getrandom`] to create a hash value. If creating a lot of
     /// hashes, consider using [`Hash::rand_with`] instead.
     pub fn rand() -> Hash {
-        let mut rand = [0; 28];
+        let mut rand = [0; HASH_LEN];
         getrandom::getrandom(&mut rand).expect("getrandom failed");
 
         Hash(rand)
@@ -95,7 +97,7 @@ impl Hash {
 
     /// Just like [`Hash::rand`], but allows for a local RNG (better throughput).
     pub fn rand_with<R: rand::Rng>(rng: &mut R) -> Hash {
-        let mut rand = [0; 28];
+        let mut rand = [0; HASH_LEN];
 
         for rand_i in &mut rand {
             *rand_i = rng.gen();

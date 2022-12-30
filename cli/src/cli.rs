@@ -63,6 +63,9 @@ pub enum Command {
         /// Set a custom time-to-leave for this commit.
         #[structopt(long)]
         ttl: Option<String>,
+        /// Skip the build and go straight for the action!
+        #[structopt(long)]
+        skip_build: bool,
         /// Make this a release (for real) commit.
         #[structopt(long)]
         release: bool,
@@ -120,6 +123,15 @@ pub enum Command {
         #[structopt(subcommand)]
         command: AuthCommand,
     },
+    /// Triggers a vacuum in the node. Vacuums remove junk from node storage and are
+    /// run periodically, but you can trigger a manual run with this commmand.
+    Vacuum {
+        /// Use this flag to erase *all* OBJECT data in the node. Any data not backed up
+        /// elsewhere WILL BE LOST. This command only affects objects; other entities,
+        /// such as series and subscriptions will be unaffected.
+        #[structopt(long)]
+        flush_all: bool,
+    }
 }
 
 impl Command {
@@ -130,8 +142,9 @@ impl Command {
             Command::Commit {
                 ttl,
                 release,
+                skip_build,
                 no_announce,
-            } => commands::commit(&ttl, release, no_announce).await,
+            } => commands::commit(&ttl, skip_build, release, no_announce).await,
             Command::Watch { ttl } => commands::watch(&ttl).await,
             Command::Upload {
                 file,
@@ -152,6 +165,11 @@ impl Command {
             Command::Subscription { command } => command.execute().await,
             Command::Identity { command } => command.execute().await,
             Command::Auth { command } => command.execute().await,
+            Command::Vacuum { flush_all } => if flush_all {
+                crate::api::post_flush_all().await
+            } else {
+                crate::api::post_vacuum().await.map(|status| println!("Vacuum status is: {status:?}"))
+            }
         }
     }
 }

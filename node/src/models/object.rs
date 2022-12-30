@@ -315,9 +315,9 @@ impl Droppable for ObjectRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
         log::info!("Removing object {:?}", self);
 
-        let metadata: ObjectMetadata = match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
-            Some(serialized) => bincode::deserialize(&serialized)?,
-            None => return Ok(()),
+        let Some(metadata) = self.metadata()? else {
+            // Object does not exist.
+            return Ok(());
         };
 
         for hash in &metadata.hashes {

@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
-use samizdat_common::address::ChannelAddr;
+use samizdat_common::address::{ChannelAddr, ChannelId};
 
 use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;
@@ -107,7 +107,7 @@ impl ChannelManager {
 }
 
 pub struct ChannelSender {
-    channel_id: u32,
+    channel_id: ChannelId,
     multiplexed: Arc<Multiplexed>,
 }
 
