@@ -2419,6 +2419,7 @@ dependencies = [
  "rustls-pemfile 1.0.1",
  "serde",
  "serde_derive",
+ "serde_json",
  "sha3",
  "tarpc",
  "tokio",

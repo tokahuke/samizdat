@@ -7,6 +7,7 @@ use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
+use crate::http::async_api_reply;
 use crate::models::{BookmarkType, Droppable, ObjectHeader, ObjectRef};
 
 use super::resolvers::resolve_object;
@@ -59,13 +60,16 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and(warp::header("content-type"))
         .and(warp::query())
         .and(warp::body::bytes())
-        .map(|content_type: String, query: Query, bytes: bytes::Bytes| {
-            let header = ObjectHeader::new(content_type, query.is_draft)?;
-            let object =
-                ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))?;
-            Ok(object.hash().to_string())
-        })
-        .map(api_reply)
+        .map(
+            |content_type: String, query: Query, bytes: bytes::Bytes| async move {
+                let header = ObjectHeader::new(content_type, query.is_draft)?;
+                let object =
+                    ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))
+                        .await?;
+                Ok(object.hash().to_string())
+            },
+        )
+        .and_then(async_api_reply)
 }
 
 /// Explicitly deletes an object from the local database. This does not have the
@@ -146,12 +150,13 @@ fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(warp::post())
         .and(authenticate([AccessRight::ManageObjects]))
         .and(warp::query())
-        .map(|hash, query: Query| {
+        .map(|hash, query: Query| async move {
             ObjectRef::new(hash)
                 .reissue(query.bookmark)
+                .await
                 .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
         })
-        .map(api_reply)
+        .and_then(async_api_reply)
 }
 
 /// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.

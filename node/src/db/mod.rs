@@ -2,13 +2,23 @@
 
 mod migrations;
 
+use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::Display;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
+use tokio::sync::RwLock;
 
 use crate::cli;
+
+lazy_static! {
+    /// A lock that allows the _write_ holder to perform deletion operations on chunks.
+    /// This lock must be held in `write` mode by all operations attepmting to
+    /// non-atomically __delete__ chunks from the database. It must also be held in
+    /// `read` mode by all operations writing to chunks.
+    pub static ref CHUNK_RW_LOCK: RwLock<()> = RwLock::default();
+}
 
 /// The handle to the RocksDB database.
 static mut DB: Option<rocksdb::DB> = None;
@@ -56,7 +66,7 @@ pub fn init_db() -> Result<(), crate::Error> {
 
         // Run possible migrations (needs DB set, but still requires exclusive access):
         log::info!("RocksDB up. Running migrations...");
-        migrations::migrate(DB.as_mut().expect("option was just set"))?;
+        migrations::migrate()?;
         log::info!("... done running all migrations.");
     }
 
@@ -77,6 +87,8 @@ pub enum Table {
     ObjectMetadata,
     /// The table of all chunks, indexed by chunk hash.
     ObjectChunks,
+    /// The table of all chunks, indexed by chunk hash.
+    ObjectChunkRefCount,
     /// Statistics on object usage.
     ObjectStatistics,
     /// List of dependencies on objects, which prevent automatic deletion.
@@ -128,6 +140,7 @@ impl Table {
     fn merge_operator(self) -> Option<MergeFunction> {
         match self {
             Table::Bookmarks => Some(MergeOperation::full_merge),
+            Table::ObjectChunkRefCount => Some(MergeOperation::full_merge),
             _ => None,
         }
     }

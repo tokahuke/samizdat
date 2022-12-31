@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, MerkleTree, Riddle};
 
-use crate::db::{db, Table};
+use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK};
 
 use super::{Bookmark, BookmarkType, Droppable};
 
@@ -70,8 +70,6 @@ impl ObjectHeader {
     }
 
     /// Reads a header from an iterator of bytes.
-    ///
-    /// TODO: should be `Read` instead of `Iterator`?
     pub fn read(
         into_iter: impl IntoIterator<Item = Result<u8, crate::Error>>,
     ) -> Result<(usize, ObjectHeader), crate::Error> {
@@ -152,6 +150,7 @@ pub struct ObjectMetadata {
 }
 
 /// An iterator over the bytes of an object, including its header.
+#[must_use]
 pub struct BytesIter {
     /// An iterator over hashes.
     hashes: std::vec::IntoIter<Hash>,
@@ -209,6 +208,7 @@ impl Iterator for BytesIter {
 }
 
 /// An iterator over the chunks of an object.
+#[must_use]
 pub struct ContentIter {
     /// An iterator over hashes.
     hashes: std::vec::IntoIter<Hash>,
@@ -245,6 +245,7 @@ impl Iterator for ContentIter {
 }
 
 /// A stream over the chunks of an object.
+#[must_use]
 pub struct ContentStream {
     /// A stream over the chunk hashes, in order.
     hashes: Pin<Box<dyn Send + Stream<Item = Result<Hash, crate::Error>>>>,
@@ -320,9 +321,20 @@ impl Droppable for ObjectRef {
             return Ok(());
         };
 
-        for hash in &metadata.hashes {
-            batch.delete_cf(Table::ObjectChunks.get(), hash);
+        // // Neved do this! You risk corrupting unrelated objects.
+        // for hash in &metadata.hashes {
+        //     batch.delete_cf(Table::ObjectChunks.get(), hash);
+        // }
+
+        for chunk_hash in metadata.hashes {
+            batch.merge_cf(
+                Table::ObjectChunkRefCount.get(),
+                &chunk_hash,
+                bincode::serialize(&MergeOperation::Increment(-1)).expect("can serialize"),
+            );
         }
+
+        // leave the vacuum daemon to clean up unused chunks. It runs frequently.
 
         self.bookmark(BookmarkType::Reference).clear_with(batch);
         self.bookmark(BookmarkType::User).clear_with(batch);
@@ -379,7 +391,7 @@ impl ObjectRef {
     ///
     /// TODO: current impl allows for TOCTOU. Need transactions, which are not exposed in the
     /// Rust API as of oct 2021.
-    pub fn touch(&self) -> Result<(), crate::Error> {
+    fn touch(&self) -> Result<(), crate::Error> {
         if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
             let mut statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
             statistics.touch();
@@ -415,55 +427,14 @@ impl ObjectRef {
         Ok(None)
     }
 
-    /// Build a new object from data coming from a _trusted_ source.
-    pub fn build(
-        header: ObjectHeader,
+    /// Creates an object in the database.
+    fn create_object_with(
+        batch: &mut rocksdb::WriteBatch,
+        hash: Hash,
+        metadata: &ObjectMetadata,
+        statistics: &ObjectStatistics,
         bookmark: bool,
-        source: impl IntoIterator<Item = Result<u8, crate::Error>>,
-    ) -> Result<ObjectRef, crate::Error> {
-        let mut content_size = 0;
-        let mut buffer = header.buffer(); // start the first chunk with the serialized header
-        let mut hashes = Vec::new();
-        let mut source = source.into_iter();
-
-        loop {
-            // Extend buffer until (a) source stops (b) error (c) reaches limit.
-            for byte in &mut source {
-                buffer.push(byte?);
-
-                if buffer.len() == CHUNK_SIZE {
-                    break;
-                }
-            }
-
-            content_size += buffer.len();
-
-            let chunk_hash = Hash::hash(&buffer);
-            db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
-            hashes.push(chunk_hash);
-
-            // Buffer not fille to the brim: it's over!
-            if buffer.len() < CHUNK_SIZE {
-                break;
-            }
-
-            // Else clean buffer!
-            buffer.clear();
-        }
-
-        let merkle_tree = MerkleTree::from(hashes);
-        let hash = merkle_tree.root();
-        let metadata = ObjectMetadata {
-            hashes: merkle_tree.hashes().to_vec(),
-            header,
-            content_size,
-            received_at: chrono::Utc::now(),
-        };
-        let statistics = ObjectStatistics::new(content_size);
-
-        log::info!("New object {} with metadata: {:#?}", hash, metadata);
-
-        let mut batch = rocksdb::WriteBatch::default();
+    ) {
         batch.put_cf(Table::Objects.get(), &hash, &[]);
         batch.put_cf(
             Table::ObjectMetadata.get(),
@@ -476,13 +447,83 @@ impl ObjectRef {
             bincode::serialize(&statistics).expect("can serialize"),
         );
 
-        if bookmark {
-            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark_with(&mut batch);
+        for chunk_hash in &metadata.hashes {
+            batch.merge_cf(
+                Table::ObjectChunkRefCount.get(),
+                chunk_hash,
+                bincode::serialize(&MergeOperation::Increment(1)).expect("can serialize"),
+            );
         }
 
-        db().write(batch)?;
+        if bookmark {
+            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark_with(batch);
+        }
+    }
 
-        Ok(ObjectRef { hash })
+    /// Build a new object from data coming from a _trusted_ source.
+    pub async fn build(
+        header: ObjectHeader,
+        bookmark: bool,
+        source: impl 'static + Send + IntoIterator<Item = Result<u8, crate::Error>>,
+    ) -> Result<ObjectRef, crate::Error> {
+        // HACK: need to wrap this around a spawn blocking because I ran into an **compiler bug**!
+        // See: https://github.com/rust-lang/rust/issues/102211
+        tokio::task::spawn_blocking(move || {
+            let mut content_size = 0;
+            let mut buffer = header.buffer(); // start the first chunk with the serialized header
+            let mut hashes = Vec::new();
+            let mut source = source.into_iter();
+            // Locks are expected to be unfrequent and short-lived. And we need this function
+            // not to be async (why?).
+            let chunk_lock = CHUNK_RW_LOCK.blocking_read();
+
+            loop {
+                // Extend buffer until (a) source stops (b) error (c) reaches limit.
+                for byte in &mut source {
+                    buffer.push(byte?);
+
+                    if buffer.len() == CHUNK_SIZE {
+                        break;
+                    }
+                }
+
+                content_size += buffer.len();
+
+                let chunk_hash = Hash::hash(&buffer);
+                db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
+                hashes.push(chunk_hash);
+
+                // Buffer not fille to the brim: it's over!
+                if buffer.len() < CHUNK_SIZE {
+                    break;
+                }
+
+                // Else clean buffer!
+                buffer.clear();
+            }
+
+            let merkle_tree = MerkleTree::from(hashes);
+            let hash = merkle_tree.root();
+            let metadata = ObjectMetadata {
+                hashes: merkle_tree.hashes().to_vec(),
+                header,
+                content_size,
+                received_at: chrono::Utc::now(),
+            };
+            let statistics = ObjectStatistics::new(content_size);
+
+            log::info!("New object {} with metadata: {:#?}", hash, metadata);
+
+            let mut batch = rocksdb::WriteBatch::default();
+            ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, bookmark);
+            db().write(batch)?;
+
+            drop(chunk_lock);
+
+            Ok(ObjectRef { hash })
+        })
+        .await
+        .unwrap()
     }
 
     /// Imports an existing object in the database from an external _already validated_ data source,
@@ -556,6 +597,7 @@ impl ObjectRef {
         let mut content_size = 0;
         let mut maybe_header = None;
         let mut limited_chunks = chunks.take(merkle_tree.len());
+        let chunk_lock = CHUNK_RW_LOCK.read().await;
 
         while let Some(chunk) = limited_chunks.next().await.transpose()? {
             // Check if hash actually corresponds to hash in merkle tree.
@@ -629,18 +671,10 @@ impl ObjectRef {
         let statistics = ObjectStatistics::new(content_size);
 
         let mut batch = rocksdb::WriteBatch::default();
-        batch.put_cf(Table::Objects.get(), &hash, &[]);
-        batch.put_cf(
-            Table::ObjectMetadata.get(),
-            &hash,
-            bincode::serialize(&metadata).expect("can serialize"),
-        );
-        batch.put_cf(
-            Table::ObjectStatistics.get(),
-            &hash,
-            bincode::serialize(&statistics).expect("can serialize"),
-        );
+        ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, false);
         db().write(batch)?;
+
+        drop(chunk_lock);
 
         log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
@@ -649,10 +683,10 @@ impl ObjectRef {
 
     /// Create a copy of this object, but with a different nonce header value. This new object
     /// will have a new content hash.
-    pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
+    pub async fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter_bytes(false)? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
-            let reissued = ObjectRef::build(header.reissue(), bookmark, iter)?;
+            let reissued = ObjectRef::build(header.reissue(), bookmark, iter).await?;
 
             Ok(Some(reissued))
         } else {
@@ -664,14 +698,15 @@ impl ObjectRef {
     /// if `skip_header` is set.
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
-    ///  
-    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
     pub fn iter_bytes(&self, skip_header: bool) -> Result<Option<BytesIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
             metadata
         } else {
             return Ok(None);
         };
+
+        // Touched because a `BytesIter` is created.
+        self.touch()?;
 
         Ok(Some(BytesIter {
             hashes: metadata.hashes.into_iter(),
@@ -685,14 +720,15 @@ impl ObjectRef {
     /// is set.
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
-    ///  
-    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
     pub fn stream_content(&self, skip_header: bool) -> Result<Option<ContentStream>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
             metadata
         } else {
             return Ok(None);
         };
+
+        // Touched because a `ContentStream` is created.
+        self.touch()?;
 
         Ok(Some(ContentStream {
             hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
@@ -704,14 +740,15 @@ impl ObjectRef {
     /// Streams the contents of an object.
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
-    ///  
-    /// TODO: lock for reading? Reading is not atomic. (snapshots?)
     pub fn iter_content(&self) -> Result<Option<ContentIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
             metadata
         } else {
             return Ok(None);
         };
+
+        // Touched because a `ContentIter` was created.
+        self.touch()?;
 
         Ok(Some(ContentIter {
             hashes: metadata.hashes.into_iter(),

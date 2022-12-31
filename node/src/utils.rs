@@ -44,19 +44,19 @@ impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
     }
 }
 
-/// An adaptor that splits the elements of another into vectors of a given size
-/// (except the last). This is a "try-iterator" implementation.
-pub fn chunks<I>(size: usize, it: I) -> Chunks<I>
-where
-    I: Iterator<Item = Result<u8, crate::Error>>,
-{
-    Chunks {
-        it,
-        size,
-        is_error: false,
-        is_done: false,
-    }
-}
+// /// An adaptor that splits the elements of another into vectors of a given size
+// /// (except the last). This is a "try-iterator" implementation.
+// pub fn chunks<I>(size: usize, it: I) -> Chunks<I>
+// where
+//     I: Iterator<Item = Result<u8, crate::Error>>,
+// {
+//     Chunks {
+//         it,
+//         size,
+//         is_error: false,
+//         is_done: false,
+//     }
+// }
 
 pub fn socket_to_canonical(socket_addr: SocketAddr) -> SocketAddr {
     (socket_addr.ip().to_canonical(), socket_addr.port()).into()

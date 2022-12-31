@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time;
 
-use samizdat_common::address::{AddrToResolve, HubAddr, ChannelId};
+use samizdat_common::address::{AddrToResolve, ChannelId, HubAddr};
 use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 

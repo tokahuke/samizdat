@@ -55,9 +55,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
                     let proxied = if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
                         let body = response.bytes().await.unwrap();
-                        hyper::body::Body::from(
-                            proxy_page(body.as_ref(), entity, content_hash)
-                        )
+                        hyper::body::Body::from(proxy_page(body.as_ref(), entity, content_hash))
                     } else {
                         hyper::body::Body::wrap_stream(response.bytes_stream())
                     };

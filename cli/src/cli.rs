@@ -131,7 +131,7 @@ pub enum Command {
         /// such as series and subscriptions will be unaffected.
         #[structopt(long)]
         flush_all: bool,
-    }
+    },
 }
 
 impl Command {
@@ -165,10 +165,14 @@ impl Command {
             Command::Subscription { command } => command.execute().await,
             Command::Identity { command } => command.execute().await,
             Command::Auth { command } => command.execute().await,
-            Command::Vacuum { flush_all } => if flush_all {
-                crate::api::post_flush_all().await
-            } else {
-                crate::api::post_vacuum().await.map(|status| println!("Vacuum status is: {status:?}"))
+            Command::Vacuum { flush_all } => {
+                if flush_all {
+                    crate::api::post_flush_all().await
+                } else {
+                    crate::api::post_vacuum()
+                        .await
+                        .map(|status| println!("Vacuum status is: {status:?}"))
+                }
             }
         }
     }

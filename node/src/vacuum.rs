@@ -5,7 +5,7 @@ use decorum::NotNan;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::time::{sleep, Instant};
@@ -14,11 +14,13 @@ use samizdat_common::heap_entry::HeapEntry;
 use samizdat_common::Hash;
 
 use crate::cli::cli;
-use crate::db::{db, Table};
-use crate::models::{CollectionItem, Droppable, ObjectRef, ObjectStatistics, UsePrior};
+use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK};
+use crate::models::{
+    CollectionItem, Droppable, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior,
+};
 
 /// Status for a vacuum task.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum VacuumStatus {
     /// Storage is within allowed parameters.
     Unnecessary,
@@ -30,6 +32,8 @@ pub enum VacuumStatus {
 
 /// Run a vacuum round in the database.
 pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
+    // STEP 1: make up space if needed, deleting rarely used stuff:
+
     // Do the vacuum operation atomically to avoid mishaps (resource leakage):
     let mut batch = WriteBatch::default();
 
@@ -97,6 +101,12 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 
     // Apply all changes atomically:
     db().write(batch)?;
+
+    // STEP 2: garbage collection:
+    let dropped_chunks = drop_orphan_chunks()?;
+    if dropped_chunks > 0 && status == VacuumStatus::Unnecessary {
+        status = VacuumStatus::Done;
+    }
 
     Ok(status)
 }
@@ -168,4 +178,61 @@ pub fn flush_all() {
             Err(err) => log::warn!("Failed to load an object from db for deletion: {err}"),
         }
     }
+}
+
+/// Fixes chunk reference count.
+pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
+    let mut ref_counts = BTreeMap::new();
+
+    for item in db().iterator_cf(Table::ObjectMetadata.get(), IteratorMode::Start) {
+        let (_, metadata) = item?;
+        let metadata: ObjectMetadata = bincode::deserialize(&metadata)?;
+        for chunk_hash in metadata.hashes {
+            *ref_counts.entry(chunk_hash).or_default() += 1;
+        }
+    }
+
+    let mut batch = rocksdb::WriteBatch::default();
+
+    for (hash, ref_count) in ref_counts {
+        batch.merge_cf(
+            Table::ObjectChunkRefCount.get(),
+            &hash,
+            bincode::serialize(&MergeOperation::Set(ref_count)).expect("can serialize"),
+        );
+    }
+
+    db().write(batch)?;
+
+    Ok(())
+}
+
+/// Drop chunks not associated with any object, i.e., those where the reference count has dropped to zero.
+///
+/// # Note:
+///
+/// Only call this function in a __blocking__ context. If `async` is needed, refactor!
+fn drop_orphan_chunks() -> Result<usize, crate::Error> {
+    // This is only called in a blocking context:
+    let chunk_lock = CHUNK_RW_LOCK.blocking_write();
+    let mut batch = rocksdb::WriteBatch::default();
+
+    for item in db().iterator_cf(Table::ObjectChunkRefCount.get(), IteratorMode::Start) {
+        let (hash, ref_count) = item?;
+        let hash = Hash::new(hash);
+        let ref_count: MergeOperation = bincode::deserialize(&ref_count)?;
+
+        match ref_count.eval_on_zero() {
+            1.. => {}
+            0 => batch.delete_cf(Table::ObjectChunks.get(), &hash),
+            neg => log::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
+        }
+    }
+
+    let dropped_chunks = batch.len();
+
+    db().write(batch)?;
+    drop(chunk_lock);
+
+    Ok(dropped_chunks)
 }

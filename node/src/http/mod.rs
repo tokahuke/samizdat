@@ -59,6 +59,14 @@ where
     )
 }
 
+async fn async_api_reply<F, T>(f: F) -> Result<impl warp::Reply, warp::Rejection>
+where
+    T: serde::Serialize,
+    F: Future<Output = Result<T, crate::Error>>,
+{
+    Ok(api_reply(f.await))
+}
+
 /// Utility to create a tuple of one value _very explicitly_.
 fn tuple<T>(t: T) -> (T,) {
     (t,)

@@ -8,10 +8,11 @@ use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
+use crate::http::async_api_reply;
 use crate::models::{CollectionRef, ItemPathBuf, ObjectRef};
 
 use super::resolvers::resolve_item;
-use super::{api_reply, authenticate, tuple};
+use super::{authenticate, tuple};
 
 /// The entrypoint of the collection public API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -32,7 +33,7 @@ pub fn post_collection(
         .and(warp::post())
         .and(authenticate([AccessRight::ManageCollections]))
         .and(warp::body::json())
-        .map(|request: Request| {
+        .map(|request: Request| async move {
             let collection = CollectionRef::build(
                 request.is_draft,
                 request
@@ -42,10 +43,11 @@ pub fn post_collection(
                         Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
                     })
                     .collect::<Result<Vec<_>, crate::Error>>()?,
-            )?;
+            )
+            .await?;
             Ok(collection.hash().to_string())
         })
-        .map(api_reply)
+        .and_then(async_api_reply)
 }
 
 /// Gets the contents of a collection item.

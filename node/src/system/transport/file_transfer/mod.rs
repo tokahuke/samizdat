@@ -137,7 +137,9 @@ impl ObjectMessage {
     ///
     /// If object does not exist locally.
     fn for_object(object: &ObjectRef) -> Result<ObjectMessage, crate::Error> {
-        let mut metadata = object.metadata()?.expect("object exists");
+        let mut metadata = object
+            .metadata()?
+            .ok_or_else(|| format!("Object message for inexistent object: {object:?}"))?;
 
         // Need to omit some details before sending through the wire:
         metadata.received_at = chrono::Utc.timestamp_nanos(0);
@@ -302,8 +304,6 @@ pub async fn recv_object(
 
 /// Sends an object to a channel.
 pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(), crate::Error> {
-    object.touch()?;
-
     let header = ObjectMessage::for_object(object)?;
 
     log::info!("negotiating nonce");

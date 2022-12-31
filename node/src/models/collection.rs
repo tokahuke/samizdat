@@ -301,9 +301,9 @@ impl CollectionRef {
 
     /// Builds a new collection from a list of paths and objects, returning the collection
     /// reference.
-    pub fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
+    pub async fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
     where
-        I: AsRef<[(ItemPathBuf, ObjectRef)]>,
+        I: Sync + Send + AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
         // Create inventory document:
         let inventory = serde_json::to_string_pretty(
@@ -318,8 +318,9 @@ impl CollectionRef {
         let inventory_object = ObjectRef::build(
             ObjectHeader::new("application/json".to_owned(), is_draft)?,
             false,
-            inventory.as_bytes().iter().map(|&byte| Ok(byte)),
-        )?;
+            inventory.into_bytes().into_iter().map(Ok),
+        )
+        .await?;
 
         // Note: this is the slow part of the process (by a long stretch)
         let mut patricia_map = objects

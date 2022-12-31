@@ -239,7 +239,6 @@ pub async fn get_all_identities() -> Result<Vec<GetIdentityResponse>, anyhow::Er
     get("/_identities").await
 }
 
-
 // Vacuum:
 
 /// Status for a vacuum task.

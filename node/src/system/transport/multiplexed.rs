@@ -129,7 +129,10 @@ impl Multiplexed {
         recv
     }
 
-    pub async fn expect(&self, channel_id: ChannelId) -> Option<mpsc::UnboundedReceiver<RecvStream>> {
+    pub async fn expect(
+        &self,
+        channel_id: ChannelId,
+    ) -> Option<mpsc::UnboundedReceiver<RecvStream>> {
         log::info!("expecting channel id {}", channel_id);
         self.matcher.expect(channel_id).await
     }

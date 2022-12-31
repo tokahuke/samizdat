@@ -67,6 +67,17 @@ impl HubServer {
 
 #[tarpc::server]
 impl Hub for HubServer {
+    // Saving for future use.
+    async fn set_property(
+        self,
+        _: context::Context,
+        _key: String,
+        _value: serde_json::Value,
+    ) -> SetPropertyResponse {
+        self.throttle(|_| async { SetPropertyResponse::Unsuported })
+            .await
+    }
+
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(move |server| async move {
