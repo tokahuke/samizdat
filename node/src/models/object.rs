@@ -440,6 +440,12 @@ impl ObjectRef {
         statistics: &ObjectStatistics,
         bookmark: bool,
     ) {
+        // Do not insert if object already exists. This will overwrite information!
+        if ObjectRef::new(hash).exists().unwrap_or(false) {
+            log::warn!("Object {hash} already exists in the database; skipping creation");
+            return;
+        }
+
         batch.put_cf(Table::Objects.get(), &hash, &[]);
         batch.put_cf(
             Table::ObjectMetadata.get(),

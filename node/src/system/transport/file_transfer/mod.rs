@@ -121,6 +121,17 @@ impl ItemMessage {
     }
 }
 
+/// Whether to proceed or not after receiving the value of the item object hash.
+#[derive(Debug, Serialize, Deserialize)]
+enum ProceedMessage {
+    /// Proceed with object transmission.
+    Proceed,
+    /// Object found local; end of transaction.
+    Cancel,
+}
+
+impl Message for ProceedMessage {}
+
 /// A header sending information (metadata) on an item.
 #[derive(Debug, Serialize, Deserialize)]
 struct ObjectMessage {
@@ -282,6 +293,7 @@ impl ReceivedObject {
 
 /// Receives the object from a channel.
 pub async fn recv_object(
+    _sender: ChannelSender,
     mut receiver: ChannelReceiver,
     hash: Hash,
 ) -> Result<ReceivedObject, crate::Error> {
@@ -303,15 +315,19 @@ pub async fn recv_object(
 }
 
 /// Sends an object to a channel.
-pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(), crate::Error> {
+pub async fn send_object(
+    sender: ChannelSender,
+    _receiver: ChannelReceiver,
+    object: &ObjectRef,
+) -> Result<(), crate::Error> {
     let header = ObjectMessage::for_object(object)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceMessage::send_negotiate(sender, *object.hash()).await?;
+    let transfer_cipher = NonceMessage::send_negotiate(&sender, *object.hash()).await?;
     log::info!("sending object header");
-    header.send(sender, &transfer_cipher).await?;
+    header.send(&sender, &transfer_cipher).await?;
     log::info!("sending data");
-    header.send_data(sender, object).await?;
+    header.send_data(&sender, object).await?;
 
     log::info!("done sending object");
 
@@ -339,6 +355,7 @@ impl ReceivedItem {
 /// Receive a collection item from a channel. Returns `Ok(None)` if the item object is
 /// perceived to already exist in the database.
 pub async fn recv_item(
+    sender: ChannelSender,
     mut receiver: ChannelReceiver,
     locator_hash: Hash,
 ) -> Result<ReceivedItem, crate::Error> {
@@ -363,7 +380,15 @@ pub async fn recv_item(
     if object_ref.exists()? {
         // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
         // the object in the database.
+        log::info!("Object {} exists. Ending transmission", object_ref.hash());
+        ProceedMessage::Cancel
+            .send(&sender, &transfer_cipher)
+            .await?;
         return Ok(ReceivedItem::ExistingObject(object_ref));
+    } else {
+        ProceedMessage::Proceed
+            .send(&sender, &transfer_cipher)
+            .await?;
     }
 
     header.item.insert()?;
@@ -384,17 +409,32 @@ pub async fn recv_item(
 }
 
 /// Sends a collection item to a channel.
-pub async fn send_item(sender: &ChannelSender, item: CollectionItem) -> Result<(), crate::Error> {
+pub async fn send_item(
+    sender: ChannelSender,
+    mut receiver: ChannelReceiver,
+    item: CollectionItem,
+) -> Result<(), crate::Error> {
     let object = item.object()?;
     let hash = item.locator().hash();
     let header = ItemMessage::for_item(item)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceMessage::send_negotiate(sender, hash).await?;
+    let transfer_cipher = NonceMessage::send_negotiate(&sender, hash).await?;
     log::info!("sending item header");
-    header.send(sender, &transfer_cipher).await?;
-    log::info!("sending data");
-    header.object_header.send_data(sender, &object).await?;
+    header.send(&sender, &transfer_cipher).await?;
+
+    log::info!("Receiving proceed message");
+    let proceed = ProceedMessage::recv(&mut receiver, &transfer_cipher).await?;
+
+    match proceed {
+        ProceedMessage::Proceed => {
+            log::info!("sending data");
+            header.object_header.send_data(&sender, &object).await?;
+        }
+        ProceedMessage::Cancel => {
+            log::info!("no need to send data");
+        }
+    }
 
     log::info!("done sending object");
 

@@ -65,8 +65,8 @@ impl NodeServer {
         tokio::spawn(
             async move {
                 log::info!("Starting task to transfer object {} to {}", hash, peer_addr);
-                let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;
-                file_transfer::send_object(&sender, &object).await
+                let (sender, receiver) = self.channel_manager.initiate(peer_addr).await?;
+                file_transfer::send_object(sender, receiver, &object).await
             }
             .map(move |outcome| {
                 outcome
@@ -126,8 +126,8 @@ impl NodeServer {
 
         tokio::spawn(
             async move {
-                let (sender, _receiver) = self.channel_manager.initiate(peer_addr).await?;
-                file_transfer::send_item(&sender, item).await
+                let (sender, receiver) = self.channel_manager.initiate(peer_addr).await?;
+                file_transfer::send_item(sender, receiver, item).await
             }
             .map(move |outcome| {
                 outcome

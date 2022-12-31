@@ -232,15 +232,19 @@ impl HubConnection {
         // For each candidate, "do the thing":
         let outcome = loop {
             match timeout_at(deadline, candidates.next()).await {
-                Ok(Some((_sender, receiver))) => {
+                Ok(Some((sender, receiver))) => {
                     // TODO: minor improvement... could we tee the object stream directly to the
                     // user? By now, we are waiting for the whole object to arrive, which is fine
                     // for most files, but can be a pain for the bigger ones...
                     let receive_outcome = match kind {
-                        QueryKind::Object => file_transfer::recv_object(receiver, content_hash)
-                            .await
-                            .map(ReceivedItem::NewObject),
-                        QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await,
+                        QueryKind::Object => {
+                            file_transfer::recv_object(sender, receiver, content_hash)
+                                .await
+                                .map(ReceivedItem::NewObject)
+                        }
+                        QueryKind::Item => {
+                            file_transfer::recv_item(sender, receiver, content_hash).await
+                        }
                     };
 
                     match receive_outcome {
