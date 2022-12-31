@@ -207,8 +207,12 @@ impl Node for NodeServer {
         log::info!("Got announcement from hub");
         match SubscriptionRef::find(&announcement.key_riddle) {
             Err(err) => log::error!("error processing {announcement:?}: {err}"),
-            Ok(None) => {}
+            Ok(None) => {
+                log::info!("No subscription found for announcement");
+            }
             Ok(Some(subscription)) => {
+                log::info!("Found {subscription} for announcement");
+
                 let cipher =
                     TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 

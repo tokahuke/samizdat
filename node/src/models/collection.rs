@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::str::FromStr;
+use serde_with::{serde_as, DisplayFromStr};
 
 use samizdat_common::{Hash, PatriciaMap, PatriciaProof, Riddle};
 
@@ -102,9 +103,11 @@ impl<'a> ItemPath<'a> {
 /// An association of paths with all object hashes for a given collection. Inventories
 /// are automatically included in all collections as a JSON file under the key
 /// `_inventory` and work much the same way like sitemaps do on the regular Web.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Inventory {
     /// The mapping of all paths to the corresponding object hash.
+    #[serde_as(as = "BTreeMap<_, DisplayFromStr>")]
     inventory: BTreeMap<ItemPathBuf, Hash>,
 }
 

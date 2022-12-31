@@ -521,6 +521,8 @@ impl Edition {
                 if !ObjectRef::new(*hash).exists()? {
                     let content_hash = collection.locator_for(item_path.as_path()).hash();
                     tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
+                } else {
+                    log::info!("Object {hash} already exists in the database. Skipping");
                 }
             }
 
