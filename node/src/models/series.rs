@@ -18,7 +18,7 @@ use crate::db::Table;
 use crate::system::ReceivedItem;
 use crate::{db, hubs};
 
-use super::{BookmarkType, CollectionRef, Droppable, Inventory};
+use super::{BookmarkType, CollectionRef, Droppable, Inventory, ObjectRef};
 
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
@@ -517,9 +517,11 @@ impl Edition {
             })?;
 
             // Make the necessary calls indiscriminately:
-            for (item_path, _hash) in &inventory {
-                let content_hash = collection.locator_for(item_path.as_path()).hash();
-                tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
+            for (item_path, hash) in &inventory {
+                if !ObjectRef::new(*hash).exists()? {
+                    let content_hash = collection.locator_for(item_path.as_path()).hash();
+                    tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
+                }
             }
 
             return Ok(());
