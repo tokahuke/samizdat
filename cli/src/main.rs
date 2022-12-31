@@ -1,10 +1,9 @@
-//! TODO: this code was hastily written. Good place for a big refactry.
+//! Command line interface for Samizdat node and hub.
 
 mod access_token;
 mod api;
 mod cli;
 mod commands;
-// mod error;
 mod html;
 mod logger;
 mod manifest;
@@ -12,7 +11,6 @@ mod util;
 
 pub use access_token::access_token;
 pub use cli::server;
-// pub use error::Error;
 pub use manifest::{Manifest, PrivateManifest};
 
 #[tokio::main]

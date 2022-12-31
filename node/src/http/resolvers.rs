@@ -10,7 +10,7 @@ use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
 use crate::models::{IdentityRef, ItemPath, Locator, ObjectRef, SeriesRef};
-use crate::system::ReceivedObject;
+use crate::system::{ReceivedItem, ReceivedObject};
 
 /// Am HTTP response for an object that has been resolved.
 pub struct Resolved {
@@ -31,14 +31,11 @@ impl TryInto<Response<Body>> for Resolved {
             builder = builder.header(header, value);
         }
 
-        builder
-            .status(http::StatusCode::OK)
-            // TODO: Bleh! Tidy-up this mess!
-            .body(self.body)
+        builder.status(http::StatusCode::OK).body(self.body)
     }
 }
 
-/// Am HTTP response for an object that has *not* been resolved.
+/// An HTTP response for an object that has *not* been resolved.
 pub struct NotResolved {
     /// The message to be relayed to the client.
     message: String,
@@ -119,17 +116,28 @@ pub async fn resolve_object(
     }
 
     log::info!("Hash {} not found locally. Querying hubs", object.hash());
-    if let Some(received_object) = hubs().query(*object.hash(), QueryKind::Object).await {
-        return Ok(resolve_new_object(received_object, ext_headers)
-            .await?
-            .try_into());
+    match hubs().query(*object.hash(), QueryKind::Object).await {
+        // This should not be possible!!
+        Some(ReceivedItem::ExistingObject(object)) => {
+            log::warn!(
+                "After querying hubs, found local hash {}. This should be impossible!",
+                object.hash()
+            );
+            Ok(resolve_existing_object(object, ext_headers)?.try_into())
+        }
+        Some(ReceivedItem::NewObject(received_object)) => {
+            Ok(resolve_new_object(received_object, ext_headers)
+                .await?
+                .try_into())
+        }
+        None => {
+            let not_resolved = NotResolved {
+                message: format!("Object {} not found", object.hash()),
+            };
+
+            Ok(not_resolved.try_into())
+        }
     }
-
-    let not_resolved = NotResolved {
-        message: format!("Object {} not found", object.hash()),
-    };
-
-    Ok(not_resolved.try_into())
 }
 
 /// Tries to find an object as a collection item, asking the Samizdat network if
@@ -151,18 +159,33 @@ pub async fn resolve_item(
         return Ok(resolve_existing_object(object, ext_headers)?.try_into());
     }
 
-    log::info!("Item not found locally. Querying hubs.");
-    if let Some(received_object) = hubs().query(locator.hash(), QueryKind::Item).await {
-        return Ok(resolve_new_object(received_object, ext_headers)
-            .await?
-            .try_into());
+    log::info!("Item {locator} not found locally. Querying hubs");
+    match hubs().query(locator.hash(), QueryKind::Object).await {
+        // This should not be possible!!
+        Some(ReceivedItem::ExistingObject(object)) => {
+            log::warn!(
+                "After querying hubs, found local hash {} for item {locator}",
+                object.hash()
+            );
+            Ok(resolve_existing_object(object, ext_headers)?.try_into())
+        }
+        Some(ReceivedItem::NewObject(received_object)) => {
+            log::warn!(
+                "After querying hubs, found new hash {} for item {locator}",
+                received_object.object_ref().hash()
+            );
+            Ok(resolve_new_object(received_object, ext_headers)
+                .await?
+                .try_into())
+        }
+        None => {
+            let not_resolved = NotResolved {
+                message: format!("Item {locator} not found"),
+            };
+
+            Ok(not_resolved.try_into())
+        }
     }
-
-    let not_resolved = NotResolved {
-        message: format!("Item {locator} not found"),
-    };
-
-    Ok(not_resolved.try_into())
 }
 
 /// Tries to find an object as an item the collection corresponding to the latest
@@ -190,7 +213,8 @@ pub async fn resolve_series(
     log::info!("Trying to find path in each edition");
     let mut empty = true;
 
-    for edition in series.get_editions()? {
+    for edition in series.get_editions() {
+        let edition = edition?;
         empty = false;
         log::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());

@@ -5,7 +5,7 @@ mod node_server;
 mod reconnect;
 mod transport;
 
-pub use file_transfer::ReceivedObject;
+pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::Reconnect;
 
 use futures::prelude::*;
@@ -126,16 +126,13 @@ impl HubConnectionInner {
 
 /// A connection to a single node, already resilient to reconnects.
 pub struct HubConnection {
-    name: &'static str,
+    name: String,
     inner: Reconnect<HubConnectionInner>,
 }
 
 impl HubConnection {
     /// Creates a connection to the hub.
-    pub async fn connect(
-        name: &'static str,
-        hub_addr: HubAddr,
-    ) -> Result<HubConnection, crate::Error> {
+    pub async fn connect(name: String, hub_addr: HubAddr) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
             name,
             inner: Reconnect::init(
@@ -151,12 +148,12 @@ impl HubConnection {
         })
     }
 
-    /// Makes a query to this hub.
+    /// Makes a query to this hub. Returns `Ok(None)` if the object is
     pub async fn query(
         &self,
         content_hash: Hash,
         kind: QueryKind,
-    ) -> Result<ReceivedObject, crate::Error> {
+    ) -> Result<ReceivedItem, crate::Error> {
         // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
             .map(|_| Riddle::new(&content_hash))
@@ -240,9 +237,9 @@ impl HubConnection {
                     // user? By now, we are waiting for the whole object to arrive, which is fine
                     // for most files, but can be a pain for the bigger ones...
                     let receive_outcome = match kind {
-                        QueryKind::Object => {
-                            file_transfer::recv_object(receiver, content_hash).await
-                        }
+                        QueryKind::Object => file_transfer::recv_object(receiver, content_hash)
+                            .await
+                            .map(ReceivedItem::NewObject),
                         QueryKind::Item => file_transfer::recv_item(receiver, content_hash).await,
                     };
 
@@ -365,7 +362,7 @@ impl Hubs {
     /// Initiates the set of all hub connections.
     pub async fn init<I>(addrs: I) -> Result<Hubs, crate::Error>
     where
-        I: IntoIterator<Item = (&'static str, HubAddr)>,
+        I: IntoIterator<Item = (String, HubAddr)>,
     {
         let hubs = stream::iter(addrs)
             .map(|(name, addr)| HubConnection::connect(name, addr))
@@ -378,11 +375,11 @@ impl Hubs {
     }
 
     /// Makes a query to all inscribed hubs.
-    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ReceivedObject> {
+    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ReceivedItem> {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
-                (hub.name, hub.query(content_hash, kind).await)
+                (hub.name.clone(), hub.query(content_hash, kind).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
@@ -403,7 +400,7 @@ impl Hubs {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for latest edition of {series}", hub.name);
-                (hub.name, hub.get_edition(series).await)
+                (hub.name.clone(), hub.get_edition(series).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
@@ -429,7 +426,7 @@ impl Hubs {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Announcing {announcement:?} to {}", hub.name);
-                (hub.name, hub.announce_edition(announcement).await)
+                (hub.name.clone(), hub.announce_edition(announcement).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
@@ -449,7 +446,7 @@ impl Hubs {
         let mut results = stream::iter(self.hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for identity {identity}", hub.name);
-                (hub.name, hub.get_identity(identity).await)
+                (hub.name.clone(), hub.get_identity(identity).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
 

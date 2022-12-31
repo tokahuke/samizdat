@@ -210,7 +210,6 @@ fn check_origin(referrer: &Url) -> Result<(), Forbidden> {
     let origin = referrer.origin();
 
     // Find out if some cross-origin thing is trying ot trick you.
-    // TODO: also implement proper CORS.
     match &origin {
         url::Origin::Tuple(http, host, _) if http == "http" || http == "https" => match host {
             Host::Domain(domain) if domain == "localhost" => return Ok(()),

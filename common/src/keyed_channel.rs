@@ -17,11 +17,17 @@ struct KeyedChannelInner<T> {
 }
 
 /// A channel that can be multiplexed with a key.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct KeyedChannel<T>(Arc<KeyedChannelInner<T>>);
 
-// TODO: this Clone bound is a dumb hack to make compiler happy.
-impl<T: Clone> KeyedChannel<T> {
+// Had to implement [`Clone`] manually for this type to make the compiler happy.
+impl<T> Clone for KeyedChannel<T> {
+    fn clone(&self) -> Self {
+        KeyedChannel(Arc::clone(&self.0))
+    }
+}
+
+impl<T> KeyedChannel<T> {
     /// Creates a new [`KeyedChannel`].
     pub fn new() -> Self {
         KeyedChannel(Arc::new(KeyedChannelInner {

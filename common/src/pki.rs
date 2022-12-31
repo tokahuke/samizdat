@@ -60,9 +60,9 @@ pub struct PrivateKey(ed25519_dalek::SecretKey);
 impl FromStr for PrivateKey {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<PrivateKey, crate::Error> {
-        // TODO: oops! need to process this error.
         Ok(PrivateKey(
-            ed25519_dalek::SecretKey::from_bytes(&base64_url::decode(s)?).expect("bad key"),
+            ed25519_dalek::SecretKey::from_bytes(&base64_url::decode(s)?)
+                .map_err(|err| format!("Failed to deserialize secret key {s}: {err}"))?,
         ))
     }
 }
@@ -106,11 +106,12 @@ pub struct Key(ed25519_dalek::PublicKey);
 impl FromStr for Key {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Key, crate::Error> {
-        // TODO: oops! need to process this error.
         Ok(Key(ed25519_dalek::PublicKey::from_bytes(
             &base64_url::decode(s)?,
         )
-        .expect("bad key")))
+        .map_err(|err| {
+            format!("Failed to deserialize public key {s}: {err}")
+        })?))
     }
 }
 

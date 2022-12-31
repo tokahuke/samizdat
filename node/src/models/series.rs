@@ -4,7 +4,7 @@
 use chrono::SubsecRound;
 use ed25519_dalek::Keypair;
 use futures::prelude::*;
-use rocksdb::{IteratorMode, WriteBatch};
+use rocksdb::{Direction, IteratorMode, WriteBatch};
 use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -15,6 +15,7 @@ use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
 use crate::db::Table;
+use crate::system::ReceivedItem;
 use crate::{db, hubs};
 
 use super::{BookmarkType, CollectionRef, Droppable, Inventory};
@@ -166,7 +167,7 @@ impl SeriesOwner {
         let mut batch = WriteBatch::default();
 
         // But first, unbookmark all your old assets...
-        if let Some(edition) = self.series().get_editions()?.first() {
+        if let Some(edition) = self.series().get_editions().next().transpose()? {
             for object in edition.collection().list_objects() {
                 object?
                     .bookmark(BookmarkType::Reference)
@@ -221,11 +222,9 @@ impl FromStr for SeriesRef {
 
 // impl Droppable for SeriesRef {
 //     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-//         // TODO: no, you dummy! Drop _prefix_
-//         // TODO: and don't forget to drop
 //         batch.delete_cf(Table::Editions.get(), self.key());
 //         batch.delete_cf(Table::Series.get(), self.key());
-
+//
 //         Ok(())
 //     }
 // }
@@ -301,10 +300,9 @@ impl SeriesRef {
         Ok(())
     }
 
-    /// Set this series as just delayed.
-    /// TODO: should get a better implementation in the future. By now, same as refresh.
+    /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
     pub fn mark_delayed(&self) -> Result<(), crate::Error> {
-        log::info!("Setting series {self} as fresh");
+        log::info!("Setting series {self} as delayed");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -316,7 +314,7 @@ impl SeriesRef {
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh(&self) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_editions()?.first() {
+        let is_fresh = if let Some(latest) = self.get_editions().next().transpose()? {
             if let Some(freshness) = db().get_cf(Table::SeriesFreshnesses.get(), self.key())? {
                 let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
                 let ttl =
@@ -333,29 +331,30 @@ impl SeriesRef {
         Ok(is_fresh)
     }
 
-    /// Returns the latest collection in the local database, no matter the freshness or
-    /// local ownership.
-    ///
-    /// TODO: should return iterator, since normally only the latest editions are important.
-    /// Although I regard this impl as safer, in a first moment.
-    pub fn get_editions(&self) -> Result<Vec<Edition>, crate::Error> {
-        let prefix = self.key();
-        let mut editions = db()
-            .prefix_iterator_cf(Table::Editions.get(), prefix)
-            // TODO: WHAT!? looks like the prefix iterator is iterating over stuff other than
-            // the prefix!?
-            .map(|item| item.expect("cannot fail here. See comment above."))
-            .take_while(|(key, _)| key.starts_with(&prefix))
-            .map(|(_, value)| {
-                let edition: Edition = bincode::deserialize(&value)?;
-                Ok(edition)
-            })
-            .collect::<Result<Vec<_>, crate::Error>>()?;
+    /// Returns the latest editions for a series in the local database, no matter the
+    /// freshness or local ownership. This iterator is guaranteed to yield items in
+    /// reverse chronological order.
+    pub fn get_editions(
+        &'_ self,
+    ) -> impl Send + Sync + Iterator<Item = Result<Edition, crate::Error>> {
+        // This is the maximum key we can have for a series:
+        let prefix = self.key().to_owned();
+        let start = [&*prefix, &i64::MAX.to_be_bytes()].concat();
 
-        // Probably already sorted, but...
-        editions.sort_unstable_by_key(|edition| std::cmp::Reverse(edition.timestamp()));
-
-        Ok(editions)
+        db().iterator_cf(
+            Table::Editions.get(),
+            IteratorMode::From(&start, Direction::Reverse),
+        )
+        .take_while(move |item| {
+            item.as_ref()
+                .map(|(key, _)| key.starts_with(&prefix))
+                .unwrap_or(true)
+        })
+        .map(|item| {
+            let (_, value) = item?;
+            let edition: Edition = bincode::deserialize(&value)?;
+            Ok(edition)
+        })
     }
 
     /// Advances the series with the supplied edition, if the edition is valid.
@@ -499,11 +498,16 @@ impl Edition {
         series.advance(self)?;
         series.refresh()?;
 
-        if let Some(received_object) = hubs().query(inventory_content_hash, QueryKind::Item).await {
-            let content = received_object
-                .into_content_stream()
-                .collect_content()
-                .await?;
+        if let Some(received_item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
+            let content = match received_item {
+                ReceivedItem::NewObject(received_object) => {
+                    received_object
+                        .into_content_stream()
+                        .collect_content()
+                        .await?
+                }
+                ReceivedItem::ExistingObject(object) => object.content()?.expect("object exists"),
+            };
 
             let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
                 crate::Error::from(format!(

@@ -318,16 +318,30 @@ pub async fn send_object(sender: &ChannelSender, object: &ObjectRef) -> Result<(
     Ok(())
 }
 
-/// Receive a collection item from a channel.
-///
-/// TODO: make object transfer optional if the receiver perceives that it
-/// already has the object (one simple table lookup, no seqscan here). This is
-/// important as people update their collections often, but keep most of it
-/// intact.
+/// Represents an item in the process of being received. It can correspond either to a
+/// fresh new object or to an existing object in the database.
+pub enum ReceivedItem {
+    /// The item resolved to a fresh new object not present in th database.
+    NewObject(ReceivedObject),
+    /// The item resolved to an existing object.
+    ExistingObject(ObjectRef),
+}
+
+impl ReceivedItem {
+    pub fn object_ref(&self) -> ObjectRef {
+        match self {
+            Self::NewObject(n) => n.object_ref(),
+            Self::ExistingObject(e) => e.clone(),
+        }
+    }
+}
+
+/// Receive a collection item from a channel. Returns `Ok(None)` if the item object is
+/// perceived to already exist in the database.
 pub async fn recv_item(
     mut receiver: ChannelReceiver,
     locator_hash: Hash,
-) -> Result<ReceivedObject, crate::Error> {
+) -> Result<ReceivedItem, crate::Error> {
     log::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
     log::info!("receiving item header");
@@ -345,6 +359,13 @@ pub async fn recv_item(
     // This checks proof validity:
     let object_ref = header.item.object()?;
 
+    // Go away if you already have what you wanted:
+    if object_ref.exists()? {
+        // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
+        // the object in the database.
+        return Ok(ReceivedItem::ExistingObject(object_ref));
+    }
+
     header.item.insert()?;
 
     log::info!("receiving data");
@@ -355,11 +376,11 @@ pub async fn recv_item(
 
     log::info!("done receiving item");
 
-    Ok(ReceivedObject {
+    Ok(ReceivedItem::NewObject(ReceivedObject {
         metadata,
         content_stream,
         object_ref,
-    })
+    }))
 }
 
 /// Sends a collection item to a channel.

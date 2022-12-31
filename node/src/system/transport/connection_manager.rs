@@ -60,7 +60,7 @@ impl ConnectionManager {
         Ok(BincodeOverQuic::new(connection, MAX_TRANSFER_SIZE))
     }
 
-    /// TODO: very basic NAT/firewall traversal stuff that works well in IPv6,
+    /// Very basic NAT/firewall traversal stuff that works well in IPv6,
     /// but not so much in IPv4. Is there a better solution? I am already using
     /// the hub as a STUN and not many people have the means to keep a TURN.
     pub(super) async fn punch_hole_to(

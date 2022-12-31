@@ -171,8 +171,8 @@ impl Node for NodeServer {
         log::info!("got {latest:?}");
 
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
-            let editions = series.and_then(|s| s.get_editions());
-            match editions.as_ref().map(|editions| editions.first()) {
+            let editions = series.map(|s| s.get_editions());
+            match editions.and_then(|mut editions| editions.next().transpose()) {
                 Ok(None) => None,
                 Ok(Some(latest)) if latest.is_draft() => None,
                 Ok(Some(latest)) => {
@@ -182,7 +182,7 @@ impl Node for NodeServer {
 
                     Some(EditionResponse {
                         rand,
-                        series: cipher.encrypt_opaque(latest),
+                        series: cipher.encrypt_opaque(&latest),
                     })
                 }
                 Err(err) => {

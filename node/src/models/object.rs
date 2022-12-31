@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, MerkleTree, Riddle};
 
-use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK};
+use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK, STATISTICS_MUTEXES};
 
 use super::{Bookmark, BookmarkType, Droppable};
 
@@ -388,11 +388,14 @@ impl ObjectRef {
     /// vacuum daemon that this object is useful and therefore a worse candidate for deletion.
     ///
     /// This function has no effect if the object does not exist.
-    ///
-    /// TODO: current impl allows for TOCTOU. Need transactions, which are not exposed in the
-    /// Rust API as of oct 2021.
     fn touch(&self) -> Result<(), crate::Error> {
         if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
+            // This lock solves a possible TOCTOU problem between reading the statistics
+            // and applying the statistics. Merge operations could be used instead.
+            let statistics_lock = STATISTICS_MUTEXES[self.hash[0] as usize % 12]
+                .lock()
+                .expect("statistics mutex poisoned");
+
             let mut statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
             statistics.touch();
             db().put_cf(
@@ -400,6 +403,8 @@ impl ObjectRef {
                 self.hash,
                 bincode::serialize(&statistics).expect("can serialize"),
             )?;
+
+            drop(statistics_lock);
         }
 
         Ok(())

@@ -269,9 +269,8 @@ impl AddrToResolve {
     pub async fn resolve(
         &self,
         resolution_mode: AddrResolutionMode,
-    ) -> Result<impl Iterator<Item = (&'static str, HubAddr)>, crate::Error> {
-        // TODO: iiirrgh! just... uuuurrrgh!
-        let name: &'static str = Box::leak(self.to_string().into_boxed_str());
+    ) -> Result<impl Iterator<Item = (String, HubAddr)>, crate::Error> {
+        let name = self.to_string();
 
         let addrs = match &self.direct_addr {
             SocketOrDomain::SocketAddr(addr) => vec![HubAddr::new(*addr, self.reverse_port)],
@@ -291,7 +290,7 @@ impl AddrToResolve {
             }
         };
 
-        Ok(addrs.into_iter().map(move |addr| (name, addr)))
+        Ok(addrs.into_iter().map(move |addr| (name.clone(), addr)))
     }
 }
 

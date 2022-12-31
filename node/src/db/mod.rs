@@ -8,7 +8,6 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
-use tokio::sync::RwLock;
 
 use crate::cli;
 
@@ -17,7 +16,11 @@ lazy_static! {
     /// This lock must be held in `write` mode by all operations attepmting to
     /// non-atomically __delete__ chunks from the database. It must also be held in
     /// `read` mode by all operations writing to chunks.
-    pub static ref CHUNK_RW_LOCK: RwLock<()> = RwLock::default();
+    pub static ref CHUNK_RW_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::default();
+    /// A set of locks (to reduce lock contention) that allow the holder to write on
+    /// [`Table::ObjectStatistics`]. This can be blocking because the lock holding
+    /// operations are very fast.
+    pub static ref STATISTICS_MUTEXES: [std::sync::Mutex<()>; 12] = Default::default();
 }
 
 /// The handle to the RocksDB database.
