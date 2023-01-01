@@ -104,7 +104,9 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 
     // STEP 2: garbage collection:
     let dropped_chunks = drop_orphan_chunks()?;
-    if dropped_chunks > 0 && status == VacuumStatus::Unnecessary {
+    let dropped_items = drop_dangling_items()?;
+
+    if (dropped_chunks > 0 || dropped_items > 0) && status == VacuumStatus::Unnecessary {
         status = VacuumStatus::Done;
     }
 
@@ -207,7 +209,8 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
     Ok(())
 }
 
-/// Drop chunks not associated with any object, i.e., those where the reference count has dropped to zero.
+/// Drop chunks not associated with any object, i.e., those where the reference count has
+/// dropped to zero.
 ///
 /// # Note:
 ///
@@ -229,10 +232,29 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
         }
     }
 
-    let dropped_chunks = batch.len();
+    let dropped = batch.len();
 
     db().write(batch)?;
     drop(chunk_lock);
 
-    Ok(dropped_chunks)
+    Ok(dropped)
+}
+
+/// Drop items that don't point to anything anymore.
+fn drop_dangling_items() -> Result<usize, crate::Error> {
+    let mut batch = rocksdb::WriteBatch::default();
+
+    for item in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
+        let (_, item) = item?;
+        let item: CollectionItem = bincode::deserialize(&item)?;
+
+        if !item.object()?.exists()? {
+            item.drop_if_exists_with(&mut batch)?;
+        }
+    }
+
+    let dropped = batch.len();
+    db().write(batch)?;
+
+    Ok(dropped)
 }

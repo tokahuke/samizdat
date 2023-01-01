@@ -3,12 +3,12 @@
 
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use serde_with::{serde_as, DisplayFromStr};
 
 use samizdat_common::{Hash, PatriciaMap, PatriciaProof, Riddle};
 
@@ -231,7 +231,10 @@ impl CollectionItem {
             };
 
             if content_riddle.resolves(&hash) {
-                return Ok(Some(bincode::deserialize(&*value)?));
+                let item: CollectionItem = bincode::deserialize(&*value)?;
+                if item.object()?.exists()? {
+                    return Ok(Some(item));
+                }
             }
         }
 
@@ -381,13 +384,7 @@ impl CollectionRef {
     /// returned.
     pub fn get(&self, name: ItemPath) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
-        let maybe_item = db().get_cf(Table::CollectionItems.get(), locator.hash())?;
-
-        if let Some(item) = maybe_item {
-            Ok(Some(bincode::deserialize(&item)?))
-        } else {
-            Ok(None)
-        }
+        locator.get()
     }
 
     /// Returns an iterator over all the item paths for the current collection that
@@ -454,7 +451,14 @@ impl<'a> Locator<'a> {
 
     /// Tries to retrieve the corresponding item from the database.
     pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
-        self.collection.get(self.name.clone())
+        let maybe_item = db().get_cf(Table::CollectionItems.get(), self.hash())?;
+
+        if let Some(item) = maybe_item {
+            let item: CollectionItem = bincode::deserialize(&*item)?;
+            Ok(Some(item))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Tries to retrieve the corresponding object from the database.

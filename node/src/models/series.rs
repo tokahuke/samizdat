@@ -167,7 +167,7 @@ impl SeriesOwner {
         let mut batch = WriteBatch::default();
 
         // But first, unbookmark all your old assets...
-        if let Some(edition) = self.series().get_editions().next().transpose()? {
+        if let Some(edition) = self.series().get_last_edition()? {
             for object in edition.collection().list_objects() {
                 object?
                     .bookmark(BookmarkType::Reference)
@@ -314,7 +314,7 @@ impl SeriesRef {
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh(&self) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_editions().next().transpose()? {
+        let is_fresh = if let Some(latest) = self.get_last_edition()? {
             if let Some(freshness) = db().get_cf(Table::SeriesFreshnesses.get(), self.key())? {
                 let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
                 let ttl =
@@ -357,6 +357,11 @@ impl SeriesRef {
         })
     }
 
+    /// Gets the last edition for this series in the database.
+    pub fn get_last_edition(&self) -> Result<Option<Edition>, crate::Error> {
+        self.get_editions().next().transpose()
+    }
+    
     /// Advances the series with the supplied edition, if the edition is valid.
     pub fn advance(&self, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {

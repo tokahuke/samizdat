@@ -93,6 +93,10 @@ pub enum Command {
         draft: bool,
         file: PathBuf,
     },
+    // /// Downloads an object from the samizdat network.
+    // Download {
+    //
+    // },
     /// Commands for managing series.
     Series {
         #[structopt(subcommand)]

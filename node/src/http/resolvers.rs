@@ -154,9 +154,10 @@ pub async fn resolve_item(
 
     log::info!("Resolving item {locator}");
     if let Some(item) = locator.get()? {
+        // If the object is known locally, we can simply deffer to querying the object.
         log::info!("Found item {locator} locally. Resolving object.");
         let object = item.object().expect("found invalid object for item");
-        return Ok(resolve_existing_object(object, ext_headers)?.try_into());
+        return resolve_object(object, ext_headers).await;
     }
 
     log::info!("Item {locator} not found locally. Querying hubs");

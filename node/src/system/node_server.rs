@@ -171,9 +171,9 @@ impl Node for NodeServer {
         log::info!("got {latest:?}");
 
         let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
-            let editions = series.map(|s| s.get_editions());
-            match editions.and_then(|mut editions| editions.next().transpose()) {
+            match series.and_then(|s| s.get_last_edition()) {
                 Ok(None) => None,
+                // Do not publish draft editions in non-draft series!
                 Ok(Some(latest)) if latest.is_draft() => None,
                 Ok(Some(latest)) => {
                     let cipher_key = latest.public_key().hash();
