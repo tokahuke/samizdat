@@ -41,6 +41,10 @@ pub struct Cli {
     /// query can propagate inside a network, with 2 being the absolute minimum to get a result.
     #[structopt(env = "SAMIZDAT_RIDDLES_PER_QUERY", long, default_value = "6")]
     pub riddles_per_query: usize,
+    /// The maximum number of simultaneous candidates (peers that have the content you queried) to
+    /// accept when processing a query to the network.
+    #[structopt(env = "SAMIZDAT_CONCURRENT_CANDIDATES", long, default_value = "4")]
+    pub concurrent_candidates: usize,
 }
 
 /// The handle to the CLI parameters.

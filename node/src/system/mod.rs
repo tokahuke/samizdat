@@ -226,16 +226,18 @@ impl HubConnection {
                         .ok()
                 })
             })
-            .buffer_unordered(4) // TODO: create CLI knob
+            .buffer_unordered(cli().concurrent_candidates)
             .filter_map(|done| Box::pin(async move { done }));
 
         // For each candidate, "do the thing":
         let outcome = loop {
             match timeout_at(deadline, candidates.next()).await {
                 Ok(Some((sender, receiver))) => {
-                    // TODO: minor improvement... could we tee the object stream directly to the
-                    // user? By now, we are waiting for the whole object to arrive, which is fine
-                    // for most files, but can be a pain for the bigger ones...
+                    // TODO: possible DOS attack... claim you have the thing and then stall
+                    // *right here*, causing the query to time out.
+                    // 
+                    // Proposed mitigation: run the candidates concurrently. This will
+                    // necessitate some extensive refactoring.
                     let receive_outcome = match kind {
                         QueryKind::Object => {
                             file_transfer::recv_object(sender, receiver, content_hash)
