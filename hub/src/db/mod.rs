@@ -15,7 +15,7 @@ pub fn db<'a>() -> &'a rocksdb::DB {
     unsafe { DB.as_ref().expect("db not initialized") }
 }
 
-/// Initializes the RocksDB for use by the Samizdat node.
+/// Initializes the RocksDB for use by the Samizdat hub.
 pub fn init_db() -> Result<(), crate::Error> {
     log::info!("Starting RocksDB");
 
@@ -50,16 +50,17 @@ pub fn init_db() -> Result<(), crate::Error> {
     // This is a single-threaded initialization function.
     unsafe {
         DB = Some(db);
-
-        // Run possible migrations (needs DB set, but still requires exclusive access):
-        log::info!("RocksDB up. Running migrations...");
-        migrations::migrate(DB.as_mut().expect("option was just set"))?;
-        log::info!("... done running all migrations.");
     }
+
+    // Run possible migrations (needs DB set, but still requires exclusive access):
+    log::info!("RocksDB up. Running migrations...");
+    migrations::migrate()?;
+    log::info!("... done running all migrations.");
 
     Ok(())
 }
 
+/// All column families in the RocksDB database.
 #[derive(Debug, Clone, Copy, EnumIter, IntoStaticStr)]
 pub enum Table {
     /// Global, singleton information.
@@ -77,10 +78,12 @@ impl Display for Table {
 }
 
 impl Table {
+    /// An iterator for all column family descriptors in the database.
     fn descriptors() -> impl Iterator<Item = rocksdb::ColumnFamilyDescriptor> {
         Table::iter().map(Table::descriptor)
     }
 
+    /// An iterator for all column family names in the database.
     fn names() -> impl Iterator<Item = String> {
         Table::iter().map(|table| table.to_string())
     }

@@ -12,6 +12,7 @@ pub(super) fn migrate() -> Result<(), crate::Error> {
     BaseMigration.migrate()
 }
 
+/// A migration to be run in the database at process start.
 trait Migration: Debug {
     fn next(&self) -> Option<Box<dyn Migration>>;
     fn up(&self) -> Result<(), crate::Error>;

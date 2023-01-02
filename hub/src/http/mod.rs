@@ -9,6 +9,7 @@ use crate::rpc::node_sampler::QuerySampler;
 use crate::rpc::ROOM;
 use crate::{balanced_or_tree, CLI};
 
+/// Mapping of Samizdat errors into HTTP status codes.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
     match err {
         crate::Error::Message(_) => http::StatusCode::BAD_REQUEST,
@@ -28,6 +29,7 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
+/// The response format for the Samizdat hub HTTP API.
 fn api_reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
 where
     T: serde::Serialize,
@@ -53,6 +55,7 @@ fn tuple<T>(t: T) -> (T,) {
     (t,)
 }
 
+/// Serves the Samizdat hub HTTP API.
 pub fn serve() -> impl Future<Output = ()> {
     let server = warp::filters::addr::remote()
         .and_then(|addr: Option<std::net::SocketAddr>| async move {
@@ -77,10 +80,12 @@ pub fn serve() -> impl Future<Output = ()> {
     warp::serve(server).run(([0; 16], CLI.http_port))
 }
 
+/// All the endpoints for the Samizdat HTTP API.
 fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     balanced_or_tree!(connected_ips(), resolution_order())
 }
 
+/// Returns all the currently connected IPs to this hub.
 fn connected_ips() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path("connected-ips")
         .and(warp::get())

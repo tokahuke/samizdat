@@ -131,10 +131,12 @@ impl Display for Table {
 type MergeFunction = fn(&[u8], Option<&[u8]>, &rocksdb::MergeOperands) -> Option<Vec<u8>>;
 
 impl Table {
+    /// An iterator for all column family descriptors in the database.
     fn descriptors() -> impl Iterator<Item = rocksdb::ColumnFamilyDescriptor> {
         Table::iter().map(Table::descriptor)
     }
 
+    /// An iterator for all column family names in the database.
     fn names() -> impl Iterator<Item = String> {
         Table::iter().map(|table| table.to_string())
     }
