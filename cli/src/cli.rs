@@ -47,6 +47,8 @@ pub struct Cli {
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum Command {
+    /// Tests if the server is up.
+    Up,
     /// Starts a new collection in this folder.
     Init {
         #[structopt(long)]
@@ -141,6 +143,7 @@ pub enum Command {
 impl Command {
     pub async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
+            Command::Up => { /* this is a no-op */ Ok(()) },
             Command::Init { name } => commands::init(name).await,
             Command::Import { private_key } => commands::import(private_key).await,
             Command::Commit {
