@@ -1,10 +1,12 @@
+//! Migrations for the RocksDb database.
+
 use std::fmt::Debug;
 
 use crate::db;
 
 use super::Table;
 
-/// The `&mut DB` guarantees exclusive access to the db, since this type is not clonable.
+/// Runs the all the necessary migrations of the RocksDb database.
 pub(super) fn migrate() -> Result<(), crate::Error> {
     BaseMigration.migrate()
 }
@@ -42,6 +44,7 @@ trait Migration: Debug {
     }
 }
 
+/// The original migration of the RocksDb database.
 #[derive(Debug)]
 struct BaseMigration;
 

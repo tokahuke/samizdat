@@ -5,7 +5,7 @@ use structopt::StructOpt;
 
 use samizdat_common::address::{AddrResolutionMode, AddrToResolve};
 
-/// The CLI parameters.
+/// The Samizdat Client.
 #[derive(Debug, StructOpt)]
 pub struct Cli {
     /// Set logging level.

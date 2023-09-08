@@ -1,3 +1,5 @@
+//! Implements the RPC server part of the Hub API.
+
 use futures::prelude::*;
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
@@ -17,13 +19,19 @@ use super::{
     REPLAY_RESISTANCE,
 };
 
+/// The Hub server side of a client-server RPC connection.
 struct HubServerInner {
+    /// Limits the number of simultaneous queries a node can make.
     call_semaphore: Semaphore,
+    /// Limits the frequency of queries a node can make.
     call_throttle: Mutex<Interval>,
+    /// The address of the node.
     addr: SocketAddr,
+    /// The channel of peers that can answer queries for this node.
     candidate_channels: KeyedChannel<Candidate>,
 }
 
+/// The Hub server side of a client-server RPC connection.
 #[derive(Clone)]
 pub struct HubServer(Arc<HubServerInner>);
 

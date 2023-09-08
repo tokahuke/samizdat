@@ -5,7 +5,6 @@ mod cli;
 mod db;
 mod http;
 mod models;
-mod replay_resistance;
 mod slow_compiler_workaround;
 mod system;
 mod utils;

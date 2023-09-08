@@ -1,3 +1,7 @@
+//! A sampling scheme based on the idea of Thompson Sampling to make the hub capable of
+//! discerning the best node in the network. This is a very simple implementation and can
+//! be vastly improved upon in the future.
+
 use rand::distributions::Distribution;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::net::SocketAddr;
@@ -9,10 +13,15 @@ use samizdat_common::heap_entry::HeapEntry;
 
 use super::Node;
 
+/// An observer of Normal random variables, which is slowly able to infer its parameters
+///  (vis. mean and standard deviation).
 #[derive(Debug, Clone)]
 struct Normal {
+    /// The number of observations.
     n: usize,
+    /// The sum of all observations.
     x: f64,
+    /// The sum of the square of all observations.
     x2: f64,
 }
 
@@ -22,31 +31,38 @@ impl Default for Normal {
         Normal {
             n: 2,
             x: 0.0,
-            x2: 2f64.ln().powi(2) / 2.0,
+            x2: 2f64.ln().powi(2) / 2.0, // special sauce number
         }
     }
 }
 
 impl Normal {
+    /// Ingests an new sampler.
     fn observe(&mut self, sample: f64) {
         self.n += 1;
         self.x += sample;
         self.x2 += sample.powi(2);
     }
 
+    /// Retrieves the current expected mean.
     fn mean(&self) -> f64 {
         self.x / self.n as f64
     }
 
+    /// Retrieve the current expected standard deviation.
     fn var(&self) -> f64 {
         self.x2 / self.n as f64 - self.mean().powi(2)
     }
 }
 
+/// The statistics of how well and how fast a node can answer queries.
 #[derive(Debug)]
 struct StatisticsInner {
+    /// The number of requests sent.
     requests: f64,
+    /// The number of successful queries (i.e., ones that yielded a valid result).
     successes: f64,
+    /// The observer of how fast successful queries were answered.
     latency_success_log: Normal,
 }
 
@@ -61,10 +77,16 @@ impl Default for StatisticsInner {
     }
 }
 
+/// The statistics of how well and how fast a node can answer queries.
 #[derive(Clone, Debug, Default)]
 pub struct Statistics(Arc<RwLock<StatisticsInner>>);
 
 impl Statistics {
+    /// Samples a reasonable guess of how well the node being observed can minimize
+    /// _inverse_ latency. In this model, not being able to answer a query yields `0.0`
+    /// inverse latency, which is akin to infinite latency. The idea of _sampling_ a
+    /// guess (instead of, e.g., taking the mean expected value) is a way of solving the
+    /// "Exploration-Exploitation dilemma" via Thompson Sampling. 
     pub fn rand_priority(&self) -> f64 {
         // Use stuff from lock and get rid of it as fast as you can:
         let lock = self.0.read().expect("poisoned");
@@ -99,11 +121,13 @@ impl Statistics {
         success_prob / sample_latency
     }
 
+    /// Marks the beginning of a new request.
     fn start_request(&self) {
         let mut lock = self.0.write().expect("poisoned");
         lock.requests += 1.0;
     }
 
+    /// Marks that the current ongoing request has ended with success.
     fn end_request_with_success(&self, latency: Duration) {
         let mut lock = self.0.write().expect("poisoned");
         lock.successes += 1.0;
@@ -111,6 +135,8 @@ impl Statistics {
             .observe((latency.as_millis() as f64).max(1.0).ln());
     }
 
+    /// Starts an "experiment", which is a representation of the ongoing act of sending
+    /// a request and waiting for the final outcome.
     pub fn start_experiment(&self) -> Experiment {
         self.start_request();
         Experiment {
@@ -120,18 +146,25 @@ impl Statistics {
     }
 }
 
+/// A representation of the ongoing act of sending a request and waiting for the final
+/// outcome. If this experiment is dropped without a call to [`Experiment::end_with_success`],
+/// this marks that the node was not able to respond in time.
 pub struct Experiment {
+    /// The statistics object that this experiment relates to.
     statistics: Statistics,
+    /// The instance that this experiment has started.
     start: Instant,
 }
 
 impl Experiment {
+    /// Marks the end of the experiment with success.
     pub fn end_with_success(self) {
         self.statistics
             .end_request_with_success(self.start.elapsed());
     }
 }
 
+/// Samples an ordering of nodes, based on a given priority.
 pub(super) fn sample(
     sampler: impl PrioritySampler,
     nodes: &BTreeMap<SocketAddr, Arc<Node>>,
@@ -151,10 +184,12 @@ pub(super) fn sample(
     std::iter::from_fn(move || queue.pop().map(|entry| entry.content))
 }
 
+/// A priority definition of a node.
 pub trait PrioritySampler {
     fn sample_priority(&self, node: &Node) -> f64;
 }
 
+/// A priority sampler that gives the same priority to all nodes.
 #[derive(Debug, Clone, Copy)]
 pub struct UniformSampler;
 
@@ -164,6 +199,8 @@ impl PrioritySampler for UniformSampler {
     }
 }
 
+/// A priority sampler that gives greater priority to nodes that can answer to _query_
+/// requests more often and faster.
 #[derive(Debug, Clone, Copy)]
 pub struct QuerySampler;
 
@@ -173,6 +210,8 @@ impl PrioritySampler for QuerySampler {
     }
 }
 
+/// A priority sampler that gives greater priority to nodes that can answer to _edition_
+/// requests more often and faster.
 #[derive(Debug, Clone, Copy)]
 pub struct EditionSampler;
 

@@ -1,4 +1,4 @@
-mod auth;
+//! HTTP API for the Samizdat Hub.
 
 use futures::{Future, StreamExt};
 use serde_derive::Deserialize;
@@ -101,6 +101,8 @@ fn connected_ips() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .map(tuple)
 }
 
+/// Gets the current resolution order of the peers, that is, the order in which peers
+/// will be queried.
 fn resolution_order() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     #[derive(Deserialize)]

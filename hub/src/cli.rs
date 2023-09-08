@@ -1,7 +1,10 @@
+//! Command line interface for the Samizdat node.
+
 use structopt::StructOpt;
 
 use samizdat_common::address::{AddrResolutionMode, AddrToResolve, HubAddr};
 
+/// The Samizdat Hub.
 #[derive(StructOpt)]
 pub struct Cli {
     /// Set logging level.
@@ -10,6 +13,7 @@ pub struct Cli {
     /// The socket addresses for nodes to connect as clients.
     #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
     pub addresses: Vec<HubAddr>,
+    /// Path to the locally stored program data.
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
     /// Maximum number of simultaneous connections.

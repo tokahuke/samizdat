@@ -1,3 +1,6 @@
+//! Implements a pool of Nodes where any two nodes may be connected to each other by this
+//! Hub.
+
 use futures::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -11,17 +14,22 @@ use super::node_sampler;
 use super::node_sampler::PrioritySampler;
 use super::Node;
 
+/// Implements a pool of Nodes where any two nodes may be connected to each other by this
+/// Hub.
 #[derive(Debug)]
 pub struct Room {
+    /// A list of all the [`Node`]s in this room.
     participants: Arc<RwLock<BTreeMap<SocketAddr, Arc<Node>>>>,
 }
 
 impl Room {
+    /// Creates a new, empty room.
     pub fn new() -> Room {
         let participants = Arc::default();
         Room { participants }
     }
 
+    /// Inserts a new node into the room.
     pub(super) async fn insert(&self, addr: SocketAddr, participant: Node) {
         self.participants
             .write()
@@ -29,15 +37,22 @@ impl Room {
             .insert(addr, Arc::new(participant));
     }
 
+    /// Removes a node from the room, as represented by its socket address.
     pub async fn remove(&self, addr: SocketAddr) {
         log::info!("dropping client {}", addr);
         self.participants.write().await.remove(&addr);
     }
 
+    /// Gets a reference to a node in the room, as represented by its socket address. This
+    /// returns [`None`] in case no node is found with that socket address.
     pub async fn get(&self, addr: SocketAddr) -> Option<Arc<Node>> {
         self.participants.read().await.get(&addr).cloned()
     }
 
+    /// Lists the peers in a random (but clever) order, as defined by a priority sampler
+    /// (each priority sampler looks to a different metric in the node). The current node
+    /// that has cause the invoking of this function is needed so as to avoid, e.g., the
+    /// hub sending the query to the same node that has sent that query, initiating a loop.
     pub async fn stream_peers<'a>(
         &'a self,
         sampler: impl 'a + PrioritySampler,
@@ -65,6 +80,10 @@ impl Room {
         futures::stream::iter(sampler)
     }
 
+    /// Runs a function on each node according to a random (but clever) order, as defined
+    /// by a priority sampler (each priority sampler looks to a different metric in the
+    /// node). This calls [`Room::stream_peers`] and does a `filter_map` on top of the
+    /// returned stream.
     pub fn with_peers<'a, F, FFut, U>(
         &'a self,
         sampler: impl 'a + PrioritySampler,
@@ -98,6 +117,7 @@ impl Room {
             .take(CLI.max_candidates)
     }
 
+    /// Gets a read handle to the underlying map backing this room.
     pub async fn raw_participants<'a>(
         &'a self,
     ) -> RwLockReadGuard<'a, BTreeMap<SocketAddr, Arc<Node>>> {

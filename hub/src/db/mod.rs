@@ -1,3 +1,5 @@
+//! The Samizdat Hub database, based on top of RocksDb.
+
 mod migrations;
 
 use std::collections::BTreeSet;

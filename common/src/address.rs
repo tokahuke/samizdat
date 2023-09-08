@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use crate::Hash;
 
+/// Represents a channel for a multiplexed QUIC connection.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ChannelId(u32);
 

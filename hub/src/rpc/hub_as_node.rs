@@ -1,3 +1,7 @@
+//! Implements the RPC client part of the Hub API _for the Samizdat Hub_. This describes
+//! how a Samizdat Hub can behave as another node to another Samizdat Hub. This confers
+//! recursion to the Samizdat network.
+
 use futures::future::Either;
 use futures::prelude::*;
 use quinn::Endpoint;
@@ -23,16 +27,24 @@ use super::{
     REPLAY_RESISTANCE,
 };
 
-const MAX_TRANSFER_SIZE: usize = 2_048;
+/// The maximum length in bytes that a message in the RPC connections can have. This is
+/// set to a low value because all messages sent and received through the RPC are quite
+/// small. A such, this may change in the future to a bigger value.
+const MAX_TRANSFER_SIZE: usize = super::MAX_LENGTH;
 
+/// The RPC server of the Samizdat Node, but implemented by a Samizdat Hub.
 #[derive(Debug, Clone)]
 pub struct HubAsNodeServer {
+    /// The socket address of the _other_ Samizdat Hub this hub is connecting to.
     partner: SocketAddr,
+    /// The raw RPC client.
     client: HubClient,
+    /// The channel of peers that can answer queries for this node.
     candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl HubAsNodeServer {
+    /// Creates a new RPC server.
     pub fn new(
         partner: SocketAddr,
         client: HubClient,

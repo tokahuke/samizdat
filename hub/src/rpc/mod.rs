@@ -1,3 +1,5 @@
+//! The RPC server that is the core of the Samizdat Hub.
+
 pub mod node_sampler;
 
 mod hub_as_node;
@@ -27,22 +29,33 @@ use self::hub_server::HubServer;
 use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
 use self::room::Room;
 
+/// The maximum length in bytes that a message in the RPC connections can have. This is
+/// set to a low value because all messages sent and received through the RPC are quite
+/// small. A such, this may change in the future to a bigger value.
 const MAX_LENGTH: usize = 2_048;
 
 lazy_static! {
+    /// The main pool of nodes.
     pub static ref ROOM: Room = Room::new();
+    /// The replay resistance that tracks nonces that are being sent to the server.
     pub static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
 }
 
+/// Represents a connection to a Samizdat node.
 #[derive(Debug)]
 pub struct Node {
+    /// Gathers statics on the ability of this node to answer queries.
     query_statistics: Statistics,
+    /// Gather statistics on the ability of this node to answer editions.
     edition_statistics: Statistics,
+    /// The RPC client of this node.
     client: NodeClient,
+    /// The socket address of the node.
     addr: SocketAddr,
 }
 
 impl Node {
+    /// Creates a new node from a socket address and a raw RPC client.
     fn new(addr: SocketAddr, client: NodeClient) -> Node {
         Node {
             query_statistics: Statistics::default(),
@@ -54,6 +67,8 @@ impl Node {
     }
 }
 
+/// Lists candidates that can answer to a given resolution.
+/// TODO: code smell: big function.
 fn candidates_for_resolution(
     ctx: context::Context,
     client_addr: SocketAddr,
@@ -154,6 +169,7 @@ fn candidates_for_resolution(
     .flatten_unordered(10)
 }
 
+/// Lists editions that can answer to a given edition request.
 async fn edition_for_request(
     ctx: context::Context,
     client_addr: SocketAddr,
@@ -197,6 +213,7 @@ async fn edition_for_request(
     responses
 }
 
+/// Announces a new edition to the network.
 async fn announce_edition(
     ctx: context::Context,
     client_addr: SocketAddr,
@@ -220,6 +237,7 @@ async fn announce_edition(
     .await;
 }
 
+/// Gets the public key relating to a given handle.
 async fn get_identity(
     ctx: context::Context,
     client_addr: SocketAddr,
@@ -258,6 +276,9 @@ async fn get_identity(
     .collect::<Vec<_>>()
 }
 
+/// Runs the "direct" server. This is the system where the Hub acts as a server and the
+/// Node acts as a client. This is used for, e.g., the nodes to ask the server the
+/// resolution to a given query.
 pub async fn run_direct(
     addrs: Vec<impl Into<SocketAddr>>,
     candidate_channels: KeyedChannel<Candidate>,
@@ -313,6 +334,10 @@ pub async fn run_direct(
     Ok(())
 }
 
+
+/// Runs the "reverse" server. This is the system where the Hub acts as a client and the
+/// Node acts as a server. This is used for, e.g., the hub to ask clients whether they can
+/// answer a given query or not.
 pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Error> {
     let all_incoming = addrs
         .into_iter()
@@ -371,6 +396,8 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
     Ok(())
 }
 
+/// This runs the current Hub taking the role of a Node to other hubs. This is what makes the
+/// network recursive.
 pub async fn run_partners() {
     let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
 

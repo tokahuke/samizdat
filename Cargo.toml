@@ -1,6 +1,7 @@
 [workspace]
 
 members = ["common", "node", "hub", "cli", "proxy"]
+resolver = "2"
 
 [profile.release]
 
