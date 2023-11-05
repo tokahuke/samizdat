@@ -6,7 +6,7 @@ mod reconnect;
 mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
-pub use reconnect::Reconnect;
+pub use reconnect::{ConnectionStatus, Reconnect};
 
 use futures::prelude::*;
 use futures::stream;
@@ -17,6 +17,7 @@ use tarpc::client::NewClient;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::time::{timeout_at, Duration};
@@ -29,6 +30,7 @@ use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
 
 use crate::cli;
+use crate::models;
 use crate::models::Identity;
 use crate::models::IdentityRef;
 use crate::models::{Edition, SeriesRef};
@@ -127,14 +129,28 @@ impl HubConnectionInner {
 /// A connection to a single node, already resilient to reconnects.
 pub struct HubConnection {
     name: String,
+    hub_addr: HubAddr,
     inner: Reconnect<HubConnectionInner>,
 }
 
 impl HubConnection {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn status(&self) -> ConnectionStatus {
+        self.inner.status()
+    }
+
+    pub fn address(&self) -> HubAddr {
+        self.hub_addr
+    }
+
     /// Creates a connection to the hub.
     pub async fn connect(name: String, hub_addr: HubAddr) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
             name,
+            hub_addr,
             inner: Reconnect::init(
                 move || HubConnectionInner::connect(hub_addr),
                 || {
@@ -161,7 +177,8 @@ impl HubConnection {
         let location_riddle = Riddle::new(&content_hash);
 
         // Acquire hub connection:
-        let inner = self.inner.get().await;
+        let guard = self.inner.get().await;
+        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
 
         // Get the deadline of the request:
         let context = context::current();
@@ -235,7 +252,7 @@ impl HubConnection {
                 Ok(Some((sender, receiver))) => {
                     // TODO: possible DOS attack... claim you have the thing and then stall
                     // *right here*, causing the query to time out.
-                    // 
+                    //
                     // Proposed mitigation: run the candidates concurrently. This will
                     // necessitate some extensive refactoring.
                     let receive_outcome = match kind {
@@ -279,7 +296,8 @@ impl HubConnection {
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_edition(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = Riddle::new(&series.public_key.hash());
-        let inner = self.inner.get().await;
+        let guard = self.inner.get().await;
+        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
 
         let response = inner
             .client
@@ -313,7 +331,8 @@ impl HubConnection {
         &self,
         announcement: &EditionAnnouncement,
     ) -> Result<(), crate::Error> {
-        let inner = self.inner.get().await;
+        let guard = self.inner.get().await;
+        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
 
         inner
             .client
@@ -328,7 +347,8 @@ impl HubConnection {
         identity: &IdentityRef,
     ) -> Result<Option<Identity>, crate::Error> {
         let identity_riddle = Riddle::new(&identity.hash());
-        let inner = self.inner.get().await;
+        let guard = self.inner.get().await;
+        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
 
         let candidates = inner
             .client
@@ -361,28 +381,102 @@ impl HubConnection {
 
 /// Set of all hub connection from this node.
 pub struct Hubs {
-    hubs: Vec<Arc<HubConnection>>,
+    hubs: RwLock<Vec<Arc<HubConnection>>>,
 }
 
 impl Hubs {
-    /// Initiates the set of all hub connections.
-    pub async fn init<I>(addrs: I) -> Result<Hubs, crate::Error>
-    where
-        I: IntoIterator<Item = (String, HubAddr)>,
-    {
-        let hubs = stream::iter(addrs)
-            .map(|(name, addr)| HubConnection::connect(name, addr))
-            .buffer_unordered(10) // 'cause 10!
-            .map(|outcome| outcome.map(Arc::new))
-            .try_collect::<Vec<_>>()
-            .await?;
+    pub async fn remove(&self, name: &str) {
+        let mut hubs = self.hubs.write().await;
+        *hubs = hubs
+            .iter()
+            .cloned()
+            .filter(|conn| conn.name != name)
+            .collect();
+    }
 
-        Ok(Hubs { hubs })
+    pub async fn insert(&self, hub_model: models::Hub) {        
+        let mut resolved_addresses = vec![];
+
+        let outcome: Result<(), crate::Error> = try {
+            for address in hub_model.address.resolve(hub_model.resolution_mode).await? {
+                resolved_addresses.push(address);
+            }
+        };
+
+        if let Err(err) = outcome {
+            log::warn!("Failed to resolve address for {}: {err}", hub_model.address);
+        }
+
+        let hub_stream = stream::iter(resolved_addresses)
+            .map(|(name, resolved)| async move {
+                match HubConnection::connect(name.clone(), resolved).await {
+                    Ok(conn) => Some(conn),
+                    Err(err) => {
+                        log::warn!("Failed to connect to hub {name} at {resolved}: {err}");
+                        None
+                    }
+                }
+            })
+            .buffer_unordered(10)
+            .filter_map(|maybe_conn| async move { maybe_conn })
+            .map(Arc::new);
+
+        log::debug!("Inserting connection(s) for {}", hub_model.address);
+
+        let mut hubs = self.hubs.write().await;
+        *hubs = stream::iter(hubs.iter().cloned())
+            .chain(hub_stream)
+            .collect()
+            .await;
+        
+        log::info!("Connection(s) for {} created", hub_model.address);
+    }
+
+    pub async fn snapshot(&self) -> Vec<Arc<HubConnection>> {
+        let hubs = self.hubs.read().await;
+        hubs.iter().cloned().collect()
+    }
+
+    /// Initiates the set of all hub connections.
+    pub async fn init() -> Result<Hubs, crate::Error> {
+        let all_hub_models = models::Hub::get_all()?;
+        let mut resolved_addresses = vec![];
+
+        for hub_model in all_hub_models {
+            let outcome: Result<(), crate::Error> = try {
+                for address in hub_model.address.resolve(hub_model.resolution_mode).await? {
+                    resolved_addresses.push(address);
+                }
+            };
+
+            if let Err(err) = outcome {
+                log::warn!("Failed to resolve address for {}: {err}", hub_model.address);
+            }
+        }
+
+        let hub_stream = stream::iter(resolved_addresses)
+            .map(|(name, resolved)| async move {
+                match HubConnection::connect(name.clone(), resolved).await {
+                    Ok(conn) => Some(conn),
+                    Err(err) => {
+                        log::warn!("Failed to connect to hub {name} at {resolved}: {err}");
+                        None
+                    }
+                }
+            })
+            .buffer_unordered(10)
+            .filter_map(|maybe_conn| async move { maybe_conn })
+            .map(Arc::new);
+
+        Ok(Hubs {
+            hubs: RwLock::new(hub_stream.collect().await),
+        })
     }
 
     /// Makes a query to all inscribed hubs.
     pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ReceivedItem> {
-        let mut results = stream::iter(self.hubs.iter().cloned())
+        let hubs = self.hubs.read().await;
+        let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
                 (hub.name.clone(), hub.query(content_hash, kind).await)
@@ -403,7 +497,8 @@ impl Hubs {
 
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Option<Edition> {
-        let mut results = stream::iter(self.hubs.iter().cloned())
+        let hubs = self.hubs.read().await;
+        let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for latest edition of {series}", hub.name);
                 (hub.name.clone(), hub.get_edition(series).await)
@@ -429,7 +524,8 @@ impl Hubs {
     }
 
     pub async fn announce_edition(&self, announcement: &EditionAnnouncement) {
-        let mut results = stream::iter(self.hubs.iter().cloned())
+        let hubs = self.hubs.read().await;
+        let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Announcing {announcement:?} to {}", hub.name);
                 (hub.name.clone(), hub.announce_edition(announcement).await)
@@ -447,9 +543,8 @@ impl Hubs {
     }
 
     pub async fn get_identity(&self, identity: &IdentityRef) -> Option<Identity> {
-        log::info!("HERE!");
-
-        let mut results = stream::iter(self.hubs.iter().cloned())
+        let hubs = self.hubs.read().await;
+        let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for identity {identity}", hub.name);
                 (hub.name.clone(), hub.get_identity(identity).await)

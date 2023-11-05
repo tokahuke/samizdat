@@ -83,6 +83,8 @@ pub enum AccessRight {
     ManageSubscriptions,
     /// Can create and delete identities.
     ManageIdentities,
+    /// Can create and delete connection to Samizdat Hubs.
+    ManageHubs,
 }
 
 /// A name of an entity inside the Samizdat network. An entity can be an object, a

@@ -334,7 +334,6 @@ pub async fn run_direct(
     Ok(())
 }
 
-
 /// Runs the "reverse" server. This is the system where the Hub acts as a client and the
 /// Node acts as a server. This is used for, e.g., the hub to ask clients whether they can
 /// answer a given query or not.

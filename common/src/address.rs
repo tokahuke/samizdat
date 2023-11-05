@@ -182,7 +182,7 @@ impl HubAddr {
 
 /// Represents either an `ip:port` style address or a `domain:port` style address. This
 /// is intended to be a flexible representation of an address in the internet.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SocketOrDomain {
     /// A raw `ip:port` address.
     SocketAddr(SocketAddr),
@@ -227,7 +227,7 @@ impl Display for SocketOrDomain {
 }
 
 /// A representation of a double-port address (linking to a Samizdat hub).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AddrToResolve {
     /// The address of the node-to-hub RPC.
     direct_addr: SocketOrDomain,
@@ -296,7 +296,7 @@ impl AddrToResolve {
 }
 
 /// The way addresses are resolved from DNS.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AddrResolutionMode {
     /// Only use IPv6 addresses and ignore IPv4 entries.
     EnsureIpv6,

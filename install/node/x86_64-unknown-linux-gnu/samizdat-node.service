@@ -9,7 +9,7 @@ Restart=always
 RestartSec=1
 User=root
 Environment=RUST_BACKTRACE=1
-ExecStart=/usr/local/bin/samizdat-node --data /var/lib/samizdat/node/ --hubs testbed.hubfederation.com
+ExecStart=/usr/local/bin/samizdat-node --data /var/lib/samizdat/node/ --hubs testbed.hubfederation.com --resolution-mode=ensure-ipv4
 
 [Install]
 WantedBy=multi-user.target

@@ -27,7 +27,7 @@ pub struct SeriesOwner {
     name: String,
     /// The keypair that controls the series.
     keypair: Keypair,
-    /// The default time-to-leave. This is the reccommended minimum period peers should
+    /// The default time-to-leave. This is the recommended minimum period peers should
     /// wait to query the network for new connections.
     #[serde(with = "humantime_serde")]
     default_ttl: Duration,
@@ -361,7 +361,7 @@ impl SeriesRef {
     pub fn get_last_edition(&self) -> Result<Option<Edition>, crate::Error> {
         self.get_editions().next().transpose()
     }
-    
+
     /// Advances the series with the supplied edition, if the edition is valid.
     pub fn advance(&self, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {
@@ -412,7 +412,7 @@ struct EditionContent {
     /// collection.
     collection: CollectionRef,
     /// The timestamp at which this collection was created, allegedly. More recent
-    /// editions supeseed less recent editions.
+    /// editions superseeds less recent editions.
     timestamp: chrono::DateTime<chrono::Utc>,
     /// The recommended time-to-leave for this edition.
     #[serde(with = "humantime_serde")]
@@ -472,7 +472,7 @@ impl Edition {
     }
 
     /// The timestamp at which this collection was created, allegedly. More recent
-    /// editions supeseed less recent editions.
+    /// editions superseed less recent editions.
     #[inline(always)]
     pub fn timestamp(&self) -> chrono::DateTime<chrono::Utc> {
         self.signed.timestamp

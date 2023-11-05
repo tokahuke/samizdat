@@ -1,4 +1,5 @@
-//! Has anyone solved this problem yet!? This module defines [`balanced_or_tree`].
+//! Has anyone solved this problem yet!? This module defines the `balanced_or_tree!`
+//! macro.
 
 /// Takes a list of handler expressions and `or`s them together
 /// in a balanced tree. That is, instead of `a.or(b).or(c).or(d)`,

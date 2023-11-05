@@ -6,6 +6,51 @@ use samizdat_common::{pow::ProofOfWork, Hash, Key, Signed};
 
 use super::{access_token, delete, get, patch, post, ApiError, CLIENT};
 
+// Hubs:
+
+#[derive(Debug, Serialize)]
+pub struct PostHubRequest {
+    pub address: String,
+    pub resolution_mode: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostHubResponse {}
+
+pub async fn post_hub(request: PostHubRequest) -> Result<PostHubResponse, anyhow::Error> {
+    post("/_hubs", request).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetHubResponse {
+    pub address: String,
+    pub resolution_mode: String,
+}
+
+pub async fn get_all_hubs() -> Result<Vec<GetHubResponse>, anyhow::Error> {
+    get("/_hubs").await
+}
+
+pub async fn delete_hub(address: &str) -> Result<bool, anyhow::Error> {
+    delete(format!("/_hubs/{address}")).await
+}
+
+
+// Connections:
+
+#[derive(Debug, Deserialize)]
+pub struct GetConnectionResponse {
+    pub name: String,
+    pub status: String,
+    pub direct_addr: String,
+    pub reverse_addr: String,
+}
+
+pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow::Error> {
+    get("/_connections").await
+}
+
+
 // Objects:
 
 pub async fn post_object(

@@ -13,7 +13,7 @@ use crate::cli;
 
 lazy_static! {
     /// A lock that allows the _write_ holder to perform deletion operations on chunks.
-    /// This lock must be held in `write` mode by all operations attepmting to
+    /// This lock must be held in `write` mode by all operations attempting to
     /// non-atomically __delete__ chunks from the database. It must also be held in
     /// `read` mode by all operations writing to chunks.
     pub static ref CHUNK_RW_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::default();
@@ -119,6 +119,8 @@ pub enum Table {
     AccessRights,
     /// General key-value store for application (because `LocalStorage` is broken in Samizdat).
     KVStore,
+    /// Specification on which hubs to connect to.
+    Hubs,
 }
 
 impl Display for Table {

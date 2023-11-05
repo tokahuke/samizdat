@@ -26,6 +26,8 @@
               Manage your subscriptions to series.
             {% when AccessRight::ManageIdentities %}
               Manage your locally stored identities.
+            {% when AccessRight::ManageHubs %}
+              Manage your connection to Samizdat Hubs.
           {% endmatch %}
         </li>
       {% endfor %}

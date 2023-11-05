@@ -18,6 +18,7 @@ use tokio::task;
 use samizdat_common::{keyed_channel::KeyedChannel, logger};
 
 lazy_static::lazy_static! {
+    /// The command line arguments.
     pub static ref CLI: cli::Cli = cli::Cli::from_args();
     // pub static ref DB: rocksdb::DB = rocksdb::DB::open_default(&CLI.db_path).unwrap();
 }

@@ -86,7 +86,7 @@ impl Statistics {
     /// _inverse_ latency. In this model, not being able to answer a query yields `0.0`
     /// inverse latency, which is akin to infinite latency. The idea of _sampling_ a
     /// guess (instead of, e.g., taking the mean expected value) is a way of solving the
-    /// "Exploration-Exploitation dilemma" via Thompson Sampling. 
+    /// "Exploration-Exploitation dilemma" via Thompson Sampling.
     pub fn rand_priority(&self) -> f64 {
         // Use stuff from lock and get rid of it as fast as you can:
         let lock = self.0.read().expect("poisoned");

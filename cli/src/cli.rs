@@ -99,6 +99,16 @@ pub enum Command {
     // Download {
     //
     // },
+    /// Commands for managing hubs to which this node is connected.
+    Hub {
+        #[structopt(subcommand)]
+        command: HubCommand,
+    },
+    /// Commands for managing hubs to which this node is connected.
+    Connection {
+        #[structopt(subcommand)]
+        command: ConnectionCommand,
+    },
     /// Commands for managing series.
     Series {
         #[structopt(subcommand)]
@@ -130,7 +140,7 @@ pub enum Command {
         command: AuthCommand,
     },
     /// Triggers a vacuum in the node. Vacuums remove junk from node storage and are
-    /// run periodically, but you can trigger a manual run with this commmand.
+    /// run periodically, but you can trigger a manual run with this command.
     Vacuum {
         /// Use this flag to erase *all* OBJECT data in the node. Any data not backed up
         /// elsewhere WILL BE LOST. This command only affects objects; other entities,
@@ -143,7 +153,10 @@ pub enum Command {
 impl Command {
     pub async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            Command::Up => { /* this is a no-op */ Ok(()) },
+            Command::Up => {
+                /* this is a no-op */
+                Ok(())
+            }
             Command::Init { name } => commands::init(name).await,
             Command::Import { private_key } => commands::import(private_key).await,
             Command::Commit {
@@ -166,6 +179,8 @@ impl Command {
                 });
                 commands::upload(&file, content_type, !no_bookmark, draft).await
             }
+            Command::Hub { command } => command.execute().await,
+            Command::Connection { command } => command.execute().await,
             Command::Series { command } => command.execute().await,
             Command::Edition { command } => command.execute().await,
             Command::Collection { command } => command.execute().await,
@@ -184,6 +199,46 @@ impl Command {
         }
     }
 }
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum HubCommand {
+    New {
+        address: String,
+        resolution_mode: String,
+    },
+    Ls,
+    Rm {
+        address: String,
+    },
+}
+
+impl HubCommand {
+    async fn execute(self) -> Result<(), anyhow::Error> {
+        match self {
+            HubCommand::New {
+                address,
+                resolution_mode,
+            } => commands::hub::new(address, resolution_mode).await,
+            HubCommand::Ls => commands::hub::ls().await,
+            HubCommand::Rm { address } => commands::hub::rm(address).await,
+        }
+    }
+}
+
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum ConnectionCommand {
+    Ls,
+}
+
+impl ConnectionCommand {
+    async fn execute(self) -> Result<(), anyhow::Error> {
+        match self {
+            ConnectionCommand::Ls => commands::connection::ls().await,
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {

@@ -8,4 +8,3 @@ mod multiplexed;
 
 pub use self::channel_manager::{ChannelManager, ChannelReceiver, ChannelSender};
 pub use self::connection_manager::ConnectionManager;
-pub use self::file_transfer::{ReceivedItem, ReceivedObject};
