@@ -17,6 +17,9 @@ curl $urlprefix/samizdat-node > samizdat-node
 curl $urlprefix/samizdat > samizdat
 curl $urlprefix/samizdat-node.service > samizdat-node.service
 
+chmod +x samizdat-node
+chmod +x samizdat
+
 (systemctl stop samizdat-node || echo 'No running node detected')
 cp samizdat-node /usr/local/bin
 cp samizdat /usr/local/bin

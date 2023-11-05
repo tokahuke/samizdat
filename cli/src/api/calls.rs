@@ -35,7 +35,6 @@ pub async fn delete_hub(address: &str) -> Result<bool, anyhow::Error> {
     delete(format!("/_hubs/{address}")).await
 }
 
-
 // Connections:
 
 #[derive(Debug, Deserialize)]
@@ -49,7 +48,6 @@ pub struct GetConnectionResponse {
 pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow::Error> {
     get("/_connections").await
 }
-
 
 // Objects:
 

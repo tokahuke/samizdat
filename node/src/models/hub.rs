@@ -30,14 +30,17 @@ impl Droppable for Hub {
 
 impl Hub {
     /// Inserts the current identity in the database using the supplied [`WriteBatch`].
-    pub fn insert(&self, batch: &mut WriteBatch) {
+    pub fn insert(&self) -> Result<(), crate::Error> {
         let hub = self.clone();
         tokio::spawn(async move { crate::hubs().insert(hub).await });
-        batch.put_cf(
+
+        db().put_cf(
             Table::Hubs.get(),
             self.address.to_string(),
             bincode::serialize(&self).expect("can serialize"),
-        );
+        )?;
+
+        Ok(())
     }
 
     /// Lists all hubs currently in the database.

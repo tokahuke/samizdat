@@ -10,7 +10,6 @@ use warp::Filter;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
-use crate::db;
 use crate::models::Droppable;
 use crate::models::Hub;
 
@@ -49,9 +48,7 @@ fn post_hub() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
                 resolution_mode: request.resolution_mode,
             };
 
-            let mut batch = rocksdb::WriteBatch::default();
-            hub.insert(&mut batch);
-            db().write(batch)?;
+            hub.insert()?;
 
             Ok(Response {})
         })

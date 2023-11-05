@@ -225,7 +225,6 @@ impl HubCommand {
     }
 }
 
-
 #[derive(Clone, Debug, StructOpt)]
 pub enum ConnectionCommand {
     Ls,
@@ -238,7 +237,6 @@ impl ConnectionCommand {
         }
     }
 }
-
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {

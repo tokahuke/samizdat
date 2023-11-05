@@ -394,12 +394,20 @@ impl Hubs {
             .collect();
     }
 
-    pub async fn insert(&self, hub_model: models::Hub) {        
+    pub async fn insert(&self, hub_model: models::Hub) {
+        let mut hubs = self.hubs.write().await;
         let mut resolved_addresses = vec![];
 
         let outcome: Result<(), crate::Error> = try {
-            for address in hub_model.address.resolve(hub_model.resolution_mode).await? {
-                resolved_addresses.push(address);
+            for (name, address) in hub_model.address.resolve(hub_model.resolution_mode).await? {
+                let is_already_inserted = hubs.iter().any(|conn| {
+                    conn.address().direct_addr() == address.direct_addr()
+                        && conn.address().reverse_addr() == address.reverse_addr()
+                });
+
+                if !is_already_inserted {
+                    resolved_addresses.push((name, address));
+                }
             }
         };
 
@@ -423,12 +431,11 @@ impl Hubs {
 
         log::debug!("Inserting connection(s) for {}", hub_model.address);
 
-        let mut hubs = self.hubs.write().await;
         *hubs = stream::iter(hubs.iter().cloned())
             .chain(hub_stream)
             .collect()
             .await;
-        
+
         log::info!("Connection(s) for {} created", hub_model.address);
     }
 
@@ -444,8 +451,9 @@ impl Hubs {
 
         for hub_model in all_hub_models {
             let outcome: Result<(), crate::Error> = try {
-                for address in hub_model.address.resolve(hub_model.resolution_mode).await? {
-                    resolved_addresses.push(address);
+                for (name, address) in hub_model.address.resolve(hub_model.resolution_mode).await? {
+                    // TODO: disallow creating more than one connection to the same HubAddr.
+                    resolved_addresses.push((name, address));
                 }
             };
 
