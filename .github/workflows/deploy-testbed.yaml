@@ -79,6 +79,8 @@ jobs:
            systemctl enable --now samizdat-hub &&
            systemctl enable --now samizdat-node &&
            systemctl enable --now samizdat-proxy &&
+           # Link to local hub:
+           samizdat hub new testbed.hubfederation.com UseBoth &&
            # Get Samizdat:
            samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM &&
            # Samizdat blog:
