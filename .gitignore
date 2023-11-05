@@ -9,3 +9,5 @@
 dist/
 .xwin-cache
 network.json
+**/*.tfvars
+**/.terraform

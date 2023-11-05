@@ -14,8 +14,7 @@ class Samizdat < Formula
     service do
         run [
             opt_bin/"samizdat-node",
-            "--data", "/var/lib/samizdat/node/",
-            "--hubs", "testbed.hubfederation.com"
+            "--data", "/var/lib/samizdat/node/"
         ]
         log_path "/var/log/samizdat-node-stdout.log"
         error_log_path "/var/log/samizdat-node-stderr.log"
