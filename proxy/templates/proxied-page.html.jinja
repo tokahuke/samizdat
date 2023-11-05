@@ -124,7 +124,7 @@
           localStorage.setItem(storageKey, pageCount + 1);
         }
 
-        if (pageCount % 3 == 0) {
+        if (pageCount % 10 == 0) {
           document.getElementById("{{ rand }}-proxy-overlay").classList.remove("{{ rand }}-hidden");
         }
       })();
