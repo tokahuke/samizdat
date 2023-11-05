@@ -22,4 +22,8 @@ class Samizdat < Formula
         keep_alive true
         restart_delay 1
     end
+
+    def post_install
+        system "samizdat", "hub", "new", "testbed.hubfederation.com", "UseBoth"   
+    end
 end

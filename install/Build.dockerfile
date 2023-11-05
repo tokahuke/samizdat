@@ -1,4 +1,4 @@
-FROM rust:1.60-buster
+FROM rust:1.73-buster
 
 # Switch to nightly:
 RUN rustup default nightly
