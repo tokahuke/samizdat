@@ -8,6 +8,15 @@ export enum AccessRight {
   ManageCollections = "ManageCollections",
   ManageSeries = "ManageSeries",
   ManageSubscriptions = "ManageSubscriptions",
+  ManageHubs = "ManageHubs",
+}
+
+/**
+ * Output from API. Therefore, snake_case.
+ */
+export interface Hub {
+  address: string,
+  resolution_mode: string,
 }
 
 /**
@@ -61,12 +70,12 @@ export interface Edition {
 }
 
 export enum SubscriptionKind {
-  FullInventory = "FullInventory"
+  FullInventory = "FullInventory",
 }
 
 export interface Subscription {
-  public_key: Array<number>,
-  kind: SubscriptionKind, 
+  public_key: Array<number>;
+  kind: SubscriptionKind;
 }
 
 export class Samizdat {
@@ -102,6 +111,37 @@ export class Samizdat {
     throw new Error(
       `Current scope needs any of ${necessaryRights} but only has ${this.accessRights}`
     );
+  }
+
+  async postHub(address: string, resolutionMode: string) {
+    await this._ensureRights([AccessRight.ManageHubs]);
+    const response = await call(
+      "POST",
+      `/_hubs`,
+      JSON.stringify({
+        address,
+        resolution_mode: resolutionMode,
+      })
+    );
+    return await response.text();
+  }
+
+  async getHub(address: string) {
+    await this._ensureRights([AccessRight.ManageHubs]);
+    const response = await call("GET", `/_hubs/${address}`);
+    return (await response.json())["Ok"] as Hub;
+  }
+
+  async getHubs() {
+    await this._ensureRights([AccessRight.ManageHubs]);
+    const response = await call("GET", `/_hubs`);
+    return (await response.json())["Ok"] as Array<Hub>;
+  }
+
+  async deleteHub(address: string) {
+    await this._ensureRights([AccessRight.ManageHubs]);
+    const response = await call("DELETE", `/_hubs/${address}`);
+    return (await response.json())["Ok"] as boolean;
   }
 
   async getObject(object: string) {
@@ -173,16 +213,20 @@ export class Samizdat {
   }
 
   async getItem(collection: string, path: string) {
-    const response = await call("GET", `/_collections${collection}${path}`);
+    const response = await call("GET", `/_collections/${collection}${path}`);
     return await response.blob();
   }
 
-  async postSeriesOwner(seriesOwnerName: string, keypair = null, isDraft = false) {
+  async postSeriesOwner(
+    seriesOwnerName: string,
+    keypair = null,
+    isDraft = false
+  ) {
     await this._ensureRights([AccessRight.ManageSeries]);
     const response = await call("POST", `/_seriesowners`, {
       series_owner_name: seriesOwnerName,
       keypair,
-      is_draft: isDraft
+      is_draft: isDraft,
     });
     return (await response.json())["Ok"] as object;
   }
@@ -244,9 +288,15 @@ export class Samizdat {
     return (await response.json())["Ok"] as Subscription | null;
   }
 
-  async postSubscription(seriesKey: string, kind: SubscriptionKind = SubscriptionKind.FullInventory) {
+  async postSubscription(
+    seriesKey: string,
+    kind: SubscriptionKind = SubscriptionKind.FullInventory
+  ) {
     await this._ensureRights([AccessRight.ManageSubscriptions]);
-    const response = await call("POST", `/_subscriptions`, { series_key: seriesKey, kind });
+    const response = await call("POST", `/_subscriptions`, {
+      series_key: seriesKey,
+      kind,
+    });
     return (await response.json())["Ok"] as string;
   }
 

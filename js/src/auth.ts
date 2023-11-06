@@ -20,7 +20,7 @@ async function isAuthenticated(accessRights: Array<AccessRight>) {
 async function doAuthenticationFlow(accessRights: Array<AccessRight>) {
   interface AuthenticationDetail {
     status: "success" | "fail" | "canceled";
-    statusCode: number,
+    statusCode: number;
   }
 
   const screen = window.screen;
@@ -28,7 +28,7 @@ async function doAuthenticationFlow(accessRights: Array<AccessRight>) {
     width: screen.width / 4.0,
     height: (screen.height * 2.0) / 3.0,
   };
-  const query = accessRights.map(right => `right=${right}`).join("&");
+  const query = accessRights.map((right) => `right=${right}`).join("&");
   const authWindow = window.open(
     `/_register?${query}`,
     "RegisterApp",
