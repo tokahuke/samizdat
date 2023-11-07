@@ -49,15 +49,12 @@ impl NodeServer {
         let hash = *object.hash();
 
         log::info!("Found hash {}", hash);
-        let peer_addr = match resolution
+        let Some(peer_addr) = resolution
             .location_message_riddle
             .resolve::<ChannelAddr>(&hash)
-        {
-            Some(socket_addr) => socket_addr,
-            None => {
-                log::warn!("Failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::NotFound;
-            }
+        else {
+            log::warn!("Failed to resolve message riddle after resolving content riddle");
+            return ResolutionResponse::NotFound;
         };
 
         log::info!("Found peer at {peer_addr}");
@@ -86,9 +83,7 @@ impl NodeServer {
     async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         log::info!("got item {:?}", resolution);
 
-        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
-            content_riddle
-        } else {
+        let Some(content_riddle) = resolution.content_riddles.first() else {
             return ResolutionResponse::EmptyResolution;
         };
         let item = match CollectionItem::find(&content_riddle) {
@@ -111,15 +106,12 @@ impl NodeServer {
         let hash = item.locator().hash();
 
         log::info!("found hash {}", hash);
-        let peer_addr = match resolution
+        let Some(peer_addr) = resolution
             .location_message_riddle
             .resolve::<ChannelAddr>(&hash)
-        {
-            Some(socket_addr) => socket_addr,
-            None => {
-                log::warn!("failed to resolve message riddle after resolving content riddle");
-                return ResolutionResponse::NotFound;
-            }
+        else {
+            log::warn!("failed to resolve message riddle after resolving content riddle");
+            return ResolutionResponse::NotFound;
         };
 
         log::info!("found peer at {}", peer_addr);

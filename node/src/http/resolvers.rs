@@ -214,7 +214,8 @@ pub async fn resolve_series(
     log::info!("Trying to find path in each edition");
     let mut empty = true;
 
-    for edition in series.get_editions() {
+    // Was a `for`. Now, we look only at the top edition.
+    if let Some(edition) = series.get_editions().next() {
         let edition = edition?;
         empty = false;
         log::info!("Trying collection {:?}", edition.collection());
