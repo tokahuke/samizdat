@@ -381,6 +381,8 @@ pub async fn recv_item(
         // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
         // the object in the database.
         log::info!("Object {} exists. Ending transmission", object_ref.hash());
+        // Need to reaffirm the collection-object connection:
+        header.item.insert()?;
         ProceedMessage::Cancel
             .send(&sender, &transfer_cipher)
             .await?;

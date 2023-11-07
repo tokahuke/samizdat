@@ -16,7 +16,7 @@ use crate::system::{ReceivedItem, ReceivedObject};
 pub struct Resolved {
     /// The body to be sent to the client, streaming the object's content.
     body: Body,
-    /// The cotent type of this object.
+    /// The content type of this object.
     content_type: String,
     /// Extra headers to be sent in the HTTP response.
     ext_headers: Vec<(&'static str, String)>,
@@ -161,7 +161,7 @@ pub async fn resolve_item(
     }
 
     log::info!("Item {locator} not found locally. Querying hubs");
-    match hubs().query(locator.hash(), QueryKind::Object).await {
+    match hubs().query(locator.hash(), QueryKind::Item).await {
         // This should not be possible!!
         Some(ReceivedItem::ExistingObject(object)) => {
             log::warn!(
@@ -211,7 +211,7 @@ pub async fn resolve_series(
         }
     }
 
-    log::info!("Trying to find path in each edition");
+    log::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
     // Was a `for`. Now, we look only at the top edition.

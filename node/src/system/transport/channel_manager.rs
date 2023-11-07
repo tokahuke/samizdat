@@ -29,27 +29,27 @@ impl ChannelManager {
         peer_addr: SocketAddr,
         drop_mode: DropMode,
     ) -> Result<Arc<Multiplexed>, crate::Error> {
-        log::info!("fetching connection for {}", peer_addr);
+        log::debug!("fetching connection for {}", peer_addr);
 
         if let Some(multiplexed) = self.connections.read().await.get(&peer_addr) {
-            log::info!("found existing connection");
+            log::debug!("found existing connection");
             if !multiplexed.is_closed() {
                 return Ok(multiplexed.clone());
             } else {
-                log::info!("existing connection already closed. Create a new one!");
+                log::debug!("existing connection already closed. Create a new one!");
             }
         }
 
         let mut guard = self.connections.write().await;
-        log::info!("connection write guard acquired");
+        log::debug!("connection write guard acquired");
 
         // Possible TOCTOU: check again.
         if let Some(multiplexed) = guard.remove(&peer_addr) {
-            log::info!("found existing connection on recheck");
+            log::debug!("found existing connection on recheck");
             if !multiplexed.is_closed() {
                 return Ok(multiplexed);
             } else {
-                log::info!("existing connection already closed. Create a new one!");
+                log::debug!("existing connection already closed. Create a new one!");
             }
         }
 

@@ -150,7 +150,7 @@ impl Inventory {
 /// An item inside a collection.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
-    /// The collectiion this item belongs to.
+    /// The collection this item belongs to.
     pub collection: CollectionRef,
     /// The path of this item in the collection.
     pub name: ItemPathBuf,
@@ -179,7 +179,7 @@ impl CollectionItem {
     /// Checks whether a collection item is valid, that is
     ///
     /// 1. If the inclusion proof is valid for the claimed collection.
-    /// 2. If the clamed name corresponds to the claimed key hash in the inclusion proof.
+    /// 2. If the claimed name corresponds to the claimed key hash in the inclusion proof.
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
         let key = Hash::hash(self.name.0.as_bytes());
