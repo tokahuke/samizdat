@@ -14,6 +14,8 @@ cd $tmpdir &&
 curl $urlprefix/samizdat-hub > samizdat-hub &&
 curl $urlprefix/samizdat-hub.service > samizdat-hub.service &&
 
+chmod +x samizdat-hub
+
 cp samizdat-node /usr/local/bin &&
 cp samizdat /usr/local/bin &&
 cp samizdat-node.service /etc/systemd/system/samizdat-server.service &&
