@@ -192,7 +192,7 @@ impl ObjectMessage {
         // Stream content
         let cipher = TransferCipher::new(&hash, &self.nonce);
         let content_size = self.metadata.content_size;
-        let mut transfered_size = 0;
+        let mut transferred_size = 0;
         let content_stream =
             receiver
                 .recv_many(MAX_STREAM_SIZE)
@@ -206,13 +206,13 @@ impl ObjectMessage {
                         Decompressor::new(Cursor::new(compressed_chunk), 4096)
                             .read_to_end(&mut chunk)?;
 
-                        transfered_size += chunk.len();
+                        transferred_size += chunk.len();
 
-                        if transfered_size <= content_size {
+                        if transferred_size <= content_size {
                             Ok(chunk)
                         } else {
                             Err(format!(
-                                "Transfered size of {transfered_size} exceeds advertized size \
+                                "Transferred size of {transferred_size} exceeds advertized size \
                                 of {content_size}"
                             )
                             .into())
@@ -381,7 +381,8 @@ pub async fn recv_item(
         // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
         // the object in the database.
         log::info!("Object {} exists. Ending transmission", object_ref.hash());
-        // Need to reaffirm the collection-object connection:
+        // Need to reaffirm the collection-object connection (e.g. the object is there,
+        // but is part of another collection and the link is not yet established):
         header.item.insert()?;
         ProceedMessage::Cancel
             .send(&sender, &transfer_cipher)

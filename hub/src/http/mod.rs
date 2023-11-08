@@ -1,5 +1,7 @@
 //! HTTP API for the Samizdat Hub.
 
+mod blacklisted_ips;
+
 use futures::{Future, StreamExt};
 use serde_derive::Deserialize;
 use std::net::SocketAddr;
@@ -82,7 +84,7 @@ pub fn serve() -> impl Future<Output = ()> {
 
 /// All the endpoints for the Samizdat HTTP API.
 fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(connected_ips(), resolution_order())
+    balanced_or_tree!(connected_ips(), resolution_order(), blacklisted_ips::api())
 }
 
 /// Returns all the currently connected IPs to this hub.

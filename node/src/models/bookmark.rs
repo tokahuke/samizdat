@@ -1,4 +1,4 @@
-//! Bookmarks prevent objects from being autmatically deleted from the database.
+//! Bookmarks prevent objects from being automatically deleted from the database.
 
 use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};

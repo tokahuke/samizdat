@@ -60,7 +60,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                         hyper::body::Body::wrap_stream(response.bytes_stream())
                     };
 
-                    // Builsd response:
+                    // Builds response:
                     http::Response::builder()
                         .status(status)
                         .header("Content-Type", content_type)

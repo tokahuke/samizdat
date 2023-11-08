@@ -3,16 +3,14 @@ from __future__ import annotations
 import json
 import subprocess
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
 
 
 class PortBroker:
     def __init__(self) -> None:
         self.current = 45100
-        self.ports: Dict[str, int] = {}
-        self.rev_ports: Dict[str, int] = {}
+        self.ports: dict[str, int] = {}
+        self.rev_ports: dict[str, int] = {}
 
     def port_for(self, interface_id: str) -> int:
         try:
@@ -37,12 +35,12 @@ class Node:
     def port(self) -> int:
         return PORT_BROKER.port_for(self.node_id)
 
-    def report_config(self) -> Dict:
+    def report_config(self) -> dict:
         return {
             "http-port": self.port(),
         }
 
-    def command(self, hubs: List[Hub]) -> List[str]:
+    def command(self, hubs: list[Hub]) -> list[str]:
         return [
             "cargo",
             "run",
@@ -72,13 +70,13 @@ class Hub:
     def address(self) -> str:
         return f"[::1]:{self.direct_port()}/{self.reverse_port()}"
 
-    def report_config(self) -> Dict:
+    def report_config(self) -> dict:
         return {
             "address": self.address(),
             "http-port": self.http_port(),
         }
 
-    def command(self, hubs: List[Hub]) -> List[str]:
+    def command(self, hubs: list[Hub]) -> list[str]:
         return [
             "cargo",
             "run",
@@ -95,9 +93,9 @@ class Hub:
 
 @dataclass
 class Graph:
-    nodes: List[str]
-    hubs: List[str]
-    connections: List[Tuple[str, str]]
+    nodes: list[str]
+    hubs: list[str]
+    connections: list[tuple[str, str]]
 
     def run(self) -> None:
         assert len(set(self.nodes + self.hubs)) == len(self.nodes + self.hubs), \

@@ -21,6 +21,7 @@ use samizdat_common::rpc::*;
 use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
 
+use crate::models::blacklisted_ip::BlacklistedIp;
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
 use crate::CLI;
@@ -315,6 +316,14 @@ pub async fn run_direct(
             // Get peer address:
             let client_addr = utils::socket_to_canonical(connection.remote_address());
             log::debug!("Incoming connection from {client_addr}");
+
+            // Validate if address is not blacklisted:
+            if BlacklistedIp::get(client_addr.ip())
+                .expect("db error")
+                .is_some()
+            {
+                return None;
+            }
 
             // Set up server:
             let transport = BincodeOverQuic::new(connection, MAX_LENGTH);

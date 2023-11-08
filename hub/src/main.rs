@@ -3,6 +3,7 @@
 mod cli;
 mod db;
 mod http;
+mod models;
 mod replay_resistance;
 mod rpc;
 mod slow_compiler_workaround;

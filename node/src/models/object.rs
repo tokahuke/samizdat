@@ -321,7 +321,7 @@ impl Droppable for ObjectRef {
             return Ok(());
         };
 
-        // // Neved do this! You risk corrupting unrelated objects.
+        // // Never do this! You risk corrupting unrelated objects.
         // for hash in &metadata.hashes {
         //     batch.delete_cf(Table::ObjectChunks.get(), hash);
         // }
@@ -484,7 +484,7 @@ impl ObjectRef {
             let mut buffer = header.buffer(); // start the first chunk with the serialized header
             let mut hashes = Vec::new();
             let mut source = source.into_iter();
-            // Locks are expected to be unfrequent and short-lived. And we need this function
+            // Locks are expected to be infrequent and short-lived. And we need this function
             // not to be async (why?).
             let chunk_lock = CHUNK_RW_LOCK.blocking_read();
 
@@ -635,7 +635,7 @@ impl ObjectRef {
                 maybe_header = Some(header);
             }
 
-            // Warn of incompatible chunk size (big chunks are dealt with somehwere else):
+            // Warn of incompatible chunk size (big chunks are dealt with somewhere else):
             if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
                 log::warn!(
                     "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
@@ -665,7 +665,7 @@ impl ObjectRef {
             .collect::<Vec<_>>();
         if !not_arrived.is_empty() {
             return Err(format!(
-                "Insuficient chunks for object {} received: missing {:?}",
+                "Insufficient chunks for object {} received: missing {:?}",
                 merkle_tree.root(),
                 not_arrived,
             )

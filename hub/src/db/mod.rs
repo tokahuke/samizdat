@@ -71,6 +71,8 @@ pub enum Table {
     Migrations,
     /// The list of all recent nonces. This is to mitigate replay attacks.
     RecentNonces,
+    /// Blacklisted IP addresses
+    BlacklistedIps,
 }
 
 impl Display for Table {
