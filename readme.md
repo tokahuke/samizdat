@@ -93,6 +93,7 @@ This is just the tip of the iceberg, however! Check out more [here](https://prox
 * `proxy`: a proxy to bridge a Samizdat Node to the open Web, used in [https://proxy.hubfederation.com](https://proxy.hubfederation.com).
 * `js`: the SamizdatJS library, with enables Web applications to interface with the local Samizdat node. 
 * `install`: installation artifacts for end users in different platforms.
+* `simulate_net`: spawn your own network locally. Necessary for integration tests.
 * `blockchain`: tentative smart contract for Samizdat identity. 
 
 ## Licensing
