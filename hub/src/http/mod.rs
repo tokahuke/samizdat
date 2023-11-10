@@ -84,7 +84,14 @@ pub fn serve() -> impl Future<Output = ()> {
 
 /// All the endpoints for the Samizdat HTTP API.
 fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(connected_ips(), resolution_order(), blacklisted_ips::api())
+    balanced_or_tree!(
+        connected_ips(),
+        resolution_order(),
+        blacklisted_ips::api(),
+        warp::get().and(warp::path::end()).map(|| {
+            warp::reply::with_header(include_str!("../index.html"), "Content-Type", "text/html")
+        }),
+    )
 }
 
 /// Returns all the currently connected IPs to this hub.

@@ -49,6 +49,7 @@
         "reconnector",
         "redirectable",
         "Referer",
+        "refreshable",
         "reqwest",
         "rgba",
         "rngs",
@@ -72,11 +73,13 @@
         "Tokahuke",
         "tree",
         "trunc",
+        "tungstenite",
         "unbookmark",
         "uninstrumented",
         "unmark",
         "untuple",
         "Vavilov",
+        "webbrowser",
         "webpki"
     ],
     "cSpell.ignoreWords": [
@@ -85,5 +88,6 @@
         "certonly",
         "fullchain",
         "privkey"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "basic"
 }

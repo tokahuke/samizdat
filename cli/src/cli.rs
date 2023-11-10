@@ -81,6 +81,9 @@ pub enum Command {
         /// Set a custom time-to-leave for the commits.
         #[structopt(long)]
         ttl: Option<String>,
+        /// Suppresses opening web browser on first commit.
+        #[structopt(long)]
+        no_browser: bool,
     },
     /// Uploads a single file as an object.
     Upload {
@@ -164,8 +167,8 @@ impl Command {
                 release,
                 skip_build,
                 no_announce,
-            } => commands::commit(&ttl, skip_build, release, no_announce).await,
-            Command::Watch { ttl } => commands::watch(&ttl).await,
+            } => commands::commit(&ttl, skip_build, release, no_announce, None).await,
+            Command::Watch { ttl, no_browser } => commands::watch(&ttl, no_browser).await,
             Command::Upload {
                 file,
                 content_type,

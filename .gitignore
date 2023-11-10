@@ -8,6 +8,6 @@
 .Samizdat.priv
 dist/
 .xwin-cache
-network.json
+network.ryan
 **/*.tfvars
 **/.terraform

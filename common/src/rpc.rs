@@ -13,8 +13,8 @@ pub enum SetPropertyResponse {
     /// The new value is now in place.
     Set,
     /// The requested property is not supported by the hub.
-    Unsuported,
-    /// The set property request is invalid, i.e., a _node side_ error has occured.
+    Unsupported,
+    /// The set property request is invalid, i.e., a _node side_ error has occurred.
     Error(String),
 }
 
@@ -88,7 +88,7 @@ pub struct EditionAnnouncement {
     pub rand: Hash,
 }
 
-/// A request for an identity within the newtork.
+/// A request for an identity within the network.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityRequest {
     /// The riddle corresponding to the identity name.
@@ -142,7 +142,7 @@ pub struct Resolution {
     pub kind: QueryKind,
 }
 
-/// A promisse of a possible peer in the network that might know the answer to a given query.
+/// A promise of a possible peer in the network that might know the answer to a given query.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
     /// The address of the peer.

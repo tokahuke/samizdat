@@ -11,6 +11,7 @@ use anyhow::Context;
 use futures::prelude::*;
 use futures::stream;
 use notify::{RecursiveMode, Watcher};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -21,7 +22,7 @@ use tokio::sync::mpsc;
 use samizdat_common::{Hash, PrivateKey};
 
 use crate::api;
-use crate::html::maybe_proxy_page;
+use crate::html::proxy_page;
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
@@ -120,6 +121,7 @@ pub async fn commit(
     skip_build: bool,
     is_release: bool,
     no_announce: bool,
+    refresh_socket: Option<SocketAddr>,
 ) -> Result<(), anyhow::Error> {
     // Oh, generators would be so nice now...
     fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -190,7 +192,7 @@ pub async fn commit(
                 .to_string();
 
             let hash = api::post_object(
-                maybe_proxy_page(path, &fs::read(&path)?).into_owned(),
+                proxy_page(path, &fs::read(&path)?, refresh_socket).into_owned(),
                 &content_type,
                 is_release,
                 !is_release,
@@ -257,7 +259,7 @@ pub async fn commit(
     Ok(())
 }
 
-pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
+pub async fn watch(ttl: &Option<String>, no_browser: bool) -> Result<(), anyhow::Error> {
     /// Minimum time you have to wait to trigger rebuild.
     const MIN_WAIT: Duration = Duration::from_secs(1);
 
@@ -294,6 +296,27 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
 
     watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
 
+    // Spawn refresh WebSocket:
+    let refresh_socket = crate::ws::RefreshSocket::init()?;
+
+    log::info!("Starting rebuild loop");
+
+    // Run the commit for the first time.
+    if let Err(err) = commit(ttl, false, false, true, Some(refresh_socket.addr())).await {
+        println!("Error while rebuilding: {err:?}");
+    }
+
+    // Load browser
+    if !no_browser {
+        if let Err(err) = webbrowser::open(&format!(
+            "http://localhost:{}/_series/{}",
+            crate::access_token::port(),
+            private_manifest.public_key_debug
+        )) {
+            println!("WARNING: could not open browser: {err}")
+        }
+    }
+
     // Print watch banner:
     const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
     println!();
@@ -302,14 +325,10 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
         crate::access_token::port(),
         private_manifest.public_key_debug
     );
-    println!();
-
-    log::info!("Starting rebuild loop");
-
-    // Run the commit for the first time.
-    if let Err(err) = commit(ttl, false, false, true).await {
-        println!("Error while rebuilding: {err:?}");
+    if !no_browser {
+        println!("  Opening in web browser...")
     }
+    println!();
 
     // Last time the commit was triggered.
     let mut last_exec = Instant::now();
@@ -321,8 +340,20 @@ pub async fn watch(ttl: &Option<String>) -> Result<(), anyhow::Error> {
 
         if watched_files_changed && now > last_exec + MIN_WAIT {
             log::info!("Rebuild triggered");
-            if let Err(err) = commit(ttl, false, false, true).await {
+            if let Err(err) = commit(ttl, false, false, true, Some(refresh_socket.addr())).await {
                 println!("Error while rebuilding: {err:?}");
+            } else {
+                refresh_socket.trigger_refresh();
+
+                // Print watch banner:
+                const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
+                println!();
+                println!(
+                    "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
+                    crate::access_token::port(),
+                    private_manifest.public_key_debug
+                );
+                println!();
             }
 
             last_exec = Instant::now();

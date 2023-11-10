@@ -26,7 +26,7 @@ impl BlacklistedIp {
         )?;
 
         if let Some(result) = maybe_result {
-            Ok(bincode::deserialize(&result)?)
+            Ok(Some(bincode::deserialize(&result)?))
         } else {
             Ok(None)
         }

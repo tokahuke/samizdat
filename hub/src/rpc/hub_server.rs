@@ -82,7 +82,7 @@ impl Hub for HubServer {
         _key: String,
         _value: serde_json::Value,
     ) -> SetPropertyResponse {
-        self.throttle(|_| async { SetPropertyResponse::Unsuported })
+        self.throttle(|_| async { SetPropertyResponse::Unsupported })
             .await
     }
 

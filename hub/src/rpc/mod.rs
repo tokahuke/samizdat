@@ -305,6 +305,15 @@ pub async fn run_direct(
         })
         .filter_map(|connecting| async move {
             let remote_addr = utils::socket_to_canonical(connecting.remote_address());
+
+            // Validate if address is not blacklisted:
+            if BlacklistedIp::get(remote_addr.ip())
+                .expect("db error")
+                .is_some()
+            {
+                return None;
+            }
+
             connecting
                 .await
                 .map_err(|err| {
@@ -316,14 +325,6 @@ pub async fn run_direct(
             // Get peer address:
             let client_addr = utils::socket_to_canonical(connection.remote_address());
             log::debug!("Incoming connection from {client_addr}");
-
-            // Validate if address is not blacklisted:
-            if BlacklistedIp::get(client_addr.ip())
-                .expect("db error")
-                .is_some()
-            {
-                return None;
-            }
 
             // Set up server:
             let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
@@ -367,6 +368,16 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
             })
         })
         .filter_map(|connecting| async move {
+            let remote_addr = utils::socket_to_canonical(connecting.remote_address());
+
+            // Validate if address is not blacklisted:
+            if BlacklistedIp::get(remote_addr.ip())
+                .expect("db error")
+                .is_some()
+            {
+                return None;
+            }
+
             connecting
                 .await
                 .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
@@ -375,7 +386,6 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
         .for_each_concurrent(Some(CLI.max_connections), |connection| async move {
             // Get peer address:
             let client_addr = utils::socket_to_canonical(connection.remote_address());
-
             log::debug!("Incoming connection from {client_addr}");
 
             let transport = BincodeOverQuic::new(connection, MAX_LENGTH);

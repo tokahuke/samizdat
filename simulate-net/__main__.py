@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import json
 import subprocess
+import traceback
+import ryan # pip install ryan-lang
 
 from dataclasses import dataclass
+from time import sleep
+
+
+def wait_all(processes: list[subprocess.Popen]) -> None:
+    for process in processes:
+        process.wait()
 
 
 class PortBroker:
     def __init__(self) -> None:
         self.current = 45100
         self.ports: dict[str, int] = {}
-        self.rev_ports: dict[str, int] = {}
+        self.rev_ports: dict[int, str] = {}
 
     def port_for(self, interface_id: str) -> int:
         try:
@@ -40,17 +48,21 @@ class Node:
             "http-port": self.port(),
         }
 
-    def command(self, hubs: list[Hub]) -> list[str]:
+    def command(self) -> list[str]:
         return [
-            "cargo",
-            "run",
-            "--release",
-            "--bin=samizdat-node",
-            "--",
+            "target/debug/samizdat-node",
             f"--port={self.port()}",
             f"--data=data/{self.node_id}",
-            "--hubs",
-            *[hub.address() for hub in hubs],
+        ]
+
+    def connect_to_hub(self, hub: Hub) -> list[str]:
+        return [
+            "target/debug/samizdat",
+            f"--data=data/{self.node_id}",
+            "hub",
+            "new",
+            hub.address(),
+            "EnsureIpv4",
         ]
 
 
@@ -78,11 +90,7 @@ class Hub:
 
     def command(self, hubs: list[Hub]) -> list[str]:
         return [
-            "cargo",
-            "run",
-            "--release",
-            "--bin=samizdat-hub",
-            "--",
+            "target/debug/samizdat-hub",
             f"--addresses={self.address()}",
             f"--data=data/{self.hub_id}",
             f"--http-port={self.http_port()}",
@@ -116,7 +124,7 @@ class Graph:
             connections.setdefault(origin, []).append(dest_hub)
 
         node_commands = [
-            node.command(connections.get(node_id, [])) for node_id, node in nodes.items()
+            node.command() for node in nodes.values()
         ]
         hub_commands = [
             hub.command(connections.get(hub_id, [])) for hub_id, hub in hubs.items()
@@ -134,13 +142,32 @@ class Graph:
         print("Configuration:", json.dumps(report_config, indent=4, ensure_ascii=False))
         input("Press any key to continue...")
 
+        # Compile stuff:
+        wait_all([
+            subprocess.Popen(["cargo", "build", "--bin", "samizdat-node"]),
+            subprocess.Popen(["cargo", "build", "--bin", "samizdat-hub"]),
+            subprocess.Popen(["cargo", "build", "--bin", "samizdat"]),
+        ])
+
+        # Launch processes:
         subprocesses = [
             subprocess.Popen(command) for command in node_commands + hub_commands
         ]
+        sleep(1.0)
+
+        # Set connections up
+        wait_all([
+            subprocess.Popen(nodes[origin].connect_to_hub(hubs[dest]))
+            for origin, dest in self.connections
+            if origin in nodes
+        ])
 
         try:
-            for process in subprocesses:
-                process.wait()
+            wait_all(subprocesses)
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            traceback.print_exc()
         finally:
             print("Sending SIGTERM to all child processes...")
             
@@ -152,7 +179,8 @@ class Graph:
 
 
 if __name__ == "__main__":
-    with open("network.json") as network_desc:
-        graph = Graph(**json.load(network_desc))
+    with open("network.ryan") as network_desc:
+        config = ryan.from_str(network_desc.read()) # type: ignore
+        graph = Graph(**config["graph"])
 
     graph.run()

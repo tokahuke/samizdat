@@ -1,0 +1,10 @@
+<script>
+    const ws = new WebSocket("ws://$$address");
+    ws.onmessage = (msg) => {
+        if (msg.data == "refresh") {
+            window.location.reload();
+        } else {
+            console.log("Refresh WS server said", msg.data);
+        }
+    };
+</script>

@@ -1,5 +1,7 @@
 //! Command line interface for Samizdat node and hub.
 
+#![feature(try_blocks)]
+
 mod access_token;
 mod api;
 mod cli;
@@ -8,6 +10,7 @@ mod html;
 mod logger;
 mod manifest;
 mod util;
+mod ws;
 
 pub use access_token::access_token;
 pub use cli::server;
