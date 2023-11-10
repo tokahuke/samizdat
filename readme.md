@@ -54,10 +54,11 @@ These are important issues where help is most appreciated:
 * **Samizdat identity**: offer human-readable handles to entities inside the network.
   * Why it matters: do you browse the network using IP addresses or do you use DNS?
   * Why it's hard: this involves _consensus_ in the net. Yeah, Byzantine Generals, Bitcoin and stuff. 
+  > Note: There already is a tentative implementation of the Samizdat identity using proof-of-work, but you might find it clumsy to use It's possible to steal your identity, if you don't put enough effort into it.
 
-* **Multi-platform support**: make Samizdat Node run on Mac, Windows and Android.
+* **Multi-platform support**: make Samizdat Node run on Windows and Android.
     * Why it matters: this is an end-user product and end-users are mostly trapped in these platforms.
-    * Why it's hard: I'm too lazy to open my Windows 10, I don't have a Mac. 
+    * Why it's hard: I'm too lazy to open my Windows 10. I'm bored by Android development.
 
 ## Architecture
 
@@ -71,7 +72,7 @@ Go [here](https://proxy.hubfederation.com/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl8
 
 In the installation, the `samizdat` cli tool is included. You can run `samizdat init` to create a new Samizdat project in your current directory. This will create a manifest file `Samizdat.toml` and a private manifest `.Samizdat.priv`, which will be added to your `.gitignore`. This file contains private credentials that you have to backup elsewhere dearly.
 
-In your local hub, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit`. Samizdat will run a build script that you supply in `Samizdat.toml`. Your content will be available in the URL:
+In your local hub, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit` (or even better, `samizdat watch` for continuous refresh-on-save). Samizdat will run a build script that you supply in `Samizdat.toml`. Your content will be available in the URL:
 
 ```
 http://localhost:4510/_series/<series key>/path/to/stuff
