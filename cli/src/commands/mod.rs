@@ -6,6 +6,7 @@ pub mod hub;
 pub mod identity;
 pub mod series;
 pub mod subscription;
+pub mod peer;
 
 use anyhow::Context;
 use futures::prelude::*;

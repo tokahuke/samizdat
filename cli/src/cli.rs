@@ -112,6 +112,11 @@ pub enum Command {
         #[structopt(subcommand)]
         command: ConnectionCommand,
     },
+    /// Commands for managing peers connected to this node.
+    Peer {
+        #[structopt(subcommand)]
+        command: PeerCommand,
+    },
     /// Commands for managing series.
     Series {
         #[structopt(subcommand)]
@@ -184,6 +189,7 @@ impl Command {
             }
             Command::Hub { command } => command.execute().await,
             Command::Connection { command } => command.execute().await,
+            Command::Peer { command } => command.execute().await,
             Command::Series { command } => command.execute().await,
             Command::Edition { command } => command.execute().await,
             Command::Collection { command } => command.execute().await,
@@ -240,6 +246,21 @@ impl ConnectionCommand {
         }
     }
 }
+
+
+#[derive(Clone, Debug, StructOpt)]
+pub enum PeerCommand {
+    Ls,
+}
+
+impl PeerCommand {
+    async fn execute(self) -> Result<(), anyhow::Error> {
+        match self {
+            PeerCommand::Ls => commands::peer::ls().await,
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {

@@ -24,6 +24,15 @@ impl ChannelManager {
         }
     }
 
+    pub async fn peers(&self) -> Vec<(SocketAddr, bool)> {
+        self.connections
+            .read()
+            .await
+            .iter()
+            .map(|(addr, multiplexed)| (*addr, multiplexed.is_closed()))
+            .collect()
+    }
+
     async fn connect_to(
         &self,
         peer_addr: SocketAddr,

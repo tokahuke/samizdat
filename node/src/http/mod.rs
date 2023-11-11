@@ -8,6 +8,7 @@ mod hubs;
 mod identities;
 mod kvstore;
 mod objects;
+mod peers;
 mod redirects;
 mod resolvers;
 mod series;
@@ -97,6 +98,7 @@ fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + C
         auth::api(),
         hubs::api(),
         connections::api(),
+        peers::api(),
         vacuum(),
     )
     .recover(|rejection: warp::Rejection| async move {

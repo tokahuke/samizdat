@@ -49,6 +49,21 @@ pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow:
     get("/_connections").await
 }
 
+
+// Peers:
+
+#[derive(Debug, Deserialize)]
+pub struct GetPeerResponse {
+    pub hub_name: String,
+    pub addr: String,
+    pub is_closed: bool,
+}
+
+pub async fn get_all_peers() -> Result<Vec<GetPeerResponse>, anyhow::Error> {
+    get("/_peers").await
+}
+
+
 // Objects:
 
 pub async fn post_object(

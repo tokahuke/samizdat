@@ -146,6 +146,14 @@ impl HubConnection {
         self.hub_addr
     }
 
+    pub async fn peers(&self) -> Vec<(SocketAddr, bool)> {
+        if let Some(connection_inner) = self.inner.get().await.as_ref() {
+            connection_inner.channel_manager.peers().await
+        } else {
+            vec![]
+        }
+    }
+
     /// Creates a connection to the hub.
     pub async fn connect(name: String, hub_addr: HubAddr) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
