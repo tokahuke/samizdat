@@ -511,6 +511,29 @@ impl Hubs {
         None
     }
 
+    pub async fn query_with_retry<I>(
+        &self,
+        content_hash: Hash,
+        kind: QueryKind,
+        retries: I,
+    ) -> Option<ReceivedItem>
+    where
+        I: IntoIterator<Item = Duration>,
+    {
+        if let Some(item) = self.query(content_hash, kind).await {
+            return Some(item);
+        }
+
+        for duration in retries {
+            tokio::time::sleep(duration).await;
+            if let Some(item) = self.query(content_hash, kind).await {
+                return Some(item);
+            }
+        }
+
+        None
+    }
+
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_latest(&self, series: &SeriesRef) -> Option<Edition> {
         let hubs = self.hubs.read().await;

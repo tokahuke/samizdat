@@ -496,6 +496,8 @@ impl Edition {
 
     /// Refresh the underlying series using and *already validated* edition.
     pub async fn refresh(&self) -> Result<(), crate::Error> {
+        let exp_backoff = || [0, 10, 30, 70, 150].into_iter().map(Duration::from_secs);
+
         let collection = self.collection();
         let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
 
@@ -503,7 +505,10 @@ impl Edition {
         series.advance(self)?;
         series.refresh()?;
 
-        if let Some(received_item) = hubs().query(inventory_content_hash, QueryKind::Item).await {
+        if let Some(received_item) = hubs()
+            .query_with_retry(inventory_content_hash, QueryKind::Item, exp_backoff())
+            .await
+        {
             let content = match received_item {
                 ReceivedItem::NewObject(received_object) => {
                     received_object
@@ -525,7 +530,11 @@ impl Edition {
             for (item_path, hash) in &inventory {
                 if !ObjectRef::new(*hash).exists()? {
                     let content_hash = collection.locator_for(item_path.as_path()).hash();
-                    tokio::spawn(hubs().query(content_hash, QueryKind::Item).map(|_| ()));
+                    tokio::spawn(
+                        hubs()
+                            .query_with_retry(content_hash, QueryKind::Item, exp_backoff())
+                            .map(|_| ()),
+                    );
                 } else {
                     log::info!("Object {hash} already exists in the database. Skipping");
                 }
