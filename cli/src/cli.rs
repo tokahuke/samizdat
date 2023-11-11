@@ -85,7 +85,7 @@ pub enum Command {
         #[structopt(long)]
         no_browser: bool,
     },
-    /// Uploads a single file as an object.
+    /// Uploads a single file as an object. Use "-" to upload from stdin.
     Upload {
         /// The content-type of this file. Will be guessed if unspecified.
         #[structopt(long)]
@@ -96,6 +96,7 @@ pub enum Command {
         /// Sets this object as drafts. Drafts are not public to the network.
         #[structopt(long)]
         draft: bool,
+        // The file to upload. Alternatively, use "-" to upload from stdin.
         file: PathBuf,
     },
     /// Downloads an object from the samizdat network.
