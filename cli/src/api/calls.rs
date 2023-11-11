@@ -1,4 +1,5 @@
 use anyhow::Context;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -49,7 +50,6 @@ pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow:
     get("/_connections").await
 }
 
-
 // Peers:
 
 #[derive(Debug, Deserialize)]
@@ -62,7 +62,6 @@ pub struct GetPeerResponse {
 pub async fn get_all_peers() -> Result<Vec<GetPeerResponse>, anyhow::Error> {
     get("/_peers").await
 }
-
 
 // Objects:
 
@@ -98,6 +97,41 @@ pub async fn post_object(
         .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
 
     Ok(content?)
+}
+
+pub async fn get_object<F>(hash: &str, mut each_chunk: F) -> Result<(), anyhow::Error>
+where
+    F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>,
+{
+    let url = format!("{}/_objects/{}", crate::server(), hash);
+    let response = CLIENT
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", access_token()))
+        .send()
+        .await
+        .with_context(|| format!("error from samizdat-node request POST /_objects"))?;
+    let status = response.status();
+    log::info!("{} GET {}", status, url);
+
+    if !status.is_success() {
+        anyhow::bail!(
+            "{}",
+            response
+                .text()
+                .await
+                .with_context(|| format!("error from samizdat-node response POST /_objects"))?
+        );
+    } else {
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.with_context(|| {
+                format!("receiving data chunk from samizdat-node request GET /_object/{hash}")
+            })?;
+            each_chunk(chunk.to_vec())?;
+        }
+    }
+
+    Ok(())
 }
 
 // Series owners:

@@ -98,10 +98,8 @@ pub enum Command {
         draft: bool,
         file: PathBuf,
     },
-    // /// Downloads an object from the samizdat network.
-    // Download {
-    //
-    // },
+    /// Downloads an object from the samizdat network.
+    Download { hash: String },
     /// Commands for managing hubs to which this node is connected.
     Hub {
         #[structopt(subcommand)]
@@ -187,6 +185,7 @@ impl Command {
                 });
                 commands::upload(&file, content_type, !no_bookmark, draft).await
             }
+            Command::Download { hash } => commands::download(hash).await,
             Command::Hub { command } => command.execute().await,
             Command::Connection { command } => command.execute().await,
             Command::Peer { command } => command.execute().await,
@@ -247,7 +246,6 @@ impl ConnectionCommand {
     }
 }
 
-
 #[derive(Clone, Debug, StructOpt)]
 pub enum PeerCommand {
     Ls,
@@ -260,7 +258,6 @@ impl PeerCommand {
         }
     }
 }
-
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {

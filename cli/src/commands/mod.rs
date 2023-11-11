@@ -4,14 +4,15 @@ pub mod connection;
 pub mod edition;
 pub mod hub;
 pub mod identity;
+pub mod peer;
 pub mod series;
 pub mod subscription;
-pub mod peer;
 
 use anyhow::Context;
 use futures::prelude::*;
 use futures::stream;
 use notify::{RecursiveMode, Watcher};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -40,6 +41,15 @@ pub async fn upload(
     println!("Object hash: {hash}");
 
     Ok(())
+}
+
+pub async fn download(hash: String) -> Result<(), anyhow::Error> {
+    let stdout = std::io::stdout();
+    api::get_object(&hash, move |chunk| {
+        stdout.lock().write_all(&chunk)?;
+        Ok(())
+    })
+    .await
 }
 
 pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {

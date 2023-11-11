@@ -11,7 +11,6 @@ use crate::balanced_or_tree;
 use super::async_api_reply;
 use super::authenticate;
 
-
 /// The entrypoint of the hub API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
@@ -28,15 +27,12 @@ struct GetPeerResponse {
 }
 
 /// Lists all hubs.
-fn get_peers() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn get_peers() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_peers")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageHubs]))
         .map(|| async move {
-            let connections = crate::hubs()
-                .snapshot()
-                .await;
+            let connections = crate::hubs().snapshot().await;
             let mut peers = vec![];
 
             for connection in connections {
