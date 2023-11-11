@@ -12,6 +12,7 @@ use anyhow::Context;
 use futures::prelude::*;
 use futures::stream;
 use notify::{RecursiveMode, Watcher};
+use std::io::Read;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -37,7 +38,14 @@ pub async fn upload(
     bookmark: bool,
     is_draft: bool,
 ) -> Result<(), anyhow::Error> {
-    let hash = api::post_object(fs::read(path)?, &content_type, bookmark, is_draft).await?;
+    let hash = if path != <str as AsRef<Path>>::as_ref("-") {
+        api::post_object(fs::read(path)?, &content_type, bookmark, is_draft).await?
+    } else {
+        let mut buf = vec![];
+        std::io::stdin().lock().read_to_end(&mut buf)?;
+        api::post_object(buf, &content_type, bookmark, is_draft).await?
+    };
+
     println!("{hash}");
 
     Ok(())

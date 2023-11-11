@@ -10,7 +10,7 @@ pub async fn ls() -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     struct Row {
         addr: String,
-        is_closed: bool,
+        status: String,
     }
 
     show_table(
@@ -18,7 +18,7 @@ pub async fn ls() -> Result<(), anyhow::Error> {
             .into_iter()
             .map(|peer| Row {
                 addr: peer.addr,
-                is_closed: peer.is_closed,
+                status: peer.status,
             })
             .collect::<Vec<_>>(),
     );

@@ -53,7 +53,7 @@ async fn receiver_task(
                 let channel_id = u32::from_be_bytes(id_buf).into();
                 log::info!("stream arrived for channel {}", channel_id);
 
-                // Send to the apropriate channel.
+                // Send to the appropriate channel.
                 let guard = senders.lock().await;
                 if let Some(sender) = guard.get(&channel_id) {
                     // Channel may be closed... create anew!

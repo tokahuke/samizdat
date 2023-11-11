@@ -39,7 +39,9 @@ impl<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> Matcher<K, T> 
             let (send, recv) = oneshot::channel();
             let removed = inner.expecting.insert(addr, send);
 
-            assert!(removed.is_none(), "Double expecting key {}", addr);
+            if let Some(removed_send) = removed {
+                assert!(!removed_send.is_closed(), "Double expecting key {}", addr);
+            }
 
             drop(inner);
 
