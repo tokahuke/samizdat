@@ -54,7 +54,6 @@ pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow:
 
 #[derive(Debug, Deserialize)]
 pub struct GetPeerResponse {
-    pub hub_name: String,
     pub addr: String,
     pub is_closed: bool,
 }

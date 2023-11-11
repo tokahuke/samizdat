@@ -38,7 +38,7 @@ pub async fn upload(
     is_draft: bool,
 ) -> Result<(), anyhow::Error> {
     let hash = api::post_object(fs::read(path)?, &content_type, bookmark, is_draft).await?;
-    println!("Object hash: {hash}");
+    println!("{hash}");
 
     Ok(())
 }

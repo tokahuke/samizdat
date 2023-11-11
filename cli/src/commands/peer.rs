@@ -9,7 +9,6 @@ pub async fn ls() -> Result<(), anyhow::Error> {
 
     #[derive(Tabled)]
     struct Row {
-        hub_name: String,
         addr: String,
         is_closed: bool,
     }
@@ -18,7 +17,6 @@ pub async fn ls() -> Result<(), anyhow::Error> {
         response
             .into_iter()
             .map(|peer| Row {
-                hub_name: peer.hub_name,
                 addr: peer.addr,
                 is_closed: peer.is_closed,
             })

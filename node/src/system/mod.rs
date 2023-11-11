@@ -7,6 +7,7 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
+pub use transport::PEER_CONNECTIONS;
 
 use futures::prelude::*;
 use futures::stream;
@@ -144,14 +145,6 @@ impl HubConnection {
 
     pub fn address(&self) -> HubAddr {
         self.hub_addr
-    }
-
-    pub async fn peers(&self) -> Vec<(SocketAddr, bool)> {
-        if let Some(connection_inner) = self.inner.get().await.as_ref() {
-            connection_inner.channel_manager.peers().await
-        } else {
-            vec![]
-        }
     }
 
     /// Creates a connection to the hub.

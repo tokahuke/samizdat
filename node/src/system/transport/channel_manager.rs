@@ -1,36 +1,29 @@
 use futures::prelude::*;
+use lazy_static::lazy_static;
 use quinn::{ReadToEndError, RecvStream};
+use samizdat_common::address::{ChannelAddr, ChannelId};
 use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
-
-use samizdat_common::address::{ChannelAddr, ChannelId};
 
 use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;
 
+lazy_static! {
+    pub static ref PEER_CONNECTIONS: RwLock<BTreeMap<SocketAddr, Arc<Multiplexed>>> =
+        RwLock::default();
+}
+
 pub struct ChannelManager {
-    connections: RwLock<BTreeMap<SocketAddr, Arc<Multiplexed>>>,
     connection_manager: Arc<ConnectionManager>,
 }
 
 impl ChannelManager {
     pub fn new(connection_manager: Arc<ConnectionManager>) -> ChannelManager {
-        ChannelManager {
-            connections: RwLock::default(),
-            connection_manager,
-        }
-    }
-
-    pub async fn peers(&self) -> Vec<(SocketAddr, bool)> {
-        self.connections
-            .read()
-            .await
-            .iter()
-            .map(|(addr, multiplexed)| (*addr, multiplexed.is_closed()))
-            .collect()
+        ChannelManager { connection_manager }
     }
 
     async fn connect_to(
@@ -40,7 +33,7 @@ impl ChannelManager {
     ) -> Result<Arc<Multiplexed>, crate::Error> {
         log::debug!("fetching connection for {}", peer_addr);
 
-        if let Some(multiplexed) = self.connections.read().await.get(&peer_addr) {
+        if let Some(multiplexed) = PEER_CONNECTIONS.read().await.get(&peer_addr) {
             log::debug!("found existing connection");
             if !multiplexed.is_closed() {
                 return Ok(multiplexed.clone());
@@ -49,26 +42,34 @@ impl ChannelManager {
             }
         }
 
-        let mut guard = self.connections.write().await;
+        let mut guard = PEER_CONNECTIONS.write().await;
         log::debug!("connection write guard acquired");
 
         // Possible TOCTOU: check again.
-        if let Some(multiplexed) = guard.remove(&peer_addr) {
+        if let Some(multiplexed) = guard.get(&peer_addr).cloned() {
             log::debug!("found existing connection on recheck");
             if !multiplexed.is_closed() {
                 return Ok(multiplexed);
             } else {
                 log::debug!("existing connection already closed. Create a new one!");
+                guard.remove(&peer_addr); // force drop before new connection
             }
         }
 
-        guard.remove(&peer_addr); // force drop before new connection
         let multiplexed = Arc::new(Multiplexed::new(
             self.connection_manager
                 .punch_hole_to(peer_addr, drop_mode)
                 .await?,
         ));
         guard.insert(peer_addr, multiplexed.clone());
+        log::info!("Inserted {peer_addr} to connections");
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            if PEER_CONNECTIONS.write().await.remove(&peer_addr).is_some() {
+                log::info!("connection to {peer_addr} closed due to timeout.");
+            }
+        });
 
         Ok(multiplexed)
     }

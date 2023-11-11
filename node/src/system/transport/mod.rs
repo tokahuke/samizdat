@@ -6,5 +6,5 @@ pub mod file_transfer;
 mod matcher;
 mod multiplexed;
 
-pub use self::channel_manager::{ChannelManager, ChannelReceiver, ChannelSender};
+pub use self::channel_manager::{ChannelManager, ChannelReceiver, ChannelSender, PEER_CONNECTIONS};
 pub use self::connection_manager::ConnectionManager;

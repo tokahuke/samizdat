@@ -7,6 +7,7 @@ use warp::Filter;
 
 use crate::access::AccessRight;
 use crate::balanced_or_tree;
+use crate::system::PEER_CONNECTIONS;
 
 use super::async_api_reply;
 use super::authenticate;
@@ -21,7 +22,6 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
 
 #[derive(Debug, Serialize)]
 struct GetPeerResponse {
-    hub_name: String,
     addr: SocketAddr,
     is_closed: bool,
 }
@@ -32,18 +32,15 @@ fn get_peers() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .and(warp::get())
         .and(authenticate([AccessRight::ManageHubs]))
         .map(|| async move {
-            let connections = crate::hubs().snapshot().await;
-            let mut peers = vec![];
-
-            for connection in connections {
-                for peer in connection.peers().await {
-                    peers.push(GetPeerResponse {
-                        hub_name: connection.name().to_string(),
-                        addr: peer.0,
-                        is_closed: peer.1,
-                    })
-                }
-            }
+            let peers = PEER_CONNECTIONS
+                .read()
+                .await
+                .iter()
+                .map(|(addr, multiplexed)| GetPeerResponse {
+                    addr: *addr,
+                    is_closed: multiplexed.is_closed(),
+                })
+                .collect::<Vec<_>>();
 
             Ok(peers)
         })
