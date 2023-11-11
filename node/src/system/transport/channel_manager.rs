@@ -55,7 +55,9 @@ impl ChannelManager {
         let connection_manager = self.connection_manager.clone();
         tokio::spawn(async move {
             match connection_manager.punch_hole_to(peer_addr, drop_mode).await {
-                Ok(conn) => *locked = Some(Arc::new(Multiplexed::new(conn))),
+                Ok(conn) => {
+                    *locked = Some(Arc::new(Multiplexed::new(conn)));
+                },
                 Err(err) => {
                     log::error!("Failed to create connection to {peer_addr}: {err}")
                 }
