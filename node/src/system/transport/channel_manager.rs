@@ -4,75 +4,29 @@ use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, RwLock};
 
 use samizdat_common::address::{ChannelAddr, ChannelId};
 
 use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;
 
-#[derive(Default)]
-struct ConnectionHolder {
-    connections: Arc<Mutex<BTreeMap<SocketAddr, Arc<Multiplexed>>>>,
-}
-
-impl ConnectionHolder {
-    fn set_to_expire(&self, addr: SocketAddr) {
-        let connections = self.connections.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            log::info!("Dropping connection with {addr} due to timeout.");
-            connections.lock().await.remove(&addr);
-        });
-    }
-
-    async fn get_or<F, Fut>(&self, addr: SocketAddr, f: F) -> Result<Arc<Multiplexed>, crate::Error>
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<Multiplexed, crate::Error>>,
-    {
-        let mut connections = self.connections.lock().await;
-        let connection = if let Some(connection) = connections.get(&addr).cloned() {
-            if connection.is_closed() {
-                log::info!("Refreshing connection with {addr} because the old was closed.");
-                let new_connection = Arc::new(f().await?);
-                connections.insert(addr, new_connection.clone());
-                self.set_to_expire(addr);
-                new_connection
-            } else {
-                log::debug!("Found existing connection with {addr}.");
-                connection
-            }
-        } else {
-            log::info!("Creating new connection with {addr}.");
-            let new_connection = Arc::new(f().await?);
-            connections.insert(addr, new_connection.clone());
-            self.set_to_expire(addr);
-            new_connection
-        };
-
-        Ok(connection)
-    }
-}
-
 pub struct ChannelManager {
-    connection_holder: ConnectionHolder,
+    connections: RwLock<BTreeMap<SocketAddr, Arc<Multiplexed>>>,
     connection_manager: Arc<ConnectionManager>,
 }
 
 impl ChannelManager {
     pub fn new(connection_manager: Arc<ConnectionManager>) -> ChannelManager {
         ChannelManager {
-            connection_holder: Default::default(),
+            connections: RwLock::default(),
             connection_manager,
         }
     }
 
     pub async fn peers(&self) -> Vec<(SocketAddr, bool)> {
-        self.connection_holder
-            .connections // TODO! Don't access `connection` outside ConnectionHolder
-            .lock()
+        self.connections
+            .read()
             .await
             .iter()
             .map(|(addr, multiplexed)| (*addr, multiplexed.is_closed()))
@@ -85,15 +39,38 @@ impl ChannelManager {
         drop_mode: DropMode,
     ) -> Result<Arc<Multiplexed>, crate::Error> {
         log::debug!("fetching connection for {}", peer_addr);
-        self.connection_holder
-            .get_or(peer_addr, || async {
-                Ok(Multiplexed::new(
-                    self.connection_manager
-                        .punch_hole_to(peer_addr, drop_mode)
-                        .await?,
-                ))
-            })
-            .await
+
+        if let Some(multiplexed) = self.connections.read().await.get(&peer_addr) {
+            log::debug!("found existing connection");
+            if !multiplexed.is_closed() {
+                return Ok(multiplexed.clone());
+            } else {
+                log::debug!("existing connection already closed. Create a new one!");
+            }
+        }
+
+        let mut guard = self.connections.write().await;
+        log::debug!("connection write guard acquired");
+
+        // Possible TOCTOU: check again.
+        if let Some(multiplexed) = guard.remove(&peer_addr) {
+            log::debug!("found existing connection on recheck");
+            if !multiplexed.is_closed() {
+                return Ok(multiplexed);
+            } else {
+                log::debug!("existing connection already closed. Create a new one!");
+            }
+        }
+
+        guard.remove(&peer_addr); // force drop before new connection
+        let multiplexed = Arc::new(Multiplexed::new(
+            self.connection_manager
+                .punch_hole_to(peer_addr, drop_mode)
+                .await?,
+        ));
+        guard.insert(peer_addr, multiplexed.clone());
+
+        Ok(multiplexed)
     }
 
     /// Waits for a given channel to be opened (i.e., the first message for it to arrive).
