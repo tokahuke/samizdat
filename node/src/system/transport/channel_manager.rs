@@ -12,8 +12,31 @@ use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;
 
 lazy_static! {
-    pub static ref PEER_CONNECTIONS: Mutex<BTreeMap<SocketAddr, Arc<Mutex<Option<Arc<Multiplexed>>>>>> =
-        Mutex::default();
+    pub static ref PEER_CONNECTIONS: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = {
+        let peers: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = Arc::new(RwLock::default());
+
+        // Remove closed and erred connections from time to time:
+        let peers_task = peers.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(10));
+            loop {
+                ticker.tick().await;
+                peers_task.write().await.retain(|_, entry| {
+                    if let Ok(guard) = entry.try_lock() {
+                        if let Some(multiplexed) = guard.as_ref() {
+                            !multiplexed.is_closed()
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    }
+                });
+            }
+        });
+
+        peers
+    };
 }
 
 pub struct ChannelManager {
