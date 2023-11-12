@@ -173,7 +173,7 @@ pub(super) fn sample(
 
     // Thompson sampling solution to find the most successful peers.
     for (&node_addr, node) in nodes {
-        let priority = (sampler.sample_priority(&node) * 1e6) as i64;
+        let priority = (sampler.sample_priority(node) * 1e6) as i64;
 
         queue.push(HeapEntry {
             priority,

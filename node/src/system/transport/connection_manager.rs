@@ -9,6 +9,7 @@ use super::matcher::Matcher;
 
 const MAX_TRANSFER_SIZE: usize = 2_048;
 
+#[derive(Debug, Clone, Copy)]
 pub enum DropMode {
     DropIncoming,
     DropOutgoing,

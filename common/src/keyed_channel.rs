@@ -27,12 +27,18 @@ impl<T> Clone for KeyedChannel<T> {
     }
 }
 
-impl<T> KeyedChannel<T> {
-    /// Creates a new [`KeyedChannel`].
-    pub fn new() -> Self {
+impl<T> Default for KeyedChannel<T> {
+    fn default() -> Self {
         KeyedChannel(Arc::new(KeyedChannelInner {
             channels: RwLock::default(),
         }))
+    }
+}
+
+impl<T> KeyedChannel<T> {
+    /// Creates a new [`KeyedChannel`].
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Sends an item to a specified address. If nobody is listening on the specified key,
@@ -61,7 +67,7 @@ impl<T> KeyedChannel<T> {
             .insert(key, sender);
         RecvStream {
             recv,
-            channel: Self::clone(&self),
+            channel: self.clone(),
             key,
         }
     }

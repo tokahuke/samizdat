@@ -145,7 +145,7 @@ impl Hub for HubServer {
                     let socket_addr = candidate.socket_addr;
                     let outcome = node
                         .client
-                        .recv_candidate(ctx.clone(), candidate_channel, candidate)
+                        .recv_candidate(ctx, candidate_channel, candidate)
                         .await;
 
                     if let Err(err) = outcome {

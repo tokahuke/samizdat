@@ -92,7 +92,7 @@ fn get_identities() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
     warp::path!("_identities")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageIdentities]))
-        .map(|| Identity::get_all())
+        .map(Identity::get_all)
         .map(api_reply)
 }
 

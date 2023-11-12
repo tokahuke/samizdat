@@ -95,7 +95,7 @@ impl Node for HubAsNodeServer {
             while let Some(candidate) = pinned.next().await {
                 let outcome = self
                     .client
-                    .recv_candidate(ctx.clone(), candidate_channel, candidate)
+                    .recv_candidate(ctx, candidate_channel, candidate)
                     .await;
 
                 if let Err(err) = outcome {

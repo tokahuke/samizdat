@@ -130,7 +130,7 @@ impl ObjectHeader {
 /// Helper function to get a chunk by its hash in the database.
 fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
     Ok(db()
-        .get_cf(Table::ObjectChunks.get(), &hash)?
+        .get_cf(Table::ObjectChunks.get(), hash)?
         .ok_or_else(|| format!("Chunk missing: {}", hash))?)
 }
 
@@ -329,7 +329,7 @@ impl Droppable for ObjectRef {
         for chunk_hash in metadata.hashes {
             batch.merge_cf(
                 Table::ObjectChunkRefCount.get(),
-                &chunk_hash,
+                chunk_hash,
                 bincode::serialize(&MergeOperation::Increment(-1)).expect("can serialize"),
             );
         }
@@ -339,9 +339,9 @@ impl Droppable for ObjectRef {
         self.bookmark(BookmarkType::Reference).clear_with(batch);
         self.bookmark(BookmarkType::User).clear_with(batch);
 
-        batch.delete_cf(Table::ObjectStatistics.get(), &self.hash);
-        batch.delete_cf(Table::ObjectMetadata.get(), &self.hash);
-        batch.delete_cf(Table::Objects.get(), &self.hash);
+        batch.delete_cf(Table::ObjectStatistics.get(), self.hash);
+        batch.delete_cf(Table::ObjectMetadata.get(), self.hash);
+        batch.delete_cf(Table::Objects.get(), self.hash);
 
         Ok(())
     }
@@ -361,14 +361,14 @@ impl ObjectRef {
     /// Returns whether an object exists in the database or not;
     pub fn exists(&self) -> Result<bool, crate::Error> {
         Ok(db()
-            .get_cf(Table::ObjectMetadata.get(), &self.hash)?
+            .get_cf(Table::ObjectMetadata.get(), self.hash)?
             .is_some())
     }
 
     /// Returns the metadata on this object. This function returns `Ok(None)` if the object
     /// does not actually exist.
     pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
-        match db().get_cf(Table::ObjectMetadata.get(), &self.hash)? {
+        match db().get_cf(Table::ObjectMetadata.get(), self.hash)? {
             Some(serialized) => Ok(Some(bincode::deserialize(&serialized)?)),
             None => Ok(None),
         }
@@ -446,15 +446,15 @@ impl ObjectRef {
             return;
         }
 
-        batch.put_cf(Table::Objects.get(), &hash, &[]);
+        batch.put_cf(Table::Objects.get(), hash, []);
         batch.put_cf(
             Table::ObjectMetadata.get(),
-            &hash,
+            hash,
             bincode::serialize(&metadata).expect("can serialize"),
         );
         batch.put_cf(
             Table::ObjectStatistics.get(),
-            &hash,
+            hash,
             bincode::serialize(&statistics).expect("can serialize"),
         );
 
@@ -500,8 +500,8 @@ impl ObjectRef {
 
                 content_size += buffer.len();
 
-                let chunk_hash = Hash::hash(&buffer);
-                db().put_cf(Table::ObjectChunks.get(), &chunk_hash, &buffer)?;
+                let chunk_hash = Hash::from_bytes(&buffer);
+                db().put_cf(Table::ObjectChunks.get(), chunk_hash, &buffer)?;
                 hashes.push(chunk_hash);
 
                 // Buffer not fille to the brim: it's over!
@@ -612,7 +612,7 @@ impl ObjectRef {
 
         while let Some(chunk) = limited_chunks.next().await.transpose()? {
             // Check if hash actually corresponds to hash in merkle tree.
-            let received_hash = Hash::hash(&chunk);
+            let received_hash = Hash::from_bytes(&chunk);
             let Some(chunk_id) = hashes.get(&received_hash).copied() else {
                 return Err(format!(
                     "Received chunk has hash {received_hash}; which was not expected"
@@ -645,7 +645,7 @@ impl ObjectRef {
             }
 
             // Put chunk in the database
-            db().put_cf(Table::ObjectChunks.get(), &received_hash, &chunk)?;
+            db().put_cf(Table::ObjectChunks.get(), received_hash, &chunk)?;
 
             // Emit received chunk:
             log::info!("Chunk {chunk_id} for object {hash} received");

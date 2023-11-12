@@ -146,7 +146,7 @@ impl Display for HubAddr {
 
 impl Debug for HubAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <Self as Display>::fmt(&self, f)
+        <Self as Display>::fmt(self, f)
     }
 }
 

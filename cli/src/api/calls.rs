@@ -83,12 +83,12 @@ pub async fn post_object(
         .body(content)
         .send()
         .await
-        .with_context(|| format!("error from samizdat-node request POST /_objects"))?;
+        .with_context(|| "error from samizdat-node request POST /_objects")?;
     let status = response.status();
     let text = response
         .text()
         .await
-        .with_context(|| format!("error from samizdat-node response POST /_objects"))?;
+        .with_context(|| "error from samizdat-node response POST /_objects")?;
 
     log::info!("{} GET {} {}", status, url, text);
 
@@ -108,7 +108,7 @@ where
         .header("Authorization", format!("Bearer {}", access_token()))
         .send()
         .await
-        .with_context(|| format!("error from samizdat-node request POST /_objects"))?;
+        .with_context(|| "error from samizdat-node request POST /_objects")?;
     let status = response.status();
     log::info!("{} GET {}", status, url);
 
@@ -118,7 +118,7 @@ where
             response
                 .text()
                 .await
-                .with_context(|| format!("error from samizdat-node response POST /_objects"))?
+                .with_context(|| "error from samizdat-node response POST /_objects")?
         );
     } else {
         let mut stream = response.bytes_stream();

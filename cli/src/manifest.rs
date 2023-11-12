@@ -58,7 +58,7 @@ impl Manifest {
         let debug_name = format!("{}-debug", name);
 
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
-            series_owner_name: &name,
+            series_owner_name: name,
             keypair: None,
             is_draft: false,
         })
@@ -118,7 +118,7 @@ impl Build {
         let script = if is_release {
             self.run.as_ref()
         } else {
-            self.run.as_ref().or_else(|| self.run_debug.as_ref())
+            self.run.as_ref().or(self.run_debug.as_ref())
         };
         let mut command = Command::new(&self.shell);
         command
@@ -186,7 +186,7 @@ impl PrivateManifest {
         }
 
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
-            series_owner_name: &debug_name,
+            series_owner_name: debug_name,
             keypair: None,
             is_draft: true,
         })

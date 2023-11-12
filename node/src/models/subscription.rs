@@ -73,7 +73,7 @@ impl SubscriptionRef {
     /// Whether the subscription exists in the local database.
     pub fn exists(&self) -> Result<bool, crate::Error> {
         Ok(db()
-            .get_cf(Table::Subscriptions.get(), &self.public_key.as_bytes())?
+            .get_cf(Table::Subscriptions.get(), self.public_key.as_bytes())?
             .is_some())
     }
 
@@ -88,7 +88,7 @@ impl SubscriptionRef {
 
         batch.put_cf(
             Table::Subscriptions.get(),
-            &subscription.public_key.as_bytes(),
+            subscription.public_key.as_bytes(),
             bincode::serialize(&subscription).expect("can serialize"),
         );
 
@@ -126,7 +126,7 @@ impl SubscriptionRef {
     /// Gets the subscription corresponding to this reference in the database, if it
     /// exists.
     pub fn get(&self) -> Result<Option<Subscription>, crate::Error> {
-        let maybe_value = db().get_cf(Table::Subscriptions.get(), &self.key())?;
+        let maybe_value = db().get_cf(Table::Subscriptions.get(), self.key())?;
         Ok(maybe_value
             .map(|value| bincode::deserialize(&value))
             .transpose()?)

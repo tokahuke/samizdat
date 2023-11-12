@@ -73,7 +73,7 @@ impl ReplayResistance {
             return Ok(false);
         }
 
-        db().put_cf(Table::RecentNonces.get(), nonce, &now.to_be_bytes())?;
+        db().put_cf(Table::RecentNonces.get(), nonce, now.to_be_bytes())?;
 
         Ok(true)
     }

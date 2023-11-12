@@ -61,7 +61,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
         .write(true)
         .truncate(true)
         .open(port_path)?;
-    file.write(cli().port.to_string().as_bytes())?;
+    file.write_all(cli().port.to_string().as_bytes())?;
 
     Ok(())
 }

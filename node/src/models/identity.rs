@@ -56,7 +56,7 @@ impl IdentityRef {
 
     /// Gets the hash of this identity.
     pub fn hash(&self) -> Hash {
-        Hash::hash(&self.handle)
+        Hash::from_bytes(&self.handle)
     }
 
     /// Gets the handle (i.e., human-readable name) of this identity.

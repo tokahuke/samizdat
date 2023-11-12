@@ -31,7 +31,7 @@ impl<P: Ord, T> Eq for HeapEntry<P, T> {}
 
 impl<P: Ord, T> PartialOrd for HeapEntry<P, T> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.ord(other))
+        Some(std::cmp::Ord::cmp(self, other))
     }
 }
 

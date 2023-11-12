@@ -26,7 +26,7 @@ pub async fn new(
         });
 
     api::post_series_owner(api::PostSeriesOwnerRequest {
-        series_owner_name: &*series_name,
+        series_owner_name: &series_name,
         keypair,
         is_draft,
     })

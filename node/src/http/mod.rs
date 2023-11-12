@@ -128,7 +128,7 @@ fn vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejectio
     balanced_or_tree!(
         warp::post()
             .and(warp::path!("_vacuum"))
-            .map(|| crate::vacuum::vacuum())
+            .map(crate::vacuum::vacuum)
             .map(api_reply),
         warp::post()
             .and(warp::path!("_vacuum" / "flush-all"))

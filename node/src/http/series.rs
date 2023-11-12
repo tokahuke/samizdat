@@ -51,7 +51,7 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         .and(authenticate([AccessRight::ManageSeries]))
         .and(warp::body::json())
         .map(|request: Request| {
-            let series_owner = if let Some(Keypair {
+            if let Some(Keypair {
                 public_key,
                 private_key,
             }) = request.keypair
@@ -69,9 +69,7 @@ fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                     Duration::from_secs(3_600),
                     request.is_draft,
                 )
-            };
-
-            Ok(series_owner?)
+            }
         })
         .map(api_reply)
 }
@@ -101,7 +99,7 @@ fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         .and(authenticate([AccessRight::ManageSeries]))
         .map(|series_owner_name: String| {
             let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            Ok(maybe_owner.map(|owner| owner))
+            Ok(maybe_owner)
         })
         .map(api_reply)
 }
@@ -112,7 +110,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
     warp::path!("_seriesowners")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageSeries]))
-        .map(|| SeriesOwner::get_all())
+        .map(SeriesOwner::get_all)
         .map(api_reply)
 }
 
@@ -179,6 +177,6 @@ fn get_all_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::
     warp::path!("_series")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageSeries]))
-        .map(|| SeriesRef::get_all())
+        .map(SeriesRef::get_all)
         .map(api_reply)
 }

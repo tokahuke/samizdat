@@ -86,7 +86,7 @@ impl NodeServer {
         let Some(content_riddle) = resolution.content_riddles.first() else {
             return ResolutionResponse::EmptyResolution;
         };
-        let item = match CollectionItem::find(&content_riddle) {
+        let item = match CollectionItem::find(content_riddle) {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
                 log::info!("hash found, but item is draft");

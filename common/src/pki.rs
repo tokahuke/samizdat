@@ -152,7 +152,7 @@ impl Key {
 
     /// Gets the hash of this public key.
     pub fn hash(&self) -> Hash {
-        Hash::hash(self.0.as_bytes())
+        Hash::from_bytes(self.0.as_bytes())
     }
 
     /// Deserializes a public key from binary data.

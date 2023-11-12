@@ -117,7 +117,7 @@ fn candidates_for_resolution(
                 // `>=`: there can be more added nonces down the line because of further redirects.
                 riddles.len() >= resolution.validation_nonces.len()
                     // Check that *your* riddle is correct
-                    && &riddles[resolution.validation_nonces.len() - 1] == &validation_riddle
+                    && riddles[resolution.validation_nonces.len() - 1] == validation_riddle
                     // Although you don't know the riddles before you, at least check that the nonces
                     // match.
                     && riddles
@@ -184,7 +184,7 @@ async fn edition_for_request(
                 let experiment = peer.edition_statistics.start_experiment();
                 let outcome = peer.client.get_edition(ctx, latest).await;
 
-                let response = match outcome {
+                match outcome {
                     Ok(response) => {
                         // Empty response is not a valid candidate.
                         if !response.is_empty() {
@@ -198,9 +198,7 @@ async fn edition_for_request(
                         log::warn!("error asking {peer_id} for latest: {err}");
                         None
                     }
-                };
-
-                response
+                }
             }
         })
         .collect::<Vec<_>>()
@@ -251,7 +249,7 @@ async fn get_identity(
             let experiment = peer.edition_statistics.start_experiment();
             let outcome = peer.client.get_identity(ctx, request).await;
 
-            let response = match outcome {
+            match outcome {
                 Ok(response) => {
                     // Empty response is not a valid candidate.
                     if !response.is_empty() {
@@ -263,11 +261,9 @@ async fn get_identity(
                 }
                 Err(err) => {
                     log::warn!("error asking {peer_id} for latest: {err}");
-                    return None;
+                    None
                 }
-            };
-
-            response
+            }
         }
     })
     .collect::<Vec<_>>()

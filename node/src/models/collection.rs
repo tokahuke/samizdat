@@ -73,7 +73,7 @@ impl ItemPathBuf {
 
     /// Hashes this item path.
     fn hash(&self) -> Hash {
-        Hash::hash(self.0.as_bytes())
+        Hash::from_bytes(self.0.as_bytes())
     }
 }
 
@@ -182,7 +182,7 @@ impl CollectionItem {
     /// 2. If the claimed name corresponds to the claimed key hash in the inclusion proof.
     pub fn is_valid(&self) -> bool {
         let is_included = self.inclusion_proof.is_in(&self.collection.hash);
-        let key = Hash::hash(self.name.0.as_bytes());
+        let key = Hash::from_bytes(self.name.0.as_bytes());
 
         if !is_included {
             log::error!("Inclusion proof failed for {:?}", self);
@@ -231,7 +231,7 @@ impl CollectionItem {
             };
 
             if content_riddle.resolves(&hash) {
-                let item: CollectionItem = bincode::deserialize(&*value)?;
+                let item: CollectionItem = bincode::deserialize(&value)?;
                 if item.object()?.exists()? {
                     return Ok(Some(item));
                 }
@@ -436,7 +436,7 @@ impl<'a> Locator<'a> {
     pub fn hash(&self) -> Hash {
         self.collection
             .hash
-            .rehash(&Hash::hash(self.name.0.as_ref()))
+            .rehash(&Hash::from_bytes(self.name.0.as_ref()))
     }
 
     /// The collection reference for this locator.
@@ -454,7 +454,7 @@ impl<'a> Locator<'a> {
         let maybe_item = db().get_cf(Table::CollectionItems.get(), self.hash())?;
 
         if let Some(item) = maybe_item {
-            let item: CollectionItem = bincode::deserialize(&*item)?;
+            let item: CollectionItem = bincode::deserialize(&item)?;
             Ok(Some(item))
         } else {
             Ok(None)

@@ -41,7 +41,7 @@ fn get_peers() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
         .and(authenticate([AccessRight::ManageHubs]))
         .map(|| async move {
             let peers = PEER_CONNECTIONS
-                .lock()
+                .read()
                 .await
                 .iter()
                 .map(|(addr, multiplexed)| {
