@@ -4,7 +4,7 @@ mod http;
 mod logger;
 mod slow_compiler_workaround;
 
-use std::io;
+use std::{io, time::Duration};
 use warp::Filter;
 
 use cli::cli;
@@ -19,41 +19,51 @@ async fn main() -> Result<(), io::Error> {
     cli::init_cli()?;
 
     // Describe server:
-    let server = warp::get()
-        .and(warp::path::end())
-        .map(|| warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html"))
-        .or(http::api())
-        .with(warp::log("api"));
+    let server = move || {
+        warp::get()
+            .and(warp::path::end())
+            .map(|| {
+                warp::reply::with_header(include_str!("index.html"), "Content-Type", "text/html")
+            })
+            .or(http::api())
+            .with(warp::log("api"))
+    };
 
     // Run server:
     if cli().https {
-        // Run certbot:
-        let status = std::process::Command::new("certbot")
-            .arg("certonly")
-            .arg("--standalone")
-            .arg("--non-interactive")
-            .arg("--email")
-            .arg(OWNER)
-            .arg("--agree-tos")
-            .arg("--domain")
-            .arg(DOMAIN)
-            .spawn()
-            .expect("failed to spawn certbot")
-            .wait()
-            .expect("failed to run certbot");
-        assert_eq!(status.code().expect("there always is a code (?)"), 0);
+        loop {
+            // Run certbot:
+            let status = std::process::Command::new("certbot")
+                .arg("certonly")
+                .arg("--standalone")
+                .arg("--non-interactive")
+                .arg("--email")
+                .arg(OWNER)
+                .arg("--agree-tos")
+                .arg("--domain")
+                .arg(DOMAIN)
+                .spawn()
+                .expect("failed to spawn certbot")
+                .wait()
+                .expect("failed to run certbot");
+            assert_eq!(status.code().expect("there always is a code (?)"), 0);
 
-        // Start server:
-        let server = warp::serve(server)
-            .tls()
-            .key_path(format!("/etc/letsencrypt/live/{}/privkey.pem", DOMAIN))
-            .cert_path(format!("/etc/letsencrypt/live/{}/fullchain.pem", DOMAIN))
-            .run(([0, 0, 0, 0], cli().port.unwrap_or(443)));
+            // Start server:
+            let (_, server) = warp::serve(server())
+                .tls()
+                .key_path(format!("/etc/letsencrypt/live/{}/privkey.pem", DOMAIN))
+                .cert_path(format!("/etc/letsencrypt/live/{}/fullchain.pem", DOMAIN))
+                .bind_with_graceful_shutdown(
+                    ([0, 0, 0, 0], cli().port.unwrap_or(443)),
+                    tokio::time::sleep(Duration::from_secs(60 * 24 * 60 * 60)),
+                );
 
-        tokio::spawn(server).await?
+            tokio::spawn(server).await?
+        }
     } else {
         // Start server:
-        let server = warp::serve(server).run(([0, 0, 0, 0], cli().port.unwrap_or(8080)));
+        let server = warp::serve(server()).run(([0, 0, 0, 0], cli().port.unwrap_or(8080)));
+
         tokio::spawn(server).await?;
     }
 

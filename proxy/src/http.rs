@@ -4,6 +4,15 @@ use warp::Filter;
 
 use crate::html::proxy_page;
 
+const PROXY_HEADERS: &[&'static str] = &[
+    "ETag",
+    "X-Samizdat-Bookmark",
+    "X-Samizdat-Object",
+    "X-Samizdat-Is-Draft",
+    "X-Samizdat-Collection",
+    "X-Samizdat-Series",
+];
+
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     crate::balanced_or_tree!(proxy())
 }
@@ -50,6 +59,15 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                         .get("Content-Type")
                         .cloned()
                         .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
+                    let mut response_builder = http::Response::builder()
+                        .status(status)
+                        .header("Content-Type", content_type.clone());
+
+                    for &header in PROXY_HEADERS {
+                        if let Some(value) = response.headers().get(header) {
+                            response_builder = response_builder.header(header, value);
+                        }
+                    }
 
                     // If web page, do your shenanigans:
                     let mime: Mime = content_type.to_str().unwrap_or_default().parse().unwrap();
@@ -60,11 +78,7 @@ pub fn proxy() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                         hyper::body::Body::wrap_stream(response.bytes_stream())
                     };
 
-                    // Builds response:
-                    http::Response::builder()
-                        .status(status)
-                        .header("Content-Type", content_type)
-                        .body(proxied)
+                    response_builder.body(proxied)
                 }
             };
 
