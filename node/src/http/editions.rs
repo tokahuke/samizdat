@@ -18,6 +18,6 @@ fn get_editions() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
     warp::path!("_editions")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageSeries]))
-        .map(|| Edition::get_all())
+        .map(Edition::get_all)
         .map(api_reply)
 }

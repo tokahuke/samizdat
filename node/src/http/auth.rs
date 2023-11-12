@@ -33,10 +33,10 @@ fn get_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
         .and(warp::get())
         .and(authenticate_only_trusted())
         .map(|tail: warp::path::Tail| {
-            let entity = Entity::from_path(tail.as_str()).ok_or_else(|| "not an entity")?;
+            let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
             let serialized = bincode::serialize(&entity).expect("can serialize");
             let current: Vec<AccessRight> = db()
-                .get_cf(Table::AccessRights.get(), &serialized)?
+                .get_cf(Table::AccessRights.get(), serialized)?
                 .map(|rights| bincode::deserialize(&rights))
                 .transpose()?
                 .unwrap_or_default();
@@ -56,7 +56,7 @@ fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         .map(|entity: Entity| {
             let serialized = bincode::serialize(&entity).expect("can serialize");
             let current: Vec<AccessRight> = db()
-                .get_cf(Table::AccessRights.get(), &serialized)?
+                .get_cf(Table::AccessRights.get(), serialized)?
                 .map(|rights| bincode::deserialize(&rights))
                 .transpose()?
                 .unwrap_or_default();
@@ -76,9 +76,8 @@ fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                 .iterator_cf(Table::AccessRights.get(), IteratorMode::Start)
                 .map(|item| {
                     let (key, value) = item?;
-                    let entity = bincode::deserialize(&key)?;
-                    let granted_rights = bincode::deserialize(&value)?;
-
+                    let entity: Entity = bincode::deserialize(&key)?;
+                    let granted_rights: Vec<AccessRight> = bincode::deserialize(&value)?;
                     Ok((entity, granted_rights))
                 })
                 .collect::<Result<Vec<_>, crate::Error>>()?;
@@ -102,7 +101,7 @@ fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
         .and(authenticate_only_trusted())
         .and(warp::body::json())
         .map(|tail: warp::path::Tail, request: Request| {
-            let entity = Entity::from_path(tail.as_str()).ok_or_else(|| "not an entity")?;
+            let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
             let serialized = bincode::serialize(&entity).expect("can serialize");
             let mut current: Vec<AccessRight> = db()
                 .get_cf(Table::AccessRights.get(), &serialized)?
@@ -132,7 +131,7 @@ fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .and(warp::delete())
         .and(authenticate([]))
         .map(|tail: warp::path::Tail| {
-            let entity = Entity::from_path(tail.as_str()).ok_or_else(|| "not an entity")?;
+            let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
             db().delete_cf(
                 Table::AccessRights.get(),
                 bincode::serialize(&entity).expect("can serialize"),
@@ -230,9 +229,9 @@ fn is_trusted_context(referrer: &Url) -> bool {
 
 /// Returns `Ok(None)` when trusted context.
 fn entity_from_referrer(referrer: &Url) -> Result<Option<Entity>, Forbidden> {
-    check_origin(&referrer)?;
+    check_origin(referrer)?;
 
-    if is_trusted_context(&referrer) {
+    if is_trusted_context(referrer) {
         Ok(None)
     } else {
         // Find which entity is requesting authorization.
@@ -247,8 +246,7 @@ pub fn security_scope() -> impl Filter<Extract = (Entity,), Error = warp::Reject
     warp::header::optional("Referer").and_then(|maybe_referrer: Option<Url>| async move {
         let referrer =
             maybe_referrer.ok_or_else(|| warp::reject::custom(Unauthorized::MissingReferer))?;
-        let maybe_entity =
-            entity_from_referrer(&referrer).map_err(|forbidden| warp::reject::custom(forbidden))?;
+        let maybe_entity = entity_from_referrer(&referrer).map_err(warp::reject::custom)?;
         let entity = maybe_entity
             .ok_or_else(|| warp::reject::custom(Forbidden::TrustedContext(referrer)))?;
 
@@ -367,7 +365,7 @@ fn get_register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .map(|entity: Entity, query: Vec<(String, AccessRight)>| {
             let register = RegisterTemplate {
                 entity: &entity,
-                rights: &*query
+                rights: &query
                     .into_iter()
                     .filter(|(field, _)| field == "right")
                     .map(|(_, right)| right)

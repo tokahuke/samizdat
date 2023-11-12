@@ -6,10 +6,14 @@ use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use std::time::Duration;
+use tokio::sync::OwnedMutexGuard;
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 use super::connection_manager::{ConnectionManager, DropMode};
 use super::multiplexed::Multiplexed;
+
+pub type PeerEntry = Arc<Mutex<Option<Arc<Multiplexed>>>>;
 
 lazy_static! {
     pub static ref PEER_CONNECTIONS: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = {
@@ -48,51 +52,81 @@ impl ChannelManager {
         ChannelManager { connection_manager }
     }
 
+    fn create_connection(
+        &self,
+        mut locked: OwnedMutexGuard<Option<Arc<Multiplexed>>>,
+        peer_addr: SocketAddr,
+        drop_mode: DropMode,
+    ) {
+        let connection_manager = self.connection_manager.clone();
+        tokio::spawn(async move {
+            match connection_manager.punch_hole_to(peer_addr, drop_mode).await {
+                Ok(conn) => {
+                    *locked = Some(Arc::new(Multiplexed::new(conn)));
+                }
+                Err(err) => {
+                    log::error!("Failed to create connection to {peer_addr}: {err}")
+                }
+            }
+        });
+    }
+
     async fn connect_to(
         &self,
         peer_addr: SocketAddr,
         drop_mode: DropMode,
     ) -> Result<Arc<Multiplexed>, crate::Error> {
         log::debug!("fetching connection for {}", peer_addr);
-        let mut guard = PEER_CONNECTIONS.lock().await;
+        let mut guard = PEER_CONNECTIONS.write().await;
         log::debug!("connection guard acquired");
 
-        if let Some(mutex) = guard.get(&peer_addr) {
-            if let Some(multiplexed) = mutex.lock().await.as_ref() {
+        // Get the mutex referring to the connection.
+        let (multiplexed_mutex, is_new) = if let Some(mutex) = guard.get(&peer_addr).cloned() {
+            (mutex, false)
+        } else {
+            let lock = Arc::new(Mutex::new(None));
+            let locked = lock.clone().try_lock_owned().expect("resolves immediately");
+            self.create_connection(locked, peer_addr, drop_mode);
+
+            guard.insert(peer_addr, lock.clone());
+            (lock, true)
+        };
+
+        drop(guard); // Drop outer guard before awaiting for inner guard (prevents deadlock).
+        let multiplexed_guard = multiplexed_mutex.clone().lock_owned().await;
+
+        // Return active connection, if found.
+        if let Some(multiplexed) = multiplexed_guard.as_ref() {
+            if !multiplexed.is_closed() {
+                log::debug!("found existing connection");
+                return Ok(multiplexed.clone());
+            } else {
+                log::debug!("existing connection already closed.");
+            }
+        } else {
+            log::debug!("existing connection was unsuccessful.");
+        }
+
+        // Else, if this is a bad, but old connection, try to create a new one.
+        if !is_new {
+            self.create_connection(multiplexed_guard, peer_addr, drop_mode);
+            let new_guard = multiplexed_mutex.lock_owned().await;
+
+            // Return active connection, if found.
+            if let Some(multiplexed) = new_guard.as_ref() {
                 if !multiplexed.is_closed() {
-                    log::debug!("found existing connection");
+                    log::debug!("got new connection");
                     return Ok(multiplexed.clone());
                 } else {
-                    log::debug!("existing connection already closed. Create a new one!");
+                    log::debug!("new connection already closed.");
                 }
             } else {
-                log::debug!("last connection attempt unsuccessful");
+                log::debug!("new connection was unsuccessful.");
             }
         }
 
-        let lock = Arc::new(Mutex::new(None));
-        let mut locked = lock.clone().lock_owned().await;
-        guard.insert(peer_addr, lock.clone());
-        drop(guard);
-
-        let connection_manager = self.connection_manager.clone();
-        tokio::spawn(async move {
-            match connection_manager.punch_hole_to(peer_addr, drop_mode).await {
-                Ok(conn) => {
-                    *locked = Some(Arc::new(Multiplexed::new(conn)));
-                },
-                Err(err) => {
-                    log::error!("Failed to create connection to {peer_addr}: {err}")
-                }
-            }
-        });
-
-        let locked = lock.lock().await;
-        if let Some(multiplexed) = locked.as_ref() {
-            Ok(multiplexed.clone())
-        } else {
-            Err(format!("Connection attempt to {peer_addr} was unsuccessful").into())
-        }
+        // If no attempt was successful, you have an error.
+        Err(format!("Connection attempt to {peer_addr} was unsuccessful").into())
     }
 
     /// Waits for a given channel to be opened (i.e., the first message for it to arrive).
@@ -165,7 +199,7 @@ fn read_error_to_io(error: ReadToEndError) -> io::Error {
 
 impl ChannelReceiver {
     pub async fn recv(&mut self, max_len: usize) -> Result<Option<Vec<u8>>, crate::Error> {
-        let outcome = if let Some(header_stream) = self.receiver.recv().await {
+        if let Some(header_stream) = self.receiver.recv().await {
             header_stream
                 .read_to_end(max_len)
                 .await
@@ -174,9 +208,7 @@ impl ChannelReceiver {
                 .map_err(crate::Error::from)
         } else {
             Ok(None)
-        };
-
-        outcome
+        }
     }
 
     pub fn recv_many(

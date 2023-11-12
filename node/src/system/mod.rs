@@ -179,7 +179,7 @@ impl HubConnection {
 
         // Acquire hub connection:
         let guard = self.inner.get().await;
-        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
+        let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         // Get the deadline of the request:
         let context = context::current();
@@ -298,7 +298,7 @@ impl HubConnection {
     pub async fn get_edition(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = Riddle::new(&series.public_key.hash());
         let guard = self.inner.get().await;
-        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
+        let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         let response = inner
             .client
@@ -333,7 +333,7 @@ impl HubConnection {
         announcement: &EditionAnnouncement,
     ) -> Result<(), crate::Error> {
         let guard = self.inner.get().await;
-        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
+        let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         inner
             .client
@@ -349,7 +349,7 @@ impl HubConnection {
     ) -> Result<Option<Identity>, crate::Error> {
         let identity_riddle = Riddle::new(&identity.hash());
         let guard = self.inner.get().await;
-        let inner = guard.as_ref().ok_or_else(|| format!("Not yet connected"))?;
+        let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         let candidates = inner
             .client
@@ -390,8 +390,8 @@ impl Hubs {
         let mut hubs = self.hubs.write().await;
         *hubs = hubs
             .iter()
+            .filter(|&conn| conn.name != name)
             .cloned()
-            .filter(|conn| conn.name != name)
             .collect();
     }
 

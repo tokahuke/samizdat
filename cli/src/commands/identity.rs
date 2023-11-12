@@ -52,7 +52,7 @@ pub async fn forge(
     let series_owner = api::get_series_owner(&series_name).await?;
     let key = Key::from(series_owner.keypair.public);
 
-    let information = Hash::hash(&identity.handle).rehash(&key.hash());
+    let information = Hash::from_bytes(&identity.handle).rehash(&key.hash());
 
     // Sender task to update Samizdat Node of the current best PoW:
     let (send, mut recv) = mpsc::unbounded_channel();
@@ -163,7 +163,7 @@ pub async fn import(
     series: Key,
     solution: Hash,
 ) -> Result<(), anyhow::Error> {
-    let information = Hash::hash(&identity_handle).rehash(&series.hash());
+    let information = Hash::from_bytes(&identity_handle).rehash(&series.hash());
     let proof = ProofOfWork {
         information,
         solution,

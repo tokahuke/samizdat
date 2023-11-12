@@ -17,7 +17,7 @@ pub fn init_access_token() -> Result<(), anyhow::Error> {
         cli().data.to_str().expect("path is not a string")
     );
 
-    let access_token = fs::read_to_string(&path)?.trim().to_owned();
+    let access_token = fs::read_to_string(path)?.trim().to_owned();
 
     // Set static:
     unsafe {
@@ -41,7 +41,7 @@ pub fn init_port() -> Result<(), anyhow::Error> {
         cli().data.to_str().expect("path is not a string")
     );
 
-    let port = fs::read_to_string(&path)?.trim().parse::<u16>()?;
+    let port = fs::read_to_string(path)?.trim().parse::<u16>()?;
 
     // Set static:
     unsafe {

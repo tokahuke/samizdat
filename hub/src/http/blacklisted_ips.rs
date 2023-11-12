@@ -33,6 +33,6 @@ fn get_blacklisted_ips(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path("blacklisted-ips")
         .and(warp::get())
-        .map(|| BlacklistedIp::get_all())
+        .map(BlacklistedIp::get_all)
         .map(api_reply)
 }

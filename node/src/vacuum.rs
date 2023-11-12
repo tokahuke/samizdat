@@ -199,7 +199,7 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
     for (hash, ref_count) in ref_counts {
         batch.merge_cf(
             Table::ObjectChunkRefCount.get(),
-            &hash,
+            hash,
             bincode::serialize(&MergeOperation::Set(ref_count)).expect("can serialize"),
         );
     }
@@ -227,7 +227,7 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
 
         match ref_count.eval_on_zero() {
             1.. => {}
-            0 => batch.delete_cf(Table::ObjectChunks.get(), &hash),
+            0 => batch.delete_cf(Table::ObjectChunks.get(), hash),
             neg => log::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
         }
     }

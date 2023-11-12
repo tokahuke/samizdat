@@ -81,7 +81,7 @@ impl Hash {
     }
 
     /// Hashes a given piece of binary data.
-    pub fn hash(thing: impl AsRef<[u8]>) -> Hash {
+    pub fn from_bytes(thing: impl AsRef<[u8]>) -> Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
     }
 
@@ -110,7 +110,7 @@ impl Hash {
     /// Calculates the hash of the concatenation of `self` with another supplied hash.
     /// This operation is the backbone of the Merkle tree implementations.
     pub fn rehash(&self, rand: &Hash) -> Hash {
-        Hash::hash([rand.0, self.0].concat())
+        Hash::from_bytes([rand.0, self.0].concat())
     }
 
     /// Checks whether this hash value is contained in a Merkle tree with root hash `root`,
@@ -160,7 +160,7 @@ impl From<Vec<Hash>> for MerkleTree {
         MerkleTree {
             tree: std::iter::successors(Some(vec), |vec| {
                 if vec.len() > 1 {
-                    Some(iterate_level(&*vec))
+                    Some(iterate_level(vec))
                 } else {
                     None
                 }

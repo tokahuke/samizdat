@@ -60,7 +60,7 @@ fn get_hub() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
     warp::path!("_hubs" / AddrToResolve)
         .and(warp::get())
         .and(authenticate([AccessRight::ManageHubs]))
-        .map(|address| Hub::get(address))
+        .map(Hub::get)
         .map(api_reply)
 }
 
@@ -69,7 +69,7 @@ fn get_hubs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
     warp::path!("_hubs")
         .and(warp::get())
         .and(authenticate([AccessRight::ManageHubs]))
-        .map(|| Hub::get_all())
+        .map(Hub::get_all)
         .map(api_reply)
 }
 

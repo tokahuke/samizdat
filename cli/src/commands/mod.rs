@@ -206,12 +206,12 @@ pub async fn commit(
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
             log::info!("Creating object for {:?}", path);
-            let content_type = mime_guess::from_path(&path)
+            let content_type = mime_guess::from_path(path)
                 .first_or_octet_stream()
                 .to_string();
 
             let hash = api::post_object(
-                proxy_page(path, &fs::read(&path)?, refresh_socket).into_owned(),
+                proxy_page(path, &fs::read(path)?, refresh_socket).into_owned(),
                 &content_type,
                 is_release,
                 !is_release,

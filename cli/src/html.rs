@@ -15,7 +15,7 @@ pub fn proxy_page(
     raw: &'_ [u8],
     refresh_server_addr: Option<SocketAddr>,
 ) -> Cow<'_, [u8]> {
-    if MATCH_HTML.is_match(&*path.as_ref().to_string_lossy()) {
+    if MATCH_HTML.is_match(&path.as_ref().to_string_lossy()) {
         // Only support utf-8 HTML by now...
         let raw = String::from_utf8_lossy(raw);
 
