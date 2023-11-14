@@ -14,10 +14,7 @@ use samizdat_common::rpc::*;
 use crate::rpc::ROOM;
 use crate::CLI;
 
-use super::{
-    announce_edition, candidates_for_resolution, edition_for_request,
-    REPLAY_RESISTANCE,
-};
+use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
 
 /// The Hub server side of a client-server RPC connection.
 struct HubServerInner {

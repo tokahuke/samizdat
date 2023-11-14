@@ -265,10 +265,7 @@ pub async fn resolve_identity(
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving identity {identity}/{name}");
-    let Some(identity) = identity_provider()
-        .get_cached(identity)
-        .await?
-    else {
+    let Some(identity) = identity_provider().get_cached(identity).await? else {
         let not_resolved = NotResolved {
             message: format!("Identity {identity} not found"),
         };

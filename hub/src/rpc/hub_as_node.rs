@@ -22,10 +22,7 @@ use samizdat_common::BincodeOverQuic;
 
 use crate::CLI;
 
-use super::{
-    announce_edition, candidates_for_resolution, edition_for_request,
-    REPLAY_RESISTANCE,
-};
+use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
 
 /// The maximum length in bytes that a message in the RPC connections can have. This is
 /// set to a low value because all messages sent and received through the RPC are quite
