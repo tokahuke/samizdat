@@ -1,5 +1,8 @@
 //! Identities API.
 
+use std::fmt::Display;
+use std::str::FromStr;
+
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 use warp::path::Tail;
@@ -66,13 +69,51 @@ fn get_ethereum_provider(
         .map(api_reply)
 }
 
+
+/// A reference to an identity.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct IdentityRef {
+    /// A valid identity handle.
+    handle: String,
+}
+
+impl FromStr for IdentityRef {
+    type Err = crate::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            invalid @ ("" | "~" | "." | "..") => {
+                Err(format!("Identity handle cannot be `{invalid}`").into())
+            }
+            s if s.starts_with('_') => {
+                Err(format!("Identity handle `{s}` starting with `_`").into())
+            }
+            s => Ok(IdentityRef {
+                handle: s.to_owned(),
+            }),
+        }
+    }
+}
+
+impl Display for IdentityRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.handle)
+    }
+}
+
+impl IdentityRef {
+    /// Gets the handle (i.e., human-readable name) of this identity.
+    pub fn handle(&self) -> &str {
+        &self.handle
+    }
+}
+
 /// Gets the contents of an item using identity.
 fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!(String / ..)
+    warp::path!(IdentityRef / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|identity: String, name: Tail| async move {
-            Ok(resolve_identity(&identity, name.as_str().into(), []).await?)
+        .and_then(|identity: IdentityRef, name: Tail| async move {
+            Ok(resolve_identity(identity.handle(), name.as_str().into(), []).await?)
                 as Result<_, warp::Rejection>
         })
         .map(tuple)

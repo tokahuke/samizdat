@@ -113,11 +113,19 @@ impl Entity {
             r#type = split.next()?;
         }
 
-        let identifier = split.next()?;
+        if r#type.starts_with('_') {
+            // Non-identity based access.
+            let identifier = split.next()?;
 
-        Some(Entity {
-            r#type: r#type.to_owned(),
-            identifier: identifier.to_owned(),
-        })
+            Some(Entity {
+                r#type: r#type.to_owned(),
+                identifier: identifier.to_owned(),
+            })
+        } else {
+            Some(Entity {
+                r#type: "_identity".to_owned(),
+                identifier: r#type.to_owned(),
+            })
+        }
     }
 }

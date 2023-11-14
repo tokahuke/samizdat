@@ -385,13 +385,18 @@ impl IdentityCommand {
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum AuthCommand {
+    /// Grats access rights to a given scope.
     Grant {
         scope: String,
+        /// Comma-separated list of rights to grant.
         access_rights: Vec<String>,
     },
+    /// Revokes _all_ rights from a given scope.
     Revoke {
         scope: String,
     },
+    /// Lists all the current rights granted to each entity.
+    Ls {},
 }
 
 impl AuthCommand {
@@ -402,6 +407,7 @@ impl AuthCommand {
                 access_rights,
             } => commands::auth::grant(scope, access_rights).await,
             AuthCommand::Revoke { scope } => commands::auth::revoke(scope).await,
+            AuthCommand::Ls { } => commands::auth::ls().await,
         }
     }
 }

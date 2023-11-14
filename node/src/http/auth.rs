@@ -2,7 +2,7 @@
 
 use askama::Template;
 use rocksdb::IteratorMode;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use url::{Host, Url};
 use warp::Filter;
@@ -17,8 +17,8 @@ use super::{api_reply, html};
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
         get_auth_current(),
-        get_auth(),
         get_auths(),
+        get_auth(),
         patch_auth(),
         delete_auth(),
         get_register(),
@@ -68,6 +68,12 @@ fn get_auth_current() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
 
 /// Gets the list of all entities and all associated access rights.
 fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Serialize)]
+    struct Response {
+        entity: Entity,
+        granted_rights: Vec<AccessRight>,
+    }
+
     warp::path!("_auth")
         .and(warp::get())
         .and(authenticate_only_trusted())
@@ -78,7 +84,10 @@ fn get_auths() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejec
                     let (key, value) = item?;
                     let entity: Entity = bincode::deserialize(&key)?;
                     let granted_rights: Vec<AccessRight> = bincode::deserialize(&value)?;
-                    Ok((entity, granted_rights))
+                    Ok(Response {
+                        entity,
+                        granted_rights,
+                    })
                 })
                 .collect::<Result<Vec<_>, crate::Error>>()?;
 
@@ -119,7 +128,7 @@ fn patch_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
                 bincode::serialize(&current).expect("can serialize"),
             )?;
 
-            Ok(()) as Result<_, crate::Error>
+            Ok(true) as Result<_, crate::Error>
         })
         .map(api_reply)
 }
@@ -137,7 +146,7 @@ fn delete_auth() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
                 bincode::serialize(&entity).expect("can serialize"),
             )?;
 
-            Ok(()) as Result<(), crate::Error>
+            Ok(true) as Result<_, crate::Error>
         })
         .map(api_reply)
 }

@@ -114,7 +114,7 @@ impl IdentityProvider {
             .storage_contract
             .read()
             .await
-            .method::<_, (String, Address, u64, Vec<u8>)>("identities", "samizdat".to_owned())
+            .method::<_, (String, Address, u64, Vec<u8>)>("identities", identity.to_owned())
             .expect("ABI was not declared as expected")
             .call()
             .await

@@ -203,6 +203,26 @@ pub async fn get_all_editions() -> Result<Vec<GetEditionResponse>, anyhow::Error
 
 // Auth:
 
+/// A name of an entity inside the Samizdat network. An entity can be an object, a
+/// collection item, a series item, etc...
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct Entity {
+    /// The type of the entity.
+    pub r#type: String,
+    /// The identifier of the entity.
+    pub identifier: String,
+}
+
+#[derive(Deserialize)]
+pub struct GetAuthRequest {
+    pub entity: Entity,
+    pub granted_rights: Vec<String>,
+}
+
+pub async fn get_auths() -> Result<Vec<GetAuthRequest>, anyhow::Error> {
+    get("/_auth").await
+}
+
 #[derive(Serialize)]
 pub struct PatchAuthRequest {
     pub granted_rights: Vec<String>,
