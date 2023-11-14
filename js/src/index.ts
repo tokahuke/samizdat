@@ -269,7 +269,7 @@ export class Samizdat {
   }
 
   async getSeriesItem(seriesKey: string, path: string) {
-    const response = await call("GET", `/_series${seriesKey}${path}`);
+    const response = await call("GET", `/_series/${seriesKey}${path}`);
     return await response.blob();
   }
 
@@ -284,7 +284,13 @@ export class Samizdat {
 
   async getSubscription(seriesKey: string) {
     await this._ensureRights([AccessRight.ManageSubscriptions]);
-    const response = await call("GET", `/_subscriptions${seriesKey}`);
+    const response = await call("GET", `/_subscriptions/${seriesKey}`);
+    return (await response.json())["Ok"] as Subscription | null;
+  }
+
+  async getSubscriptions() {
+    await this._ensureRights([AccessRight.ManageSubscriptions]);
+    const response = await call("GET", `/_subscriptions`);
     return (await response.json())["Ok"] as Subscription | null;
   }
 
