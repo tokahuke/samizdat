@@ -99,6 +99,38 @@ where
     Ok(content?)
 }
 
+async fn put<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
+where
+    R: AsRef<str>,
+    P: Serialize + std::fmt::Debug,
+    Q: for<'a> Deserialize<'a>,
+{
+    let url = format!("{}{}", crate::server(), route.as_ref());
+    let response = CLIENT
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", access_token()))
+        .json(&payload)
+        .send()
+        .await
+        .with_context(|| format!("error from samizdat-node request POST {}", route.as_ref()))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
+
+    log::info!("{} POST {} {}", status, url, text);
+
+    let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "error deserializing response from POST {}: {text}",
+            route.as_ref()
+        )
+    })?;
+
+    Ok(content?)
+}
+
 async fn patch<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,

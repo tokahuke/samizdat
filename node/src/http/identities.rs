@@ -1,30 +1,70 @@
 //! Identities API.
 
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
+use serde_with::serde_as;
 use warp::path::Tail;
 use warp::Filter;
 
-use samizdat_common::pow::ProofOfWork;
-
-use crate::access::AccessRight;
-use crate::balanced_or_tree;
-use crate::db;
-use crate::models::{Identity, IdentityRef};
+use crate::db::Table;
+use crate::http::api_reply;
+use crate::identity_dapp::{identity_provider, DEFAULT_PROVIDER_ENDPOINT};
+use crate::models::IdentityRef;
+use crate::{balanced_or_tree, db};
 
 use super::resolvers::resolve_identity;
-use super::{api_reply, authenticate, tuple};
+use super::tuple;
 
 /// The entrypoint of the object API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     balanced_or_tree!(
-        // // Identity CRUD
-        // get_identity(),
-        get_identities(),
-        post_identity(),
-        // delete_identity(),
         // Query item using identity
         get_item(),
+        get_ethereum_provider(),
+        put_ethereum_provider(),
     )
+}
+
+/// Sets the Ethereum Network Provider to be used.
+fn put_ethereum_provider(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct Request {
+        endpoint: String,
+    }
+
+    #[derive(Serialize)]
+    struct Response {}
+
+    warp::path!("_ethereum_provider")
+        .and(warp::put())
+        .and(warp::body::json())
+        .map(|request: Request| {
+            tokio::spawn(async move { identity_provider().set_endpoint(&request.endpoint).await });
+            Ok(Response {})
+        })
+        .map(api_reply)
+}
+
+/// Gets the Ethereum Network Provider to be used.
+fn get_ethereum_provider(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(Serialize)]
+    struct Response {
+        endpoint: String,
+    }
+
+    warp::path!("_ethereum_provider")
+        .and(warp::get())
+        .map(|| {
+            Ok(Response {
+                endpoint: db()
+                    .get_cf(Table::Global.get(), "ethereum_provider_endpoint")?
+                    .map(|e| String::from_utf8_lossy(&e).into_owned())
+                    .unwrap_or_else(|| DEFAULT_PROVIDER_ENDPOINT.to_owned()),
+            })
+        })
+        .map(api_reply)
 }
 
 /// Gets the contents of an item using identity.
@@ -38,69 +78,3 @@ fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
         })
         .map(tuple)
 }
-
-/// Inserts a new identity in a database. This only has effect if no previous identity
-/// existed before or if the new supplied identity has a better proof of work than the
-/// existing one.
-fn post_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[derive(Deserialize)]
-    struct Request {
-        identity: String,
-        series: String,
-        proof: ProofOfWork,
-    }
-
-    warp::path!("_identities")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageIdentities]))
-        .and(warp::body::json())
-        .map(|request: Request| {
-            let identity = Identity {
-                identity: request.identity.parse()?,
-                series: request.series.parse()?,
-                proof: request.proof,
-            };
-
-            if identity.is_valid() {
-                let existing_work_done = if let Some(existing) = Identity::get(&identity.identity)?
-                {
-                    existing.work_done()
-                } else {
-                    0.0
-                };
-
-                if identity.work_done() > existing_work_done {
-                    let mut batch = rocksdb::WriteBatch::default();
-                    identity.insert(&mut batch);
-                    db().write(batch)?;
-
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            } else {
-                Err(crate::Error::Message(format!(
-                    "Invalid identity: {identity:?}"
-                )))
-            }
-        })
-        .map(api_reply)
-}
-
-/// Lists all identities.
-fn get_identities() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_identities")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageIdentities]))
-        .map(Identity::get_all)
-        .map(api_reply)
-}
-
-// fn delete_identity() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-//     warp::path!("_identities" / IdentityRef)
-//         .and(warp::delete())
-//         .and(authenticate([AccessRight::ManageIdentities]))
-//         .map(|identity| {
-
-//         }).map(api_reply)
-// }

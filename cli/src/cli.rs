@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-use samizdat_common::{Hash, Key};
-
 use crate::commands;
 
 static mut CLI: Option<Cli> = None;
@@ -368,51 +366,19 @@ impl SubscriptionCommand {
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum IdentityCommand {
-    /// Creates a new identity, putting the work to create a proof-of-work for it.
-    Forge {
-        /// Then handle (name) of the identity you want to forge.
-        identity_handle: String,
-        /// The name of the series owner for which you want to create an identity.
-        series_owner_name: String,
-        /// The number of iterations (per thread) to use to calculate proof-of-work.
-        #[structopt(long)]
-        n_iters: Option<usize>,
-    },
-    /// Imports an existing identity.
-    Import {
-        /// The handle (name) of the identity to be imported.
-        identity_handle: String,
-        /// The public key of the identity.
-        #[structopt(long)]
-        series: Key,
-        /// The solution to the proof-of-work for this identity.
-        #[structopt(long)]
-        solution: Hash,
-    },
-    /// Lists all locally stored identities.
-    Ls {
-        /// An optional specific identity to be listed. If none is given, will list all existing
-        /// identities.
-        identity_handle: Option<String>,
-    },
+    /// Sets the endpoint for connecting to the provider for the Ethereum blockchain.
+    SetEndpoint { endpoint: String },
+    /// Gets the endpoint for connection to the provider for the Ethereum blockchain.
+    GetEndpoint {},
 }
 
 impl IdentityCommand {
     async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            IdentityCommand::Forge {
-                identity_handle,
-                series_owner_name,
-                n_iters,
-            } => commands::identity::forge(identity_handle, series_owner_name, n_iters).await,
-            IdentityCommand::Ls { identity_handle } => {
-                commands::identity::ls(identity_handle).await
+            IdentityCommand::SetEndpoint { endpoint } => {
+                commands::identity::set_provider(&endpoint).await
             }
-            IdentityCommand::Import {
-                identity_handle,
-                series,
-                solution,
-            } => commands::identity::import(identity_handle, series, solution).await,
+            IdentityCommand::GetEndpoint {} => commands::identity::get_provider().await,
         }
     }
 }

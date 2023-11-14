@@ -4,6 +4,7 @@ mod access;
 mod cli;
 mod db;
 mod http;
+mod identity_dapp;
 mod models;
 mod slow_compiler_workaround;
 mod system;
@@ -23,6 +24,7 @@ use samizdat_common::logger;
 use access::init_access_token;
 use cli::init_cli;
 use db::init_db;
+use identity_dapp::init_identity_provider;
 use system::Hubs;
 
 /// The variable holding a list of all the connections to the hubs.
@@ -69,6 +71,7 @@ async fn main() -> Result<(), crate::Error> {
     // Init resources:
     init_db()?;
     init_access_token()?;
+    init_identity_provider()?;
     init_hubs().await?;
 
     // Start vacuum:
