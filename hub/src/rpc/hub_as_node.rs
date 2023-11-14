@@ -23,7 +23,7 @@ use samizdat_common::BincodeOverQuic;
 use crate::CLI;
 
 use super::{
-    announce_edition, candidates_for_resolution, edition_for_request, get_identity,
+    announce_edition, candidates_for_resolution, edition_for_request,
     REPLAY_RESISTANCE,
 };
 
@@ -146,32 +146,6 @@ impl Node for HubAsNodeServer {
         }
 
         announce_edition(ctx, self.partner, announcement).await
-    }
-
-    async fn get_identity(
-        self,
-        ctx: context::Context,
-        request: Arc<IdentityRequest>,
-    ) -> Vec<IdentityResponse> {
-        // Se if you are not being replayed:
-        match REPLAY_RESISTANCE.lock().await.check(&*request) {
-            Ok(true) => { /* valid */ }
-            Ok(false) => return vec![],
-            Err(err) => {
-                log::error!("error while checking for replay: {}", err);
-                return vec![];
-            }
-        }
-
-        get_identity(ctx, self.partner, request).await
-    }
-
-    async fn announce_identity(
-        self,
-        _ctx: context::Context,
-        _announcement: Arc<IdentityAnnouncement>,
-    ) {
-        // TODO: this is a no-op by now.
     }
 }
 

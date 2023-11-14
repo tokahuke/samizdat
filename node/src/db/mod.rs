@@ -109,7 +109,7 @@ pub enum Table {
     /// The list of series owners: pieces of information which allows the
     /// publication of a new version of a series in the network.
     SeriesOwners,
-    /// The list of all known identities, indexed by identity handle hash.
+    /// (DEPRECATED)
     Identities,
     /// Subscription to series on the network.
     Subscriptions,

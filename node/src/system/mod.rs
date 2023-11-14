@@ -32,8 +32,6 @@ use samizdat_common::{Hash, Riddle};
 
 use crate::cli;
 use crate::models;
-use crate::models::Identity;
-use crate::models::IdentityRef;
 use crate::models::{Edition, SeriesRef};
 
 use self::node_server::NodeServer;
@@ -342,42 +340,6 @@ impl HubConnection {
 
         Ok(())
     }
-
-    pub async fn get_identity(
-        &self,
-        identity: &IdentityRef,
-    ) -> Result<Option<Identity>, crate::Error> {
-        let identity_riddle = Riddle::new(&identity.hash());
-        let guard = self.inner.get().await;
-        let inner = guard.as_ref().ok_or("Not yet connected")?;
-
-        let candidates = inner
-            .client
-            .get_identity(context::current(), IdentityRequest { identity_riddle })
-            .await?;
-
-        let mut most_worked_on: Option<Identity> = None;
-
-        for candidate in candidates {
-            let cipher = TransferCipher::new(&identity.hash(), &candidate.rand);
-            let candidate_identity: Identity = candidate.identity.decrypt_with(&cipher)?;
-
-            if !candidate_identity.is_valid() || candidate_identity.identity() != identity {
-                log::warn!("received invalid candidate identity: {candidate_identity:?}",);
-                continue;
-            }
-
-            if let Some(most_worked_on) = most_worked_on.as_mut() {
-                if candidate_identity.work_done() > most_worked_on.work_done() {
-                    *most_worked_on = candidate_identity;
-                }
-            } else {
-                most_worked_on = Some(candidate_identity);
-            }
-        }
-
-        Ok(most_worked_on)
-    }
 }
 
 /// Set of all hub connection from this node.
@@ -572,39 +534,5 @@ impl Hubs {
                 }
             }
         }
-    }
-
-    pub async fn get_identity(&self, identity: &IdentityRef) -> Option<Identity> {
-        let hubs = self.hubs.read().await;
-        let mut results = stream::iter(hubs.iter().cloned())
-            .map(|hub| async move {
-                log::debug!("Querying {} for identity {identity}", hub.name);
-                (hub.name.clone(), hub.get_identity(identity).await)
-            })
-            .buffer_unordered(cli().max_parallel_hubs);
-
-        let mut most_worked_on: Option<Identity> = None;
-
-        // Here, we need to go through *aaaaaall* the hubs to find the best match.
-        // In other words, this *must* be correct. Let's not cut any corners here.
-        while let Some((hub_name, result)) = results.next().await {
-            match result {
-                Ok(Some(found)) => {
-                    if let Some(most_worked_on) = most_worked_on.as_mut() {
-                        if found.work_done() > most_worked_on.work_done() {
-                            *most_worked_on = found;
-                        }
-                    } else {
-                        most_worked_on = Some(found);
-                    }
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    log::error!("Error while querying {hub_name}: {err}")
-                }
-            }
-        }
-
-        most_worked_on
     }
 }

@@ -3,7 +3,6 @@
 mod bookmark;
 mod collection;
 mod hub;
-mod identity;
 mod object;
 mod series;
 mod subscription;
@@ -11,7 +10,6 @@ mod subscription;
 pub use bookmark::{Bookmark, BookmarkType};
 pub use collection::{CollectionItem, CollectionRef, Inventory, ItemPath, ItemPathBuf, Locator};
 pub use hub::Hub;
-pub use identity::{Identity, IdentityRef};
 pub use object::{
     ContentStream, ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE,
 };

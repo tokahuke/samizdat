@@ -8,7 +8,6 @@ use warp::Filter;
 use crate::db::Table;
 use crate::http::api_reply;
 use crate::identity_dapp::{identity_provider, DEFAULT_PROVIDER_ENDPOINT};
-use crate::models::IdentityRef;
 use crate::{balanced_or_tree, db};
 
 use super::resolvers::resolve_identity;
@@ -69,11 +68,11 @@ fn get_ethereum_provider(
 
 /// Gets the contents of an item using identity.
 fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!(IdentityRef / ..)
+    warp::path!(String / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|identity, name: Tail| async move {
-            Ok(resolve_identity(identity, name.as_str().into(), []).await?)
+        .and_then(|identity: String, name: Tail| async move {
+            Ok(resolve_identity(&identity, name.as_str().into(), []).await?)
                 as Result<_, warp::Rejection>
         })
         .map(tuple)

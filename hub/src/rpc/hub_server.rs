@@ -15,7 +15,7 @@ use crate::rpc::ROOM;
 use crate::CLI;
 
 use super::{
-    announce_edition, candidates_for_resolution, edition_for_request, get_identity,
+    announce_edition, candidates_for_resolution, edition_for_request,
     REPLAY_RESISTANCE,
 };
 
@@ -222,32 +222,5 @@ impl Hub for HubServer {
             announce_edition(ctx, client_addr, Arc::new(announcement)).await
         })
         .await
-    }
-
-    async fn get_identity(
-        self,
-        ctx: context::Context,
-        request: IdentityRequest,
-    ) -> Vec<IdentityResponse> {
-        let client_addr = self.0.addr;
-        self.throttle(|_| async move {
-            // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&request) {
-                Ok(false) => return vec![],
-                Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
-                    return vec![];
-                }
-                _ => {}
-            }
-
-            // Now, broadcast the announcement:
-            get_identity(ctx, client_addr, Arc::new(request)).await
-        })
-        .await
-    }
-
-    async fn announce_identity(self, _ctx: context::Context, _announcement: IdentityAnnouncement) {
-        unimplemented!()
     }
 }

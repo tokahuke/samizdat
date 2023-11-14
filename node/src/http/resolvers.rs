@@ -9,7 +9,7 @@ use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
 use crate::identity_dapp::identity_provider;
-use crate::models::{IdentityRef, ItemPath, Locator, ObjectRef, SeriesRef};
+use crate::models::{ItemPath, Locator, ObjectRef, SeriesRef};
 use crate::system::{ReceivedItem, ReceivedObject};
 
 /// Am HTTP response for an object that has been resolved.
@@ -260,17 +260,17 @@ pub async fn resolve_series(
 /// Tries to find an item in a collection, accessed by an identity handle, asking the
 /// Samizdat network if necessary.
 pub async fn resolve_identity(
-    identity_ref: IdentityRef,
+    identity: &str,
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving identity {identity_ref}/{name}");
+    log::info!("Resolving identity {identity}/{name}");
     let Some(identity) = identity_provider()
-        .get_cached(identity_ref.handle())
+        .get_cached(identity)
         .await?
     else {
         let not_resolved = NotResolved {
-            message: format!("Identity {identity_ref} not found"),
+            message: format!("Identity {identity} not found"),
         };
 
         return Ok(not_resolved.try_into());

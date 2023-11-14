@@ -236,43 +236,6 @@ async fn announce_edition(
     .await;
 }
 
-/// Gets the public key relating to a given handle.
-async fn get_identity(
-    ctx: context::Context,
-    client_addr: SocketAddr,
-    request: Arc<IdentityRequest>,
-) -> Vec<IdentityResponse> {
-    // TODO: create dedicated sampler....
-    ROOM.with_peers(EditionSampler, client_addr, |peer_id, peer| {
-        let request = request.clone();
-        async move {
-            let experiment = peer.edition_statistics.start_experiment();
-            let outcome = peer.client.get_identity(ctx, request).await;
-
-            match outcome {
-                Ok(response) => {
-                    // Empty response is not a valid candidate.
-                    if !response.is_empty() {
-                        experiment.end_with_success();
-                        Some(response)
-                    } else {
-                        None
-                    }
-                }
-                Err(err) => {
-                    log::warn!("error asking {peer_id} for latest: {err}");
-                    None
-                }
-            }
-        }
-    })
-    .collect::<Vec<_>>()
-    .await
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-}
-
 /// Runs the "direct" server. This is the system where the Hub acts as a server and the
 /// Node acts as a client. This is used for, e.g., the nodes to ask the server the
 /// resolution to a given query.

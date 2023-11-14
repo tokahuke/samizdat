@@ -122,10 +122,6 @@ pub trait Hub {
     async fn get_edition(request: EditionRequest) -> Vec<EditionResponse>;
     /// Announces a new edition of a series to the network.
     async fn announce_edition(announcement: EditionAnnouncement);
-    /// Gets the series associated to a given identifier.
-    async fn get_identity(request: IdentityRequest) -> Vec<IdentityResponse>;
-    /// Announces a new identity to the network.
-    async fn announce_identity(announcement: IdentityAnnouncement);
 }
 
 /// A resolution to a given query, given by the hub to a node.
@@ -171,8 +167,4 @@ pub trait Node {
     async fn get_edition(latest_request: Arc<EditionRequest>) -> Vec<EditionResponse>;
     /// Receives the announcement of a new edition.
     async fn announce_edition(announcement: Arc<EditionAnnouncement>);
-    /// Tries to resolve an identity request.
-    async fn get_identity(request: Arc<IdentityRequest>) -> Vec<IdentityResponse>;
-    /// Receives the announcement of a new identity.
-    async fn announce_identity(announcement: Arc<IdentityAnnouncement>);
 }

@@ -10,7 +10,7 @@ use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
 
-use crate::models::{CollectionItem, Edition, Identity, ObjectRef, SeriesRef, SubscriptionRef};
+use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
 
 use super::file_transfer;
 use super::transport::ChannelManager;
@@ -233,46 +233,5 @@ impl Node for NodeServer {
                 });
             }
         }
-    }
-
-    async fn get_identity(
-        self,
-        _ctx: context::Context,
-        request: Arc<IdentityRequest>,
-    ) -> Vec<IdentityResponse> {
-        log::info!("Got identity request from hub: {request:?}");
-
-        let maybe_response = match Identity::find(&request.identity_riddle) {
-            Err(err) => {
-                log::error!("Error while processing {request:?}: {err}");
-                None
-            }
-            Ok(None) => {
-                log::info!("No identity found for request");
-                None
-            }
-            Ok(Some(identity)) => {
-                let cipher_key = identity.identity().hash();
-                let rand = Hash::rand();
-                let cipher = TransferCipher::new(&cipher_key, &rand);
-
-                log::info!("Found identity {}", identity.identity().handle());
-
-                Some(IdentityResponse {
-                    rand,
-                    identity: cipher.encrypt_opaque(&identity),
-                })
-            }
-        };
-
-        maybe_response.into_iter().collect()
-    }
-
-    async fn announce_identity(
-        self,
-        _ctx: context::Context,
-        _announcement: Arc<IdentityAnnouncement>,
-    ) {
-        // This is a no-op, by now.
     }
 }
