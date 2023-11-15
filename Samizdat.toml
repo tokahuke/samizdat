@@ -23,4 +23,4 @@ name = "get-samizdat-debug"
 # Build instructions for this series.
 
 base = "./dist"
-run = "./install/build.sh 'aarch64-apple-darwin x86_64-unknown-linux-gnu'"
+run = "./install/build.sh 'aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-gnu'"

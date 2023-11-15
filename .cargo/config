@@ -2,13 +2,13 @@
 #rustflags = ["-C", "linker=clang"]
 #rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
-[target.x86_64-pc-windows-msvc]
-linker = "lld"
-rustflags = [
-  "-Lnative=/opt/xwin/crt/lib/x86_64",
-  "-Lnative=/opt/xwin/sdk/lib/um/x86_64",
-  "-Lnative=/opt/xwin/sdk/lib/ucrt/x86_64"
-]
+# [target.x86_64-pc-windows-msvc]
+# linker = "lld"
+# rustflags = [
+#   "-Lnative=/opt/xwin/crt/lib/x86_64",
+#   "-Lnative=/opt/xwin/sdk/lib/um/x86_64",
+#   "-Lnative=/opt/xwin/sdk/lib/ucrt/x86_64"
+# ]
 
 [target.x86_64-pc-windows-gnu]
-linker = "lld"
+linker = "x86_64-w64-mingw32-gcc"
