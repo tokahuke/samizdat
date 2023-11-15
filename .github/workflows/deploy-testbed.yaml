@@ -84,9 +84,9 @@ jobs:
            # Link to local hub:
            samizdat hub new testbed.hubfederation.com UseBoth &&
            # Get Samizdat:
-           samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM &&
+           samizdat subscription new $(samizdat identity get get-samizdat) &&
            # Samizdat blog:
-           samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
+           samizdat subscription new $(samizdat identity get samizdat)
            "
     
     - name: Done
