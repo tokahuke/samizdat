@@ -1,6 +1,7 @@
 #![feature(ip)]
 
 pub mod address;
+pub mod blockchain;
 pub mod cipher;
 pub mod heap_entry;
 pub mod keyed_channel;

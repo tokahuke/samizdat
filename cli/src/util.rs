@@ -1,6 +1,8 @@
 use core::fmt;
 use std::{collections::BTreeMap, fmt::Display};
 
+pub const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
+
 pub fn print_paths(paths: &[String], delimiter: char) {
     struct Node(BTreeMap<String, Node>);
 

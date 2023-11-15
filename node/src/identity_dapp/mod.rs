@@ -5,13 +5,12 @@ use lazy_static::lazy_static;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
+use samizdat_common::blockchain;
+
 use crate::{
     db::{db, Table},
     models::SeriesRef,
 };
-
-pub const DEFAULT_PROVIDER_ENDPOINT: &str = "https://rpc2.sepolia.org";
-pub const STORAGE_CONTRACT_ADDRESS: &str = "0x338Ea0bef7861a8D85D0034DB5a4Ce4Ee01BCce2";
 
 lazy_static! {
     pub static ref IDENTITY_CACHE: RwLock<BTreeMap<String, Arc<Identity>>> = RwLock::default();
@@ -25,9 +24,10 @@ pub fn init_identity_provider() -> Result<(), crate::Error> {
             IdentityProvider::new(String::from_utf8_lossy(&endpoint).as_ref())
         } else {
             log::warn!(
-                "Ethereum provider endpoint not set. Using default: {DEFAULT_PROVIDER_ENDPOINT}"
+                "Ethereum provider endpoint not set. Using default: {}",
+                blockchain::DEFAULT_PROVIDER_ENDPOINT
             );
-            IdentityProvider::new(DEFAULT_PROVIDER_ENDPOINT)
+            IdentityProvider::new(blockchain::DEFAULT_PROVIDER_ENDPOINT)
         };
 
     unsafe {
@@ -75,10 +75,13 @@ impl IdentityProvider {
         let rpc_client = Arc::new(
             Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"),
         );
-        let abi: Abi = serde_json::from_str(include_str!("SamizdatStorage.json"))
-            .expect("SamizdatStorage abi is valid");
+        let abi: Abi =
+            serde_json::from_str(include_str!("../../../blockchain/SamizdatStorage.json"))
+                .expect("SamizdatStorage abi is valid");
         let storage_contract = Contract::new(
-            STORAGE_CONTRACT_ADDRESS.parse::<Address>().unwrap(),
+            blockchain::STORAGE_CONTRACT_ADDRESS
+                .parse::<Address>()
+                .unwrap(),
             abi,
             rpc_client.clone(),
         );
@@ -91,10 +94,13 @@ impl IdentityProvider {
         let rpc_client = Arc::new(
             Provider::<Http>::try_from(new_endpoint).expect("could not instantiate HTTP Provider"),
         );
-        let abi: Abi = serde_json::from_str(include_str!("SamizdatStorage.json"))
-            .expect("SamizdatStorage abi is valid");
+        let abi: Abi =
+            serde_json::from_str(include_str!("../../../blockchain/SamizdatStorage.json"))
+                .expect("SamizdatStorage abi is valid");
         let storage_contract = Contract::new(
-            STORAGE_CONTRACT_ADDRESS.parse::<Address>().unwrap(),
+            blockchain::STORAGE_CONTRACT_ADDRESS
+                .parse::<Address>()
+                .unwrap(),
             abi,
             rpc_client.clone(),
         );

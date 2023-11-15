@@ -26,6 +26,7 @@ use samizdat_common::{Hash, PrivateKey};
 
 use crate::api;
 use crate::html::proxy_page;
+use crate::util::MARKER;
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
@@ -337,7 +338,6 @@ pub async fn watch(ttl: &Option<String>, no_browser: bool) -> Result<(), anyhow:
     }
 
     // Print watch banner:
-    const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
     println!();
     println!(
         "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",

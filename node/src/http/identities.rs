@@ -10,7 +10,7 @@ use warp::Filter;
 
 use crate::db::Table;
 use crate::http::api_reply;
-use crate::identity_dapp::{identity_provider, DEFAULT_PROVIDER_ENDPOINT};
+use crate::identity_dapp::identity_provider;
 use crate::{balanced_or_tree, db};
 
 use super::resolvers::resolve_identity;
@@ -63,12 +63,13 @@ fn get_ethereum_provider(
                 endpoint: db()
                     .get_cf(Table::Global.get(), "ethereum_provider_endpoint")?
                     .map(|e| String::from_utf8_lossy(&e).into_owned())
-                    .unwrap_or_else(|| DEFAULT_PROVIDER_ENDPOINT.to_owned()),
+                    .unwrap_or_else(|| {
+                        samizdat_common::blockchain::DEFAULT_PROVIDER_ENDPOINT.to_owned()
+                    }),
             })
         })
         .map(api_reply)
 }
-
 
 /// A reference to an identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

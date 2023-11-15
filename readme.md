@@ -51,11 +51,6 @@ We are not quite there yet...
 
 These are important issues where help is most appreciated:
 
-* **Samizdat identity**: offer human-readable handles to entities inside the network.
-  * Why it matters: do you browse the network using IP addresses or do you use DNS?
-  * Why it's hard: this involves _consensus_ in the net. Yeah, Byzantine Generals, Bitcoin and stuff. 
-  > Note: There already is a tentative implementation of the Samizdat identity using proof-of-work, but you might find it clumsy to use It's possible to steal your identity, if you don't put enough effort into it.
-
 * **Multi-platform support**: make Samizdat Node run on Windows and Android.
     * Why it matters: this is an end-user product and end-users are mostly trapped in these platforms.
     * Why it's hard: I'm too lazy to open my Windows 10. I'm bored by Android development.
@@ -94,7 +89,7 @@ This is just the tip of the iceberg, however! Check out more [here](https://prox
 * `js`: the SamizdatJS library, with enables Web applications to interface with the local Samizdat node. 
 * `install`: installation artifacts for end users in different platforms.
 * `simulate_net`: spawn your own network locally. Necessary for integration tests.
-* `blockchain`: tentative smart contract for Samizdat identity. 
+* `blockchain`: smart contracts for the Samizdat identity. 
 
 ## Licensing
 

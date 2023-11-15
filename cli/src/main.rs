@@ -7,6 +7,7 @@ mod api;
 mod cli;
 mod commands;
 mod html;
+mod identity_dapp;
 mod logger;
 mod manifest;
 mod util;
@@ -17,18 +18,20 @@ pub use cli::server;
 pub use manifest::{Manifest, PrivateManifest};
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    cli::init_cli()?;
+async fn main() {
+    let outcome: Result<(), anyhow::Error> = try {
+        cli::init_cli()?;
 
-    let _ = logger::init_logger(cli::cli().verbose);
+        let _ = logger::init_logger(cli::cli().verbose);
 
-    access_token::init_access_token()?;
-    access_token::init_port()?;
+        access_token::init_access_token()?;
+        access_token::init_port()?;
 
-    api::validate_node_is_up().await?;
-    if let Err(err) = cli::cli().clone().command.execute().await {
+        api::validate_node_is_up().await?;
+        cli::cli().clone().command.execute().await?;
+    };
+
+    if let Err(err) = outcome {
         println!("Error: {err:?}");
     }
-
-    Ok(())
 }

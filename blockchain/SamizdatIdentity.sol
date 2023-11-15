@@ -26,6 +26,8 @@ contract SamizdatIdentityStorage {
         owner = msg.sender;
     }
 
+    event SetIdentity(string identity, Entry from, Entry to);
+
     // Only the operator of the storage can do this.
     modifier operatorOnly() {
         require(msg.sender == operator, "Only the operator contract can run this");
@@ -45,6 +47,7 @@ contract SamizdatIdentityStorage {
 
     // Method for setting identities from another contract.
     function setIdentity(string calldata identity, Entry memory entry) public operatorOnly {
+        emit SetIdentity(identity, identities[identity], entry);
         identities[identity] = entry;
     }
 }
@@ -62,13 +65,6 @@ contract SamizdatIdentityV1 {
     bool public isDeprecated = false;
     // The contract tht superseeds this one.
     address public superseedingContract;
-
-    // A fresh-new association.
-    event NewAssociation(string identity, string entity);
-    // An association was updated.
-    event UpdateAssociation(string identity, string oldEntity, string newEntity);
-    // Ownership transferred.
-    event Transfer(string identity, address from, address to);
 
     constructor(address _identityStorage) {
         identityStorage = _identityStorage;
@@ -121,7 +117,12 @@ contract SamizdatIdentityV1 {
     ) payable public notDeprecated {
         Entry memory entry = SamizdatIdentityStorage(identityStorage).getIdentity(identity);
 
-        require(msg.value == price, "Need to pay the identity price to have it registered");
+        if (entry.ttl == 0) {
+            require(msg.value == price, "Need to pay the identity price to have it registered");
+        } else {
+            require(msg.value == 0, "Cannot pay for registered entity");
+        }
+
         require(
             entry.owner == address(0) || entry.owner == msg.sender,
             "Must be owner of the identity to control it"
@@ -130,14 +131,6 @@ contract SamizdatIdentityV1 {
         require(bytes(identity)[0] != "_", "Identity canot start with `_`");
         require(bytes(entity).length != 0, "Entity cannot be empty");
         require(ttl > 15 * 60, "TTL must be greater than 15 minutes");
-
-        if (entry.owner == address(0)) {
-            emit NewAssociation(identity, entity);
-        } else if (
-            keccak256(abi.encodePacked(entity)) != keccak256(abi.encodePacked(entry.entity))
-        ) {
-            emit UpdateAssociation(identity, entry.entity, entity);
-        }
 
         // Do update:
         entry.entity = entity;
@@ -163,10 +156,6 @@ contract SamizdatIdentityV1 {
         require(entry.owner != address(0), "Identity does not exist");
         require(entry.owner == msg.sender, "Must be owner of the identity to control it");
         require(to != address(0), "Cannot transfer to zero-address");
-
-        if (entry.owner != to) {
-            emit Transfer(identity, entry.owner, to);
-        }
 
         entry.owner = to;
 

@@ -370,6 +370,32 @@ pub enum IdentityCommand {
     SetEndpoint { endpoint: String },
     /// Gets the endpoint for connection to the provider for the Ethereum blockchain.
     GetEndpoint {},
+    /// Creates a new association in the smart contact in the Ethereum blockchain.
+    Create {
+        /// The human readable name to be associated.
+        identity: String,
+        /// The **public** the identity will refer to.
+        entity: String,
+        /// The time-to-leave in seconds (time in cache) of this rule.
+        #[structopt(long, default_value = "3600")]
+        ttl: u64,
+    },
+    /// Updatess and existing association in the smart contact in the Ethereum
+    /// blockchain.
+    Update {
+        /// The human readable name to be associated.
+        identity: String,
+        /// The new **public** the identity will refer to.
+        entity: String,
+        /// The time-to-leave in seconds (time in cache) of this rule.
+        #[structopt(long, default_value = "3600")]
+        ttl: u64,
+    },
+    /// Gets the current key associated with a given identity.
+    Get {
+        /// The identity to be resolved.
+        identity: String,
+    },
 }
 
 impl IdentityCommand {
@@ -379,6 +405,17 @@ impl IdentityCommand {
                 commands::identity::set_provider(&endpoint).await
             }
             IdentityCommand::GetEndpoint {} => commands::identity::get_provider().await,
+            IdentityCommand::Create {
+                identity,
+                entity,
+                ttl,
+            } => commands::identity::create(identity, entity, ttl).await,
+            IdentityCommand::Update {
+                identity,
+                entity,
+                ttl,
+            } => commands::identity::update(identity, entity, ttl).await,
+            IdentityCommand::Get { identity } => commands::identity::get(identity).await,
         }
     }
 }
@@ -392,9 +429,7 @@ pub enum AuthCommand {
         access_rights: Vec<String>,
     },
     /// Revokes _all_ rights from a given scope.
-    Revoke {
-        scope: String,
-    },
+    Revoke { scope: String },
     /// Lists all the current rights granted to each entity.
     Ls {},
 }
@@ -407,7 +442,7 @@ impl AuthCommand {
                 access_rights,
             } => commands::auth::grant(scope, access_rights).await,
             AuthCommand::Revoke { scope } => commands::auth::revoke(scope).await,
-            AuthCommand::Ls { } => commands::auth::ls().await,
+            AuthCommand::Ls {} => commands::auth::ls().await,
         }
     }
 }
