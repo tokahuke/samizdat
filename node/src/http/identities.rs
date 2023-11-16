@@ -2,6 +2,7 @@
 
 use std::fmt::Display;
 use std::str::FromStr;
+use std::time::SystemTime;
 
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -14,7 +15,7 @@ use crate::identity_dapp::identity_provider;
 use crate::{balanced_or_tree, db};
 
 use super::resolvers::resolve_identity;
-use super::tuple;
+use super::{get_timeout, tuple};
 
 /// The entrypoint of the object API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -113,9 +114,15 @@ fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reject
     warp::path!(IdentityRef / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|identity: IdentityRef, name: Tail| async move {
-            Ok(resolve_identity(identity.handle(), name.as_str().into(), []).await?)
-                as Result<_, warp::Rejection>
+        .and(get_timeout())
+        .and_then(|identity: IdentityRef, name: Tail, timeout| async move {
+            Ok(resolve_identity(
+                identity.handle(),
+                name.as_str().into(),
+                [],
+                SystemTime::now() + timeout,
+            )
+            .await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

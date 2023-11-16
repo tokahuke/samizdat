@@ -4,13 +4,14 @@ use warp::Filter;
 
 use crate::html::proxy_page;
 
-const PROXY_HEADERS: &[&'static str] = &[
+const PROXY_HEADERS: &[&str] = &[
     "ETag",
     "X-Samizdat-Bookmark",
     "X-Samizdat-Object",
     "X-Samizdat-Is-Draft",
     "X-Samizdat-Collection",
     "X-Samizdat-Series",
+    "X-Samizdat-Query-Duration",
 ];
 
 pub fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {

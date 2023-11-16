@@ -7,6 +7,7 @@ use samizdat_common::MerkleTree;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
+use std::time::Duration;
 
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::Hash;
@@ -166,6 +167,7 @@ impl ObjectMessage {
         self,
         receiver: ChannelReceiver,
         hash: Hash,
+        query_duration: Duration,
     ) -> Result<ContentStream, crate::Error> {
         let merkle_tree = MerkleTree::from(self.metadata.hashes.clone());
 
@@ -221,7 +223,12 @@ impl ObjectMessage {
                 });
 
         // Build content from stream (this limits content size to the advertised amount)
-        let tee = ObjectRef::import(merkle_tree, self.metadata, Box::pin(content_stream));
+        let tee = ObjectRef::import(
+            merkle_tree,
+            self.metadata,
+            query_duration,
+            Box::pin(content_stream),
+        );
 
         log::info!("done building object");
 
@@ -271,6 +278,8 @@ pub struct ReceivedObject {
     content_stream: ContentStream,
     /// The object handle for the soon-to-be object.
     object_ref: ObjectRef,
+    /// The time that took for the object to be resolved.
+    query_duration: Duration,
 }
 
 impl ReceivedObject {
@@ -289,6 +298,11 @@ impl ReceivedObject {
     pub fn metadata(&self) -> &ObjectMetadata {
         &self.metadata
     }
+
+    /// The time that took for the object to be resolved.
+    pub fn query_duration(&self) -> Duration {
+        self.query_duration
+    }
 }
 
 /// Receives the object from a channel.
@@ -296,6 +310,7 @@ pub async fn recv_object(
     _sender: ChannelSender,
     mut receiver: ChannelReceiver,
     hash: Hash,
+    query_duration: Duration,
 ) -> Result<ReceivedObject, crate::Error> {
     log::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash).await?;
@@ -303,7 +318,7 @@ pub async fn recv_object(
     let header = ObjectMessage::recv(&mut receiver, &transfer_cipher).await?;
     let metadata = header.metadata.clone();
     log::info!("receiving data");
-    let content_stream = header.recv_data(receiver, hash)?;
+    let content_stream = header.recv_data(receiver, hash, query_duration)?;
 
     log::info!("done receiving object");
 
@@ -311,6 +326,7 @@ pub async fn recv_object(
         metadata,
         content_stream,
         object_ref: ObjectRef::new(hash),
+        query_duration,
     })
 }
 
@@ -358,6 +374,7 @@ pub async fn recv_item(
     sender: ChannelSender,
     mut receiver: ChannelReceiver,
     locator_hash: Hash,
+    query_duration: Duration,
 ) -> Result<ReceivedItem, crate::Error> {
     log::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
@@ -398,9 +415,10 @@ pub async fn recv_item(
 
     log::info!("receiving data");
     let metadata = header.object_header.metadata.clone();
-    let content_stream = header
-        .object_header
-        .recv_data(receiver, *object_ref.hash())?;
+    let content_stream =
+        header
+            .object_header
+            .recv_data(receiver, *object_ref.hash(), query_duration)?;
 
     log::info!("done receiving item");
 
@@ -408,6 +426,7 @@ pub async fn recv_item(
         metadata,
         content_stream,
         object_ref,
+        query_duration,
     }))
 }
 

@@ -9,7 +9,7 @@ use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
@@ -506,7 +506,12 @@ impl Edition {
         series.refresh()?;
 
         if let Some(received_item) = hubs()
-            .query_with_retry(inventory_content_hash, QueryKind::Item, exp_backoff())
+            .query_with_retry(
+                inventory_content_hash,
+                QueryKind::Item,
+                SystemTime::now() + Duration::from_secs(60),
+                exp_backoff(),
+            )
             .await
         {
             let content = match received_item {
@@ -532,7 +537,12 @@ impl Edition {
                     let content_hash = collection.locator_for(item_path.as_path()).hash();
                     tokio::spawn(
                         hubs()
-                            .query_with_retry(content_hash, QueryKind::Item, exp_backoff())
+                            .query_with_retry(
+                                content_hash,
+                                QueryKind::Item,
+                                SystemTime::now() + Duration::from_secs(60),
+                                exp_backoff(),
+                            )
                             .map(|_| ()),
                     );
                 } else {

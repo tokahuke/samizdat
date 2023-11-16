@@ -52,9 +52,9 @@ pub async fn upload(
     Ok(())
 }
 
-pub async fn download(hash: String) -> Result<(), anyhow::Error> {
+pub async fn download(hash: String, timeout: u64) -> Result<(), anyhow::Error> {
     let stdout = std::io::stdout();
-    api::get_object(&hash, move |chunk| {
+    api::get_object(&hash, timeout, move |chunk| {
         stdout.lock().write_all(&chunk)?;
         Ok(())
     })

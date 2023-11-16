@@ -98,7 +98,7 @@ pub async fn post_object(
     Ok(content?)
 }
 
-pub async fn get_object<F>(hash: &str, mut each_chunk: F) -> Result<(), anyhow::Error>
+pub async fn get_object<F>(hash: &str, timeout: u64, mut each_chunk: F) -> Result<(), anyhow::Error>
 where
     F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>,
 {
@@ -106,6 +106,7 @@ where
     let response = CLIENT
         .get(&url)
         .header("Authorization", format!("Bearer {}", access_token()))
+        .header("X-Samizdat-Timeout", timeout)
         .send()
         .await
         .with_context(|| "error from samizdat-node request POST /_objects")?;

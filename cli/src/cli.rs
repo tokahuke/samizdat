@@ -98,7 +98,11 @@ pub enum Command {
         file: PathBuf,
     },
     /// Downloads an object from the samizdat network.
-    Download { hash: String },
+    Download {
+        hash: String,
+        #[structopt(long, default_value = "10")]
+        timeout: u64,
+    },
     /// Commands for managing hubs to which this node is connected.
     Hub {
         #[structopt(subcommand)]
@@ -184,7 +188,7 @@ impl Command {
                 });
                 commands::upload(&file, content_type, !no_bookmark, draft).await
             }
-            Command::Download { hash } => commands::download(hash).await,
+            Command::Download { hash, timeout } => commands::download(hash, timeout).await,
             Command::Hub { command } => command.execute().await,
             Command::Connection { command } => command.execute().await,
             Command::Peer { command } => command.execute().await,

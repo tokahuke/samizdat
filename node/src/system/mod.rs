@@ -7,6 +7,7 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
+use tokio::time::Instant;
 pub use transport::PEER_CONNECTIONS;
 
 use futures::prelude::*;
@@ -20,7 +21,6 @@ use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio::time::Instant;
 use tokio::time::{timeout_at, Duration};
 
 use samizdat_common::address::{ChannelAddr, HubAddr};
@@ -168,6 +168,7 @@ impl HubConnection {
         &self,
         content_hash: Hash,
         kind: QueryKind,
+        deadline: SystemTime,
     ) -> Result<ReceivedItem, crate::Error> {
         // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
@@ -180,18 +181,19 @@ impl HubConnection {
         let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         // Get the deadline of the request:
-        let context = context::current();
-        let request_duration = context
-            .deadline
-            .duration_since(SystemTime::now())
+        let query_start = SystemTime::now();
+        let mut context = context::current();
+        context.deadline = deadline;
+        let request_duration = deadline
+            .duration_since(query_start)
             .expect("deadline is in the future");
-        let deadline = Instant::now() + request_duration;
+        let deadline_instant = Instant::now() + request_duration;
 
         // Do the RPC call:
         let query_response = inner
             .client
             .query(
-                context,
+                context::current(),
                 Query {
                     content_riddles,
                     location_riddle,
@@ -223,6 +225,7 @@ impl HubConnection {
         );
 
         // Stream of peer candidates:
+        let mut query_duration;
         let mut candidates = inner
             .candidate_channels
             .recv_stream(candidate_channel)
@@ -247,21 +250,30 @@ impl HubConnection {
 
         // For each candidate, "do the thing":
         let outcome = loop {
-            match timeout_at(deadline, candidates.next()).await {
+            match timeout_at(deadline_instant, candidates.next()).await {
                 Ok(Some((sender, receiver))) => {
+                    query_duration = SystemTime::now()
+                        .duration_since(query_start)
+                        .expect("time error");
+                    log::info!("Query for {} took {:?}", content_hash, query_duration);
+
                     // TODO: possible DOS attack... claim you have the thing and then stall
                     // *right here*, causing the query to time out.
                     //
                     // Proposed mitigation: run the candidates concurrently. This will
                     // necessitate some extensive refactoring.
                     let receive_outcome = match kind {
-                        QueryKind::Object => {
-                            file_transfer::recv_object(sender, receiver, content_hash)
-                                .await
-                                .map(ReceivedItem::NewObject)
-                        }
+                        QueryKind::Object => file_transfer::recv_object(
+                            sender,
+                            receiver,
+                            content_hash,
+                            query_duration,
+                        )
+                        .await
+                        .map(ReceivedItem::NewObject),
                         QueryKind::Item => {
-                            file_transfer::recv_item(sender, receiver, content_hash).await
+                            file_transfer::recv_item(sender, receiver, content_hash, query_duration)
+                                .await
                         }
                     };
 
@@ -445,12 +457,20 @@ impl Hubs {
     }
 
     /// Makes a query to all inscribed hubs.
-    pub async fn query(&self, content_hash: Hash, kind: QueryKind) -> Option<ReceivedItem> {
+    pub async fn query(
+        &self,
+        content_hash: Hash,
+        kind: QueryKind,
+        deadline: SystemTime,
+    ) -> Option<ReceivedItem> {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
                 log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
-                (hub.name.clone(), hub.query(content_hash, kind).await)
+                (
+                    hub.name.clone(),
+                    hub.query(content_hash, kind, deadline).await,
+                )
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
@@ -470,18 +490,19 @@ impl Hubs {
         &self,
         content_hash: Hash,
         kind: QueryKind,
+        deadline: SystemTime,
         retries: I,
     ) -> Option<ReceivedItem>
     where
         I: IntoIterator<Item = Duration>,
     {
-        if let Some(item) = self.query(content_hash, kind).await {
+        if let Some(item) = self.query(content_hash, kind, deadline).await {
             return Some(item);
         }
 
         for duration in retries {
             tokio::time::sleep(duration).await;
-            if let Some(item) = self.query(content_hash, kind).await {
+            if let Some(item) = self.query(content_hash, kind, deadline).await {
                 return Some(item);
             }
         }

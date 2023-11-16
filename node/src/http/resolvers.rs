@@ -4,6 +4,7 @@ use futures::TryStreamExt;
 use http::Response;
 use hyper::Body;
 use std::convert::TryInto;
+use std::time::SystemTime;
 
 use samizdat_common::rpc::QueryKind;
 
@@ -59,6 +60,7 @@ async fn resolve_new_object(
 ) -> Result<Resolved, crate::Error> {
     let object = received_object.object_ref();
     let header = received_object.metadata().header.clone();
+    let query_duration = received_object.query_duration();
     let content_stream = received_object.into_content_stream();
 
     Ok(Resolved {
@@ -69,8 +71,12 @@ async fn resolve_new_object(
                 ("ETag", format!("\"{}\"", object.hash())),
                 // New objects are never bookmarked
                 ("X-Samizdat-Bookmark", "false".to_owned()),
-                // ("X-Samizdat-Is-Draft", header.is_draft().to_string()),
+                ("X-Samizdat-Is-Draft", header.is_draft().to_string()),
                 ("X-Samizdat-Object", object.hash().to_string()),
+                (
+                    "X-Samizdat-Query-Duration",
+                    query_duration.as_secs_f64().to_string(),
+                ),
             ])
             .collect(),
         body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
@@ -98,6 +104,7 @@ fn resolve_existing_object(
                     metadata.header.is_draft().to_string(),
                 ),
                 ("X-Samizdat-Object", object.hash().to_string()),
+                ("X-Samizdat-Query-Duration", "0".to_owned()),
             ])
             .collect(),
         body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
@@ -108,6 +115,7 @@ fn resolve_existing_object(
 pub async fn resolve_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+    deadline: SystemTime,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {object:?}");
     if object.exists()? {
@@ -116,7 +124,10 @@ pub async fn resolve_object(
     }
 
     log::info!("Hash {} not found locally. Querying hubs", object.hash());
-    match hubs().query(*object.hash(), QueryKind::Object).await {
+    match hubs()
+        .query(*object.hash(), QueryKind::Object, deadline)
+        .await
+    {
         // This should not be possible!!
         Some(ReceivedItem::ExistingObject(object)) => {
             log::warn!(
@@ -145,6 +156,7 @@ pub async fn resolve_object(
 pub async fn resolve_item(
     locator: Locator<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+    deadline: SystemTime,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     // Add extra headers for item:
     let ext_headers = ext_headers.into_iter().chain([(
@@ -157,11 +169,14 @@ pub async fn resolve_item(
         // If the object is known locally, we can simply deffer to querying the object.
         log::info!("Found item {locator} locally. Resolving object.");
         let object = item.object().expect("found invalid object for item");
-        return resolve_object(object, ext_headers).await;
+        return resolve_object(object, ext_headers, deadline).await;
     }
 
     log::info!("Item {locator} not found locally. Querying hubs");
-    match hubs().query(locator.hash(), QueryKind::Item).await {
+    match hubs()
+        .query(locator.hash(), QueryKind::Item, deadline)
+        .await
+    {
         // This should not be possible!!
         Some(ReceivedItem::ExistingObject(object)) => {
             log::warn!(
@@ -195,6 +210,7 @@ pub async fn resolve_series(
     series: SeriesRef,
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+    deadline: SystemTime,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving series item {series}/{name}");
 
@@ -226,7 +242,9 @@ pub async fn resolve_series(
             Some(item)
         } else {
             log::info!("Item not found locally. Querying hubs.");
-            hubs().query(locator.hash(), QueryKind::Item).await;
+            hubs()
+                .query(locator.hash(), QueryKind::Item, deadline)
+                .await;
 
             locator.get()?
         };
@@ -241,6 +259,7 @@ pub async fn resolve_series(
                     ),
                     ("X-Samizdat-Series", series.public_key().to_string()),
                 ]),
+                deadline,
             )
             .await;
         }
@@ -263,6 +282,7 @@ pub async fn resolve_identity(
     identity: &str,
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
+    deadline: SystemTime,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving identity {identity}/{name}");
     let Some(identity) = identity_provider().get_cached(identity).await? else {
@@ -273,5 +293,5 @@ pub async fn resolve_identity(
         return Ok(not_resolved.try_into());
     };
 
-    resolve_series(identity.series()?, name, ext_headers).await
+    resolve_series(identity.series()?, name, ext_headers, deadline).await
 }

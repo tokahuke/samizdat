@@ -14,10 +14,12 @@ mod resolvers;
 mod series;
 mod subscriptions;
 
+use std::time::Duration;
+
 pub use auth::authenticate;
 
 use futures::Future;
-use warp::Filter;
+use warp::{reject::Rejection, Filter};
 
 use crate::{balanced_or_tree, cli};
 
@@ -39,6 +41,12 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
         crate::Error::NoHeaderRead => http::StatusCode::INTERNAL_SERVER_ERROR,
         _ => http::StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+/// Retrieves the timeout from the `X-Samizdat-Timeout` header.
+fn get_timeout() -> impl Filter<Extract = (Duration,), Error = Rejection> + Clone {
+    warp::header::optional("X-Samizdat-Timeout")
+        .map(|maybe_timeout: Option<u64>| Duration::from_secs(maybe_timeout.unwrap_or(10)))
 }
 
 /// The standardized JSON reply for the API.

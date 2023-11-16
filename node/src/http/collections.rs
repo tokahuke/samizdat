@@ -1,5 +1,7 @@
 //! Collections API.
 
+use std::time::SystemTime;
+
 use serde_derive::Deserialize;
 use warp::path::Tail;
 use warp::Filter;
@@ -12,7 +14,7 @@ use crate::http::async_api_reply;
 use crate::models::{CollectionRef, ItemPathBuf, ObjectRef};
 
 use super::resolvers::resolve_item;
-use super::{authenticate, tuple};
+use super::{authenticate, get_timeout, tuple};
 
 /// The entrypoint of the collection public API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -55,11 +57,13 @@ pub fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
     warp::path!("_collections" / Hash / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|hash: Hash, name: Tail| async move {
+        .and(get_timeout())
+        .and_then(|hash: Hash, name: Tail, timeout| async move {
             let collection = CollectionRef::new(hash);
             let path = name.as_str().into();
             let locator = collection.locator_for(path);
-            Ok(resolve_item(locator, []).await?) as Result<_, warp::Rejection>
+            Ok(resolve_item(locator, [], SystemTime::now() + timeout).await?)
+                as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

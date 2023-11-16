@@ -1,5 +1,7 @@
 //! Objects API.
 
+use std::time::SystemTime;
+
 use serde_derive::Deserialize;
 use warp::Filter;
 
@@ -11,7 +13,7 @@ use crate::http::async_api_reply;
 use crate::models::{BookmarkType, Droppable, ObjectHeader, ObjectRef};
 
 use super::resolvers::resolve_object;
-use super::{api_reply, authenticate, tuple};
+use super::{api_reply, authenticate, get_timeout, tuple};
 
 /// The entrypoint of the object API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -37,8 +39,10 @@ pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejecti
 fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("_objects" / Hash)
         .and(warp::get())
-        .and_then(|hash: Hash| async move {
-            Ok(resolve_object(ObjectRef::new(hash), vec![]).await?) as Result<_, warp::Rejection>
+        .and(get_timeout())
+        .and_then(|hash: Hash, timeout| async move {
+            Ok(resolve_object(ObjectRef::new(hash), vec![], SystemTime::now() + timeout).await?)
+                as Result<_, warp::Rejection>
         })
         .map(tuple)
 }

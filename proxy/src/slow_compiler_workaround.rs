@@ -40,12 +40,12 @@ macro_rules! balanced_or_tree {
     ($x:expr $(,)?) => { $crate::debug_boxed!($x) };
     // Multiple expressions: recurse with three lists: left, right and counter.
     ($($x:expr),+ $(,)?) => {
-        crate::balanced_or_tree!(@internal  ;     $($x),+; $($x),+)
+        $crate::balanced_or_tree!(@internal  ;     $($x),+; $($x),+)
         //                          ^ left ^ right  ^ counter
     };
     // Counter 1 or 2; move one more item and recurse on each sublist, and or them together
     (@internal $($left:expr),*; $head:expr, $($tail:expr),+; $a:expr $(,$b:expr)?) => {
-        (crate::balanced_or_tree!($($left,)* $head)).or(crate::balanced_or_tree!($($tail),+))
+        ($crate::balanced_or_tree!($($left,)* $head)).or($crate::balanced_or_tree!($($tail),+))
     };
     // Counter > 2; move one item from the right to the left and subtract two from the counter
     (@internal $($left:expr),*; $head:expr, $($tail:expr),+; $a:expr, $b:expr, $($more:expr),+) => {

@@ -9,6 +9,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use std::{collections::BTreeMap, convert::TryInto};
 use tokio::sync::mpsc;
 
@@ -521,7 +522,7 @@ impl ObjectRef {
                 content_size,
                 received_at: chrono::Utc::now(),
             };
-            let statistics = ObjectStatistics::new(content_size);
+            let statistics = ObjectStatistics::new(content_size, Duration::from_secs(0));
 
             log::info!("New object {} with metadata: {:#?}", hash, metadata);
 
@@ -542,6 +543,7 @@ impl ObjectRef {
     pub fn import(
         merkle_tree: MerkleTree,
         supplied_metadata: ObjectMetadata,
+        query_duration: Duration,
         chunks: impl 'static + Send + Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
     ) -> ContentStream {
         let (send, recv) = mpsc::unbounded_channel();
@@ -552,7 +554,8 @@ impl ObjectRef {
         // Spawn importing task
         tokio::spawn(async move {
             if let Err(err) =
-                ObjectRef::do_import(merkle_tree, supplied_metadata, send, chunks).await
+                ObjectRef::do_import(merkle_tree, supplied_metadata, query_duration, send, chunks)
+                    .await
             {
                 task_send.send(Err(err)).ok();
             }
@@ -588,6 +591,7 @@ impl ObjectRef {
     async fn do_import(
         merkle_tree: MerkleTree,
         supplied_metadata: ObjectMetadata,
+        query_duration: Duration,
         sender: mpsc::UnboundedSender<Result<(usize, Hash), crate::Error>>,
         chunks: impl Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
     ) -> Result<(), crate::Error> {
@@ -679,7 +683,7 @@ impl ObjectRef {
             content_size,
             received_at: chrono::Utc::now(),
         };
-        let statistics = ObjectStatistics::new(content_size);
+        let statistics = ObjectStatistics::new(content_size, query_duration);
 
         let mut batch = rocksdb::WriteBatch::default();
         ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, false);
@@ -829,6 +833,9 @@ pub struct ObjectStatistics {
     last_touched_at: DateTime<Utc>,
     /// Total number of touches on this object.
     touches: usize,
+    /// The time it took for the network to respond with a valid candidate for this object.
+    #[serde(default)]
+    query_duration: Duration,
 }
 
 /// The prior distribution parameters (_a priori_ suppositions) about object usage.
@@ -853,12 +860,13 @@ impl Default for UsePrior {
 
 impl ObjectStatistics {
     /// Create a new statistics struct for an object of given size.
-    fn new(size: usize) -> ObjectStatistics {
+    fn new(size: usize, query_duration: Duration) -> ObjectStatistics {
         ObjectStatistics {
             size,
             created_at: Utc::now(),
             last_touched_at: Utc::now(),
             touches: 1,
+            query_duration,
         }
     }
 

@@ -1,7 +1,7 @@
 //! Series API.
 
 use serde_derive::Deserialize;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use warp::path::Tail;
 use warp::Filter;
 
@@ -12,7 +12,7 @@ use crate::models::{CollectionRef, Droppable, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
-use super::{api_reply, authenticate, tuple};
+use super::{api_reply, authenticate, get_timeout, tuple};
 
 /// The entrypoint of the series API.
 pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -164,10 +164,16 @@ fn get_edition_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
     warp::path!("_series" / Key / ..)
         .and(warp::path::tail())
         .and(warp::get())
-        .and_then(|series_key: Key, name: Tail| async move {
+        .and(get_timeout())
+        .and_then(|series_key: Key, name: Tail, timeout| async move {
             let series = SeriesRef::new(series_key);
-            Ok(resolve_series(series, name.as_str().into(), []).await?)
-                as Result<_, warp::Rejection>
+            Ok(resolve_series(
+                series,
+                name.as_str().into(),
+                [],
+                SystemTime::now() + timeout,
+            )
+            .await?) as Result<_, warp::Rejection>
         })
         .map(tuple)
 }
