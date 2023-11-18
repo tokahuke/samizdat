@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::models::ContentStream;
+use crate::models::{ContentStream, self};
 use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
 use crate::utils::{pop_front_chunk, push_front_chunk};
 
@@ -154,6 +154,7 @@ impl ValidatedCandidate {
                 missing_hashes.remove(position);
                 chunk_sender.send(chunk).ok();
             } else {
+                log::warn!("{}", String::from_utf8_lossy(&chunk));
                 return Err(format!(
                     "Received chunk has hash {received_hash}; which was not expected"
                 )
@@ -257,15 +258,21 @@ pub async fn recv_object(
     deadline_instant: Instant,
 ) -> Result<ReceivedObject, crate::Error> {
     let mut negotiated = Box::pin(
-        candidate_stream
-            .map(move |(sender, receiver)| async move {
-                ValidatedCandidate::init_object(hash, sender, receiver)
-                    .await
-                    .map_err(|err| log::error!("{err}"))
-                    .ok()
-            })
-            .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
-            .filter_map(|c| async move { c }),
+        stream::select(
+            candidate_stream
+                .map(move |(sender, receiver)| async move {
+                    ValidatedCandidate::init_object(hash, sender, receiver)
+                        .await
+                        .map_err(|err| log::error!("{err}"))
+                        .ok()
+                })
+                .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
+                .filter_map(|c| async move { c })
+                .map(Ok),
+            stream::once(tokio::time::sleep_until(deadline_instant).map(|_| Err(()))),
+        )
+        .take_while(|c| future::ready(c.is_ok()))
+        .map(|c| c.expect("is always ok")),
     );
 
     // Choose the first peer to do some special things.
@@ -290,7 +297,7 @@ pub async fn recv_object(
 
     // Receive the content in a separate task:
     tokio::spawn(
-        futures::stream::once(async move { master })
+        stream::once(async move { master })
             .chain(negotiated)
             .for_each_concurrent(None, move |mut candidate| {
                 let hashes = hashes.clone();
@@ -325,7 +332,7 @@ pub async fn recv_object(
         merkle_tree,
         metadata.clone(),
         query_duration,
-        futures::stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
+        stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
     );
 
     log::info!("done receiving object");
@@ -365,8 +372,8 @@ pub async fn send_object(
                         .into());
                     }
 
-                    log::debug!("stream for data opened");
-                    let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                    let chunk_content = models::get_chunk(*chunk)?;
+                    let mut compressed = CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                         .bytes()
                         .collect::<Result<Vec<_>, _>>()
                         .expect("never error");
@@ -408,16 +415,23 @@ pub async fn recv_item(
     deadline_instant: Instant,
 ) -> Result<ReceivedItem, crate::Error> {
     let mut negotiated = Box::pin(
-        candidate_stream
-            .map(move |(sender, receiver)| async move {
-                ValidatedCandidate::init_item(locator_hash, sender, receiver)
-                    .await
-                    .map_err(|err| log::error!("{err}"))
-                    .ok()
-            })
-            .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
-            .filter_map(|c| async move { c }),
+        stream::select(
+            candidate_stream
+                .map(move |(sender, receiver)| async move {
+                    ValidatedCandidate::init_item(locator_hash, sender, receiver)
+                        .await
+                        .map_err(|err| log::error!("{err}"))
+                        .ok()
+                })
+                .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
+                .filter_map(|c| async move { c })
+                .map(Ok),
+            stream::once(tokio::time::sleep_until(deadline_instant).map(|_| Err(()))),
+        )
+        .take_while(|c| future::ready(c.is_ok()))
+        .map(|c| c.expect("is always ok")),
     );
+
     // Choose the first peer to do some special things.
     let Ok(maybe_master) = tokio::time::timeout_at(deadline_instant, negotiated.next()).await
     else {
@@ -452,7 +466,7 @@ pub async fn recv_item(
         log::info!("Object {} exists. Ending transmission", object_ref.hash());
         // Ending transmission from all potential candidates that might arrive:
         tokio::spawn(
-            futures::stream::once(async move { master })
+            stream::once(async move { master })
                 .chain(negotiated)
                 .for_each_concurrent(None, move |candidate| async move {
                     if let Err(err) = candidate.say_thanks().await {
@@ -465,7 +479,7 @@ pub async fn recv_item(
 
     // Receive the content in a separate task:
     tokio::spawn(
-        futures::stream::once(async move { master })
+        stream::once(async move { master })
             .chain(negotiated)
             .for_each_concurrent(None, move |mut candidate| {
                 let hashes = hashes.clone();
@@ -500,7 +514,7 @@ pub async fn recv_item(
         merkle_tree,
         metadata.clone(),
         query_duration,
-        futures::stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
+        stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
     );
 
     log::info!("done receiving object");
@@ -541,8 +555,8 @@ pub async fn send_item(
                         .into());
                     }
 
-                    log::debug!("stream for data opened");
-                    let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                    let chunk_content = models::get_chunk(*chunk)?;
+                    let mut compressed = CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                         .bytes()
                         .collect::<Result<Vec<_>, _>>()
                         .expect("never error");
