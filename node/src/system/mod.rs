@@ -21,7 +21,7 @@ use tarpc::server::{self, Channel};
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio::time::{timeout_at, Duration};
+use tokio::time::Duration;
 
 use samizdat_common::address::{ChannelAddr, HubAddr};
 use samizdat_common::cipher::TransferCipher;
@@ -225,16 +225,16 @@ impl HubConnection {
         );
 
         // Stream of peer candidates:
-        let mut query_duration;
-        let mut candidates = inner
+        let channel_manager = inner.channel_manager.clone();
+        let candidates = inner
             .candidate_channels
             .recv_stream(candidate_channel)
-            .map(|candidate| {
+            .map(move |candidate| {
                 // TODO: check if candidate is valid. However, seems to be unnecessary, since
                 // transport will make sure no naughty people are involved.
                 let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
                 log::info!("Got candidate {channel_addr} for channel {candidate_channel}");
-                let channel_manager = inner.channel_manager.clone();
+                let channel_manager = channel_manager.clone();
                 Box::pin(async move {
                     channel_manager
                         .expect(channel_addr)
@@ -248,51 +248,15 @@ impl HubConnection {
             .buffer_unordered(cli().concurrent_candidates)
             .filter_map(|done| Box::pin(async move { done }));
 
-        // For each candidate, "do the thing":
-        let outcome = loop {
-            match timeout_at(deadline_instant, candidates.next()).await {
-                Ok(Some((sender, receiver))) => {
-                    query_duration = SystemTime::now()
-                        .duration_since(query_start)
-                        .expect("time error");
-                    log::info!("Query for {} took {:?}", content_hash, query_duration);
-
-                    // TODO: possible DOS attack... claim you have the thing and then stall
-                    // *right here*, causing the query to time out.
-                    //
-                    // Proposed mitigation: run the candidates concurrently. This will
-                    // necessitate some extensive refactoring.
-                    let receive_outcome = match kind {
-                        QueryKind::Object => file_transfer::recv_object(
-                            sender,
-                            receiver,
-                            content_hash,
-                            query_duration,
-                        )
-                        .await
-                        .map(ReceivedItem::NewObject),
-                        QueryKind::Item => {
-                            file_transfer::recv_item(sender, receiver, content_hash, query_duration)
-                                .await
-                        }
-                    };
-
-                    match receive_outcome {
-                        Ok(outcome) => break Ok(outcome),
-                        Err(err) => {
-                            log::warn!(
-                                "Candidate for query {kind:?} {content_hash} failed with: {err}"
-                            );
-                        }
-                    }
-                }
-                Ok(None) => {
-                    log::info!("Candidate channel {candidate_channel} dried");
-                    break Err(crate::Error::AllCandidatesFailed);
-                }
-                Err(_) => {
-                    break Err(crate::Error::Timeout);
-                }
+        let outcome = match kind {
+            QueryKind::Object => {
+                file_transfer::recv_object(candidates, content_hash, query_start, deadline_instant)
+                    .await
+                    .map(ReceivedItem::NewObject)
+            }
+            QueryKind::Item => {
+                file_transfer::recv_item(candidates, content_hash, query_start, deadline_instant)
+                    .await
             }
         };
 

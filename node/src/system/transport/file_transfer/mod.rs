@@ -1,272 +1,216 @@
 //! Protocol for information transfer between peers.
 
-use brotli::{CompressorReader, Decompressor};
-use chrono::TimeZone;
-use futures::prelude::*;
-use samizdat_common::MerkleTree;
-use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
-use serde_derive::{Deserialize, Serialize};
+pub mod legacy;
+mod messages;
+
+use std::collections::VecDeque;
 use std::io::{Cursor, Read};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
+use brotli::{CompressorReader, Decompressor};
+use futures::prelude::*;
 use samizdat_common::cipher::TransferCipher;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, MerkleTree};
+use serde_derive::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
+use tokio::time::Instant;
 
-use crate::cli;
+use crate::models::ContentStream;
 use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
-use crate::models::{ContentStream, CHUNK_SIZE};
+use crate::utils::{pop_front_chunk, push_front_chunk};
 
 use super::{ChannelReceiver, ChannelSender};
 
-/// The maximum number of bytes allowed for a header. This puts a hard cap on the maximum file size
-/// at around 2.34GB.
-const MAX_HEADER_LENGTH: usize = CHUNK_SIZE;
-/// The maximum size of the stream, with plenty of room for errors.
-const MAX_STREAM_SIZE: usize = crate::models::CHUNK_SIZE * 2;
+use self::messages::{ItemMessage, Message, NonceMessage, ObjectMessage, MAX_STREAM_SIZE};
 
-/// A header that can be sent from the sender to the receiver _before_ the stream starts.
-#[async_trait::async_trait]
-trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeserialize<'a> {
-    /// Receive the header.
-    async fn recv(
-        receiver: &mut ChannelReceiver,
-        cipher: &TransferCipher,
-    ) -> Result<Self, crate::Error> {
-        // Receive header from peer:
-        let mut serialized_header = receiver
-            .recv(MAX_HEADER_LENGTH)
-            .await?
-            .ok_or("channel dried")?;
-        cipher.decrypt(&mut serialized_header);
-        let header: Self = bincode::deserialize(&serialized_header)?;
+const MAX_CONCURRENT_CANDIDATES: usize = 10;
+const HASHES_PER_REQUEST: usize = 5;
+const CHUNK_TIMEOUT: Duration = Duration::from_secs(5);
 
-        Ok(header)
-    }
-
-    /// Send the header.
-    async fn send(
-        &self,
-        sender: &ChannelSender,
-        cipher: &TransferCipher,
-    ) -> Result<(), crate::Error> {
-        let mut serialized_header = bincode::serialize(&self).expect("can serialize");
-        cipher.encrypt(&mut serialized_header);
-        sender.send(&serialized_header).await?;
-
-        Ok(())
-    }
+struct ValidatedCandidate {
+    sender: ChannelSender,
+    receiver: ChannelReceiver,
+    transfer_cipher: TransferCipher,
+    merkle_tree: Option<MerkleTree>,
+    metadata: Option<ObjectMetadata>,
+    item: Option<CollectionItem>,
 }
 
-/// Sends a _nonce_ (a number used only once) that will be used for deriving a key to transfer
-/// the stream.
-#[derive(Default, Serialize, Deserialize)]
-struct NonceMessage {
-    nonce: Hash,
-}
-
-impl Message for NonceMessage {}
-
-impl NonceMessage {
-    fn new() -> NonceMessage {
-        NonceMessage {
-            nonce: Hash::rand(),
-        }
-    }
-
-    /// Combines with a content header to create a symmetric cipher.
-    fn cipher(self, hash: Hash) -> TransferCipher {
-        TransferCipher::new(&hash, &self.nonce)
-    }
-
-    /// Receive a header from a channel and creates a cipher for all further transmissions.
-    async fn recv_negotiate(
-        receiver: &mut ChannelReceiver,
+impl ValidatedCandidate {
+    async fn init_object(
         hash: Hash,
-    ) -> Result<TransferCipher, crate::Error> {
-        let init_cipher = NonceMessage::default().cipher(hash);
-        let nonce_header = NonceMessage::recv(receiver, &init_cipher).await?;
+        sender: ChannelSender,
+        mut receiver: ChannelReceiver,
+    ) -> Result<ValidatedCandidate, crate::Error> {
+        log::info!("negotiating nonce with {}", sender.remote_address());
+        let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to negotiate nonce with {}: {err}",
+                    sender.remote_address()
+                )
+            })?;
+        let header = ObjectMessage::recv(&mut receiver, &transfer_cipher)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to receive object message from {}: {err}",
+                    sender.remote_address()
+                )
+            })?;
+        let merkle_tree = header.validate(hash).map_err(|err| {
+            format!(
+                "Validation of the object message from {} failed: {err}",
+                sender.remote_address()
+            )
+        })?;
 
-        Ok(nonce_header.cipher(hash))
-    }
-
-    /// Sends a header from a channel and creates a cipher for all further transmissions.
-    async fn send_negotiate(
-        sender: &ChannelSender,
-        hash: Hash,
-    ) -> Result<TransferCipher, crate::Error> {
-        let init_cipher = NonceMessage::default().cipher(hash);
-        let nonce_header = NonceMessage::new();
-        nonce_header.send(sender, &init_cipher).await?;
-
-        Ok(nonce_header.cipher(hash))
-    }
-}
-
-/// A header sending information (metadata) on a collection item.
-#[derive(Debug, Serialize, Deserialize)]
-struct ItemMessage {
-    item: CollectionItem,
-    object_header: ObjectMessage,
-}
-
-impl Message for ItemMessage {}
-
-impl ItemMessage {
-    /// Creates an item header for a given collection item.
-    fn for_item(item: CollectionItem) -> Result<ItemMessage, crate::Error> {
-        let object_header = ObjectMessage::for_object(&item.object()?)?;
-        Ok(ItemMessage {
-            item,
-            object_header,
-        })
-    }
-}
-
-/// Whether to proceed or not after receiving the value of the item object hash.
-#[derive(Debug, Serialize, Deserialize)]
-enum ProceedMessage {
-    /// Proceed with object transmission.
-    Proceed,
-    /// Object found local; end of transaction.
-    Cancel,
-}
-
-impl Message for ProceedMessage {}
-
-/// A header sending information (metadata) on an item.
-#[derive(Debug, Serialize, Deserialize)]
-struct ObjectMessage {
-    nonce: Hash,
-    metadata: ObjectMetadata,
-}
-
-impl Message for ObjectMessage {}
-
-impl ObjectMessage {
-    /// Creates an object header for a given object.
-    ///
-    /// # Panics:
-    ///
-    /// If object does not exist locally.
-    fn for_object(object: &ObjectRef) -> Result<ObjectMessage, crate::Error> {
-        let mut metadata = object
-            .metadata()?
-            .ok_or_else(|| format!("Object message for inexistent object: {object:?}"))?;
-
-        // Need to omit some details before sending through the wire:
-        metadata.received_at = chrono::Utc.timestamp_nanos(0);
-
-        Ok(ObjectMessage {
-            nonce: Hash::rand(),
-            metadata,
+        Ok(ValidatedCandidate {
+            sender,
+            receiver,
+            transfer_cipher,
+            merkle_tree: Some(merkle_tree),
+            metadata: Some(header.metadata),
+            item: None,
         })
     }
 
-    /// Use this header to receive the object from the peer.
-    pub fn recv_data(
-        self,
-        receiver: ChannelReceiver,
-        hash: Hash,
-        query_duration: Duration,
-    ) -> Result<ContentStream, crate::Error> {
-        let merkle_tree = MerkleTree::from(self.metadata.hashes.clone());
-
-        // Check if content actually corresponds to advertized hash:
-        if merkle_tree.root() != hash {
-            return Err(format!(
-                "bad content from peer: expected {}, got {}",
-                hash,
-                merkle_tree.root(),
+    async fn init_item(
+        locator_hash: Hash,
+        sender: ChannelSender,
+        mut receiver: ChannelReceiver,
+    ) -> Result<ValidatedCandidate, crate::Error> {
+        log::info!("negotiating nonce with {}", sender.remote_address());
+        let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to negotiate nonce with {}: {err}",
+                    sender.remote_address()
+                )
+            })?;
+        let item = ItemMessage::recv(&mut receiver, &transfer_cipher)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to receive item message from {}: {err}",
+                    sender.remote_address()
+                )
+            })?;
+        let merkle_tree = item.validate(locator_hash).map_err(|err| {
+            format!(
+                "Validation of the object message from {} failed: {err}",
+                sender.remote_address()
             )
-            .into());
-        }
+        })?;
 
-        // Refuse if content is too big:
-        if self.metadata.content_size > cli().max_content_size * 1_000_000 {
-            return Err(format!(
-                "content too big: max size is {}Mb, but content is {}Mb",
-                cli().max_content_size,
-                self.metadata.content_size / 1_000_000,
-            )
-            .into());
-        }
-
-        // Stream content
-        let cipher = TransferCipher::new(&hash, &self.nonce);
-        let content_size = self.metadata.content_size;
-        let mut transferred_size = 0;
-        let content_stream =
-            receiver
-                .recv_many(MAX_STREAM_SIZE)
-                .and_then(move |mut compressed_chunk| {
-                    // Decrypt and decompress:
-                    cipher.decrypt(&mut compressed_chunk);
-
-                    async move {
-                        // Decompress chunk:
-                        let mut chunk = Vec::with_capacity(CHUNK_SIZE);
-                        Decompressor::new(Cursor::new(compressed_chunk), 4096)
-                            .read_to_end(&mut chunk)?;
-
-                        transferred_size += chunk.len();
-
-                        if transferred_size <= content_size {
-                            Ok(chunk)
-                        } else {
-                            Err(format!(
-                                "Transferred size of {transferred_size} exceeds advertized size \
-                                of {content_size}"
-                            )
-                            .into())
-                        }
-                    }
-                });
-
-        // Build content from stream (this limits content size to the advertised amount)
-        let tee = ObjectRef::import(
-            merkle_tree,
-            self.metadata,
-            query_duration,
-            Box::pin(content_stream),
-        );
-
-        log::info!("done building object");
-
-        Ok(tee)
+        Ok(ValidatedCandidate {
+            sender,
+            receiver,
+            transfer_cipher,
+            merkle_tree: Some(merkle_tree),
+            metadata: Some(item.object_header.metadata),
+            item: Some(item.item),
+        })
     }
 
-    /// Use this header to send the object to the peer.
-    pub async fn send_data(
-        self,
-        sender: &ChannelSender,
-        object: &ObjectRef,
+    async fn request_chunk(
+        &mut self,
+        chunks: &[Hash],
+        missing_hashes: &mut Vec<Hash>,
+        chunk_sender: &mpsc::UnboundedSender<Vec<u8>>,
     ) -> Result<(), crate::Error> {
-        let cipher = TransferCipher::new(object.hash(), &self.nonce);
-        let chunks = stream::iter(object.iter_content()?.expect("object exits"));
-
-        // TODO play with concurrent streams later.
-        chunks
-            .try_for_each_concurrent(Some(1), |chunk| {
-                log::debug!("stream for data opened");
-                let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
-                    .bytes()
-                    .collect::<Result<Vec<_>, _>>()
-                    .expect("never error");
-                cipher.encrypt(&mut compressed);
-
-                async move { sender.send(&compressed).await }
-            })
+        RequestChunkMessage::GetChunks(chunks.to_vec())
+            .send(&self.sender, &self.transfer_cipher)
             .await?;
 
-        log::info!(
-            "finished sending {} to {}",
-            object.hash(),
-            sender.remote_address()
-        );
+        let mut incoming = Box::pin(self.receiver.recv_many(MAX_STREAM_SIZE).take(chunks.len()));
+
+        while let Some(maybe_chunk) = tokio::time::timeout(CHUNK_TIMEOUT, incoming.next())
+            .await
+            .transpose()
+        {
+            // Receive chunk:
+            let mut compressed_chunk = maybe_chunk
+                .map_err(|_| format!("Incoming chunk timed out").into())
+                .flatten()?;
+
+            // Decrypt compressed chunk:
+            self.transfer_cipher.decrypt(&mut compressed_chunk);
+
+            // Decompress chunk:
+            let mut chunk = Vec::with_capacity(MAX_STREAM_SIZE);
+            Decompressor::new(Cursor::new(compressed_chunk), 4096).read_to_end(&mut chunk)?;
+
+            // Check vailidity:
+            let received_hash = Hash::from_bytes(&chunk);
+            if let Some(position) = missing_hashes
+                .iter()
+                .position(|hash| hash == &received_hash)
+            {
+                missing_hashes.remove(position);
+                chunk_sender.send(chunk).ok();
+            } else {
+                return Err(format!(
+                    "Received chunk has hash {received_hash}; which was not expected"
+                )
+                .into());
+            }
+        }
 
         Ok(())
     }
+
+    async fn say_thanks(self) -> Result<(), crate::Error> {
+        RequestChunkMessage::Thanks {}
+            .send(&self.sender, &self.transfer_cipher)
+            .await
+    }
 }
+
+struct Hashes {
+    hashes: VecDeque<Hash>,
+    original_size: usize,
+    received: usize,
+}
+
+impl Hashes {
+    fn new(hashes: Vec<Hash>) -> Hashes {
+        Hashes {
+            original_size: hashes.len(),
+            received: 0,
+            hashes: VecDeque::from(hashes),
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        self.original_size == self.received
+    }
+
+    fn get_chunk(&mut self) -> Option<Vec<Hash>> {
+        if !self.is_done() {
+            Some(pop_front_chunk(&mut self.hashes, HASHES_PER_REQUEST))
+        } else {
+            None
+        }
+    }
+
+    fn mark_received(&mut self, chunk: Vec<Hash>, missing: Vec<Hash>) {
+        self.received += chunk.len() - missing.len();
+        push_front_chunk(&mut self.hashes, chunk);
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum RequestChunkMessage {
+    GetChunks(Vec<Hash>),
+    Thanks,
+}
+
+impl Message for RequestChunkMessage {}
 
 /// Represents an object in the process of being received. The object to which this
 /// struct corresponds most likely does not exist in the database.
@@ -307,18 +251,82 @@ impl ReceivedObject {
 
 /// Receives the object from a channel.
 pub async fn recv_object(
-    _sender: ChannelSender,
-    mut receiver: ChannelReceiver,
+    candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     hash: Hash,
-    query_duration: Duration,
+    query_start: SystemTime,
+    deadline_instant: Instant,
 ) -> Result<ReceivedObject, crate::Error> {
-    log::info!("negotiating nonce");
-    let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash).await?;
-    log::info!("receiving object header");
-    let header = ObjectMessage::recv(&mut receiver, &transfer_cipher).await?;
-    let metadata = header.metadata.clone();
-    log::info!("receiving data");
-    let content_stream = header.recv_data(receiver, hash, query_duration)?;
+    let mut negotiated = Box::pin(
+        candidate_stream
+            .map(move |(sender, receiver)| async move {
+                ValidatedCandidate::init_object(hash, sender, receiver)
+                    .await
+                    .map_err(|err| log::error!("{err}"))
+                    .ok()
+            })
+            .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
+            .filter_map(|c| async move { c }),
+    );
+
+    // Choose the first peer to do some special things.
+    let Ok(maybe_master) = tokio::time::timeout_at(deadline_instant, negotiated.next()).await
+    else {
+        return Err(format!("Query for {hash} timed out").into());
+    };
+    let Some(mut master) = maybe_master else {
+        return Err(format!("No valid candidate arrived for {hash}").into());
+    };
+
+    // Now, the query is considered done.
+    let query_duration = SystemTime::now()
+        .duration_since(query_start)
+        .expect("time error");
+
+    // Prepare to receive content:
+    let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
+    let merkle_tree = master.merkle_tree.clone().take().expect("is always set");
+    let metadata = master.metadata.take().expect("is always set");
+    let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
+
+    // Receive the content in a separate task:
+    tokio::spawn(
+        futures::stream::once(async move { master })
+            .chain(negotiated)
+            .for_each_concurrent(None, move |mut candidate| {
+                let hashes = hashes.clone();
+                let chunk_sender = chunk_sender.clone();
+                async move {
+                    loop {
+                        let Some(chunk) = hashes.lock().await.get_chunk() else {
+                            break;
+                        };
+
+                        let mut missing_hashes = chunk.clone();
+                        let outcome = candidate
+                            .request_chunk(&chunk, &mut missing_hashes, &chunk_sender)
+                            .await;
+                        hashes.lock().await.mark_received(chunk, missing_hashes);
+
+                        if let Err(err) = outcome {
+                            log::error!("{err}");
+                            break;
+                        }
+                    }
+
+                    if let Err(err) = candidate.say_thanks().await {
+                        log::error!("{err}");
+                    }
+                }
+            }),
+    );
+
+    // Import the data into the database:
+    let content_stream = ObjectRef::import(
+        merkle_tree,
+        metadata.clone(),
+        query_duration,
+        futures::stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
+    );
 
     log::info!("done receiving object");
 
@@ -333,7 +341,7 @@ pub async fn recv_object(
 /// Sends an object to a channel.
 pub async fn send_object(
     sender: ChannelSender,
-    _receiver: ChannelReceiver,
+    mut receiver: ChannelReceiver,
     object: &ObjectRef,
 ) -> Result<(), crate::Error> {
     let header = ObjectMessage::for_object(object)?;
@@ -342,10 +350,33 @@ pub async fn send_object(
     let transfer_cipher = NonceMessage::send_negotiate(&sender, *object.hash()).await?;
     log::info!("sending object header");
     header.send(&sender, &transfer_cipher).await?;
-    log::info!("sending data");
-    header.send_data(&sender, object).await?;
 
-    log::info!("done sending object");
+    loop {
+        match RequestChunkMessage::recv(&mut receiver, &transfer_cipher).await? {
+            RequestChunkMessage::Thanks => break,
+            RequestChunkMessage::GetChunks(chunks) => {
+                for chunk in &chunks {
+                    if !header.metadata.hashes.contains(chunk) {
+                        return Err(format!(
+                            "Candidate {} requested chunk {chunk} out of object {}",
+                            sender.remote_address(),
+                            object.hash(),
+                        )
+                        .into());
+                    }
+
+                    log::debug!("stream for data opened");
+                    let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                        .bytes()
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("never error");
+                    transfer_cipher.encrypt(&mut compressed);
+
+                    sender.send(&compressed).await?;
+                }
+            }
+        }
+    }
 
     Ok(())
 }
@@ -371,56 +402,108 @@ impl ReceivedItem {
 /// Receive a collection item from a channel. Returns `Ok(None)` if the item object is
 /// perceived to already exist in the database.
 pub async fn recv_item(
-    sender: ChannelSender,
-    mut receiver: ChannelReceiver,
+    candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     locator_hash: Hash,
-    query_duration: Duration,
+    query_start: SystemTime,
+    deadline_instant: Instant,
 ) -> Result<ReceivedItem, crate::Error> {
-    log::info!("negotiating nonce");
-    let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
-    log::info!("receiving item header");
-    let header = ItemMessage::recv(&mut receiver, &transfer_cipher).await?;
+    let mut negotiated = Box::pin(
+        candidate_stream
+            .map(move |(sender, receiver)| async move {
+                ValidatedCandidate::init_item(locator_hash, sender, receiver)
+                    .await
+                    .map_err(|err| log::error!("{err}"))
+                    .ok()
+            })
+            .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
+            .filter_map(|c| async move { c }),
+    );
+    // Choose the first peer to do some special things.
+    let Ok(maybe_master) = tokio::time::timeout_at(deadline_instant, negotiated.next()).await
+    else {
+        return Err(format!("Query for locator {locator_hash} timed out").into());
+    };
+    let Some(mut master) = maybe_master else {
+        return Err(format!("No valid candidate arrived for locator {locator_hash}").into());
+    };
 
-    // No tricks!
-    let locator_hash_from_peer = header.item.locator().hash();
-    if locator_hash_from_peer != locator_hash {
-        return Err(crate::Error::Message(format!(
-            "bad item from peer: expected {}, got {}",
-            locator_hash, locator_hash_from_peer,
-        )));
-    }
+    // Now, the query is considered done.
+    let query_duration = SystemTime::now()
+        .duration_since(query_start)
+        .expect("time error");
 
-    // This checks proof validity:
-    let object_ref = header.item.object()?;
+    // Prepare to receive data:
+    let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
+    let merkle_tree = master.merkle_tree.clone().take().expect("is always set");
+    let metadata = master.metadata.take().expect("is always set");
+    let item = master.item.take().expect("is always set");
+    let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
+
+    // Insert item (should already be validated by this point.)
+    item.insert()?;
+
+    // Get object ref:
+    let object_ref = ObjectRef::new(merkle_tree.root());
 
     // Go away if you already have what you wanted:
     if object_ref.exists()? {
         // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
         // the object in the database.
         log::info!("Object {} exists. Ending transmission", object_ref.hash());
-        // Need to reaffirm the collection-object connection (e.g. the object is there,
-        // but is part of another collection and the link is not yet established):
-        header.item.insert()?;
-        ProceedMessage::Cancel
-            .send(&sender, &transfer_cipher)
-            .await?;
+        // Ending transmission from all potential candidates that might arrive:
+        tokio::spawn(
+            futures::stream::once(async move { master })
+                .chain(negotiated)
+                .for_each_concurrent(None, move |candidate| async move {
+                    if let Err(err) = candidate.say_thanks().await {
+                        log::error!("{err}");
+                    }
+                }),
+        );
         return Ok(ReceivedItem::ExistingObject(object_ref));
-    } else {
-        ProceedMessage::Proceed
-            .send(&sender, &transfer_cipher)
-            .await?;
     }
 
-    header.item.insert()?;
+    // Receive the content in a separate task:
+    tokio::spawn(
+        futures::stream::once(async move { master })
+            .chain(negotiated)
+            .for_each_concurrent(None, move |mut candidate| {
+                let hashes = hashes.clone();
+                let chunk_sender = chunk_sender.clone();
+                async move {
+                    loop {
+                        let Some(chunk) = hashes.lock().await.get_chunk() else {
+                            break;
+                        };
 
-    log::info!("receiving data");
-    let metadata = header.object_header.metadata.clone();
-    let content_stream =
-        header
-            .object_header
-            .recv_data(receiver, *object_ref.hash(), query_duration)?;
+                        let mut missing_hashes = chunk.clone();
+                        let outcome = candidate
+                            .request_chunk(&chunk, &mut missing_hashes, &chunk_sender)
+                            .await;
+                        hashes.lock().await.mark_received(chunk, missing_hashes);
 
-    log::info!("done receiving item");
+                        if let Err(err) = outcome {
+                            log::error!("{err}");
+                            break;
+                        }
+                    }
+
+                    if let Err(err) = candidate.say_thanks().await {
+                        log::error!("{err}");
+                    }
+                }
+            }),
+    );
+
+    // Import the data into the database:
+    let content_stream = ObjectRef::import(
+        merkle_tree,
+        metadata.clone(),
+        query_duration,
+        futures::stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
+    );
+
+    log::info!("done receiving object");
 
     Ok(ReceivedItem::NewObject(ReceivedObject {
         metadata,
@@ -436,29 +519,40 @@ pub async fn send_item(
     mut receiver: ChannelReceiver,
     item: CollectionItem,
 ) -> Result<(), crate::Error> {
-    let object = item.object()?;
-    let hash = item.locator().hash();
     let header = ItemMessage::for_item(item)?;
 
     log::info!("negotiating nonce");
-    let transfer_cipher = NonceMessage::send_negotiate(&sender, hash).await?;
-    log::info!("sending item header");
+    let transfer_cipher =
+        NonceMessage::send_negotiate(&sender, header.item.locator().hash()).await?;
+    log::info!("sending object header");
     header.send(&sender, &transfer_cipher).await?;
 
-    log::info!("Receiving proceed message");
-    let proceed = ProceedMessage::recv(&mut receiver, &transfer_cipher).await?;
+    loop {
+        match RequestChunkMessage::recv(&mut receiver, &transfer_cipher).await? {
+            RequestChunkMessage::Thanks => break,
+            RequestChunkMessage::GetChunks(chunks) => {
+                for chunk in &chunks {
+                    if !header.object_header.metadata.hashes.contains(chunk) {
+                        return Err(format!(
+                            "Candidate {} requested chunk {chunk} out of item {}",
+                            sender.remote_address(),
+                            header.item.locator(),
+                        )
+                        .into());
+                    }
 
-    match proceed {
-        ProceedMessage::Proceed => {
-            log::info!("sending data");
-            header.object_header.send_data(&sender, &object).await?;
-        }
-        ProceedMessage::Cancel => {
-            log::info!("no need to send data");
+                    log::debug!("stream for data opened");
+                    let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
+                        .bytes()
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("never error");
+                    transfer_cipher.encrypt(&mut compressed);
+
+                    sender.send(&compressed).await?;
+                }
+            }
         }
     }
-
-    log::info!("done sending object");
 
     Ok(())
 }
