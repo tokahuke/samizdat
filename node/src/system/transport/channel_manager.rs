@@ -199,8 +199,8 @@ fn read_error_to_io(error: ReadToEndError) -> io::Error {
 
 impl ChannelReceiver {
     pub async fn recv(&mut self, max_len: usize) -> Result<Option<Vec<u8>>, crate::Error> {
-        if let Some(header_stream) = self.receiver.recv().await {
-            header_stream
+        if let Some(recv_stream) = self.receiver.recv().await {
+            recv_stream
                 .read_to_end(max_len)
                 .await
                 .map(Some)
@@ -211,13 +211,28 @@ impl ChannelReceiver {
         }
     }
 
-    pub fn recv_many(
+    pub fn recv_many<'a>(
+        &'a mut self,
+        max_len: usize,
+    ) -> impl 'a + Stream<Item = Result<Vec<u8>, crate::Error>> {
+        stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
+            move |recv_stream| async move {
+                recv_stream
+                    .read_to_end(max_len)
+                    .await
+                    .map_err(read_error_to_io)
+                    .map_err(crate::Error::from)
+            },
+        )
+    }
+
+    pub fn recv_many_owned(
         mut self,
         max_len: usize,
     ) -> impl Stream<Item = Result<Vec<u8>, crate::Error>> {
         stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
-            move |header_stream| async move {
-                header_stream
+            move |recv_stream| async move {
+                recv_stream
                     .read_to_end(max_len)
                     .await
                     .map_err(read_error_to_io)

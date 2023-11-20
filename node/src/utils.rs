@@ -1,6 +1,6 @@
 //! General utilities which don't fit anywhere else.
 
-use std::net::SocketAddr;
+use std::{collections::VecDeque, net::SocketAddr};
 
 /// An adaptor that splits the elements of another into vectors of a given size
 /// (except the last). This is a "try-iterator" implementation.
@@ -62,4 +62,18 @@ impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
 /// IPv4, then the IP will be turned into tits IPv4 address.
 pub fn socket_to_canonical(socket_addr: SocketAddr) -> SocketAddr {
     (socket_addr.ip().to_canonical(), socket_addr.port()).into()
+}
+
+pub fn pop_front_chunk<T>(deque: &mut VecDeque<T>, size: usize) -> Vec<T> {
+    let mut chunk = Vec::with_capacity(size);
+    while let Some(item) = deque.pop_front() {
+        chunk.push(item);
+    }
+    chunk
+}
+
+pub fn push_front_chunk<T>(deque: &mut VecDeque<T>, chunk: Vec<T>) {
+    for item in chunk {
+        deque.push_front(item);
+    }
 }

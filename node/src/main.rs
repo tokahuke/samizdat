@@ -1,4 +1,4 @@
-#![feature(ip, try_blocks)]
+#![feature(ip, try_blocks, result_flattening)]
 
 mod access;
 mod cli;

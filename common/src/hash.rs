@@ -138,7 +138,10 @@ impl Hash {
     }
 }
 
-/// A Merkle tree implementation that orders hashes in a list. Hashes are thus keyed by their index in the list. For a map-like implementation of a Merkle tree, see the [`crate::PatriciaMap`] implementation.
+/// A Merkle tree implementation that orders hashes in a list. Hashes are thus keyed by
+/// their index in the list. For a map-like implementation of a Merkle tree, see the
+/// [`crate::PatriciaMap`] implementation.
+#[derive(Debug, Clone)]
 pub struct MerkleTree {
     /// The binary tree. Each item of the vector corresponds to a level of a tree.
     tree: Vec<Vec<Hash>>,

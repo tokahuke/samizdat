@@ -129,7 +129,7 @@ impl ObjectHeader {
 }
 
 /// Helper function to get a chunk by its hash in the database.
-fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
+pub fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
     Ok(db()
         .get_cf(Table::ObjectChunks.get(), hash)?
         .ok_or_else(|| format!("Chunk missing: {}", hash))?)
