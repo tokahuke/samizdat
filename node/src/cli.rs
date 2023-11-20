@@ -31,6 +31,15 @@ pub struct Cli {
     /// query can propagate inside a network, with 2 being the absolute minimum to get a result.
     #[structopt(env = "SAMIZDAT_RIDDLES_PER_QUERY", long, default_value = "6")]
     pub riddles_per_query: usize,
+    /// The size in bytes of the answer to query riddles that will get "leaked". This allows peers
+    /// to more quickly process content riddles.
+    #[structopt(env = "SAMIZDAT_HINT_SIZE", long, default_value = "1")]
+    pub hint_size: u8,
+    /// The minimum size of riddle hint that this node accepts. All queries that have hints smaller
+    /// than this value will not be resolved. Since going through all the database is costly, it's a
+    /// good idea to expect a minimum hint size so as not to get overwhelmed.
+    #[structopt(env = "SAMIZDAT_MIN_HINT_SIZE", long, default_value = "1")]
+    pub min_hint_size: u8,
     /// The maximum number of simultaneous candidates (peers that have the content you queried) to
     /// accept when processing a query to the network.
     #[structopt(env = "SAMIZDAT_CONCURRENT_CANDIDATES", long, default_value = "4")]

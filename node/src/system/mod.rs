@@ -7,6 +7,7 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
+use samizdat_common::Hint;
 use tokio::time::Instant;
 pub use transport::PEER_CONNECTIONS;
 
@@ -174,6 +175,7 @@ impl HubConnection {
         let content_riddles = (0..cli().riddles_per_query)
             .map(|_| Riddle::new(&content_hash))
             .collect();
+        let hint = Hint::new(content_hash, cli().hint_size as usize);
         let location_riddle = Riddle::new(&content_hash);
 
         // Acquire hub connection:
@@ -196,6 +198,7 @@ impl HubConnection {
                 context::current(),
                 Query {
                     content_riddles,
+                    hint,
                     location_riddle,
                     kind,
                 },

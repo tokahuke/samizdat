@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::models::{ContentStream, self};
+use crate::models::{self, ContentStream};
 use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
 use crate::utils::{pop_front_chunk, push_front_chunk};
 
@@ -138,12 +138,21 @@ impl ValidatedCandidate {
                 .map_err(|_| format!("Incoming chunk timed out").into())
                 .flatten()?;
 
-            // Decrypt compressed chunk:
-            self.transfer_cipher.decrypt(&mut compressed_chunk);
+            // Move the complicated stuff off the executor
+            // Tested! This does make things faster.
+            let transfer_cipher = self.transfer_cipher.clone();
+            let chunk = tokio::task::spawn_blocking(move || {
+                // Decrypt compressed chunk:
+                transfer_cipher.decrypt(&mut compressed_chunk);
 
-            // Decompress chunk:
-            let mut chunk = Vec::with_capacity(MAX_STREAM_SIZE);
-            Decompressor::new(Cursor::new(compressed_chunk), 4096).read_to_end(&mut chunk)?;
+                // Decompress chunk:
+                let mut chunk = Vec::with_capacity(MAX_STREAM_SIZE);
+                Decompressor::new(Cursor::new(compressed_chunk), 4096).read_to_end(&mut chunk)?;
+
+                Ok(chunk) as Result<_, crate::Error>
+            })
+            .await
+            .expect("decoing task panicked")?;
 
             // Check vailidity:
             let received_hash = Hash::from_bytes(&chunk);
@@ -154,11 +163,9 @@ impl ValidatedCandidate {
                 missing_hashes.remove(position);
                 chunk_sender.send(chunk).ok();
             } else {
-                log::warn!("{}", String::from_utf8_lossy(&chunk));
-                return Err(format!(
+                return Err(crate::Error::Message(format!(
                     "Received chunk has hash {received_hash}; which was not expected"
-                )
-                .into());
+                )));
             }
         }
 
@@ -362,22 +369,32 @@ pub async fn send_object(
         match RequestChunkMessage::recv(&mut receiver, &transfer_cipher).await? {
             RequestChunkMessage::Thanks => break,
             RequestChunkMessage::GetChunks(chunks) => {
-                for chunk in &chunks {
-                    if !header.metadata.hashes.contains(chunk) {
-                        return Err(format!(
+                for chunk in chunks {
+                    if !header.metadata.hashes.contains(&chunk) {
+                        Err(format!(
                             "Candidate {} requested chunk {chunk} out of object {}",
                             sender.remote_address(),
                             object.hash(),
-                        )
-                        .into());
+                        ))?;
                     }
 
-                    let chunk_content = models::get_chunk(*chunk)?;
-                    let mut compressed = CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
-                        .bytes()
-                        .collect::<Result<Vec<_>, _>>()
-                        .expect("never error");
-                    transfer_cipher.encrypt(&mut compressed);
+                    let sender = sender.clone();
+                    let transfer_cipher = transfer_cipher.clone();
+
+                    // This doesn't make stuff much faster, but... I did it on the
+                    // decoding side, so... why not?
+                    let compressed = tokio::task::spawn_blocking(move || {
+                        let chunk_content = models::get_chunk(chunk)?;
+                        let mut compressed =
+                            CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
+                                .bytes()
+                                .collect::<Result<Vec<_>, _>>()
+                                .expect("never error");
+                        transfer_cipher.encrypt(&mut compressed);
+                        Ok(compressed) as Result<Vec<u8>, crate::Error>
+                    })
+                    .await
+                    .expect("encoding task panicked")?;
 
                     sender.send(&compressed).await?;
                 }
@@ -545,8 +562,8 @@ pub async fn send_item(
         match RequestChunkMessage::recv(&mut receiver, &transfer_cipher).await? {
             RequestChunkMessage::Thanks => break,
             RequestChunkMessage::GetChunks(chunks) => {
-                for chunk in &chunks {
-                    if !header.object_header.metadata.hashes.contains(chunk) {
+                for &chunk in &chunks {
+                    if !header.object_header.metadata.hashes.contains(&chunk) {
                         return Err(format!(
                             "Candidate {} requested chunk {chunk} out of item {}",
                             sender.remote_address(),
@@ -555,12 +572,22 @@ pub async fn send_item(
                         .into());
                     }
 
-                    let chunk_content = models::get_chunk(*chunk)?;
-                    let mut compressed = CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
-                        .bytes()
-                        .collect::<Result<Vec<_>, _>>()
-                        .expect("never error");
-                    transfer_cipher.encrypt(&mut compressed);
+                    let transfer_cipher = transfer_cipher.clone();
+
+                    // This doesn't make stuff much faster, but... I did it on the
+                    // decoding side, so... why not?
+                    let compressed = tokio::task::spawn_blocking(move || {
+                        let chunk_content = models::get_chunk(chunk)?;
+                        let mut compressed =
+                            CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
+                                .bytes()
+                                .collect::<Result<Vec<_>, _>>()
+                                .expect("never error");
+                        transfer_cipher.encrypt(&mut compressed);
+                        Ok(compressed) as Result<Vec<u8>, crate::Error>
+                    })
+                    .await
+                    .expect("encoding task panicked")?;
 
                     sender.send(&compressed).await?;
                 }

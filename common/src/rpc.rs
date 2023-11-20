@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::address::ChannelId;
 use crate::cipher::OpaqueEncrypted;
+use crate::riddles::Hint;
 use crate::{Hash, MessageRiddle, Riddle};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +34,9 @@ pub enum QueryKind {
 pub struct Query {
     /// The riddles the resolver can use to find the content hash.
     pub content_riddles: Vec<Riddle>,
+    /// A hint to the solution of the content hash. This can set the degree of toughness of solving
+    /// the content riddles.
+    pub hint: Hint,
     /// The riddle that will be used by the peer that has the hash to find the IP of the client.
     pub location_riddle: Riddle,
     /// The kind of entity being requested.
@@ -132,6 +136,9 @@ pub struct Resolution {
     /// The nonces which the resolver must combine with the content hash to prove that it knows the
     /// correct hash.
     pub validation_nonces: Vec<Hash>,
+    /// A hint to the solution of the content hash. This can set the degree of toughness of solving
+    /// the content riddles.
+    pub hint: Hint,
     /// The riddle for the client address.
     pub location_message_riddle: MessageRiddle,
     /// The kind of entity being requested.

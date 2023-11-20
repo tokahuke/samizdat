@@ -171,6 +171,7 @@ impl ChannelManager {
     }
 }
 
+#[derive(Clone)]
 pub struct ChannelSender {
     channel_id: ChannelId,
     multiplexed: Arc<Multiplexed>,

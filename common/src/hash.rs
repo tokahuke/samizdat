@@ -85,6 +85,11 @@ impl Hash {
         Hash::new(Sha3_224::digest(thing.as_ref()))
     }
 
+    /// Creates the hash with all the bits set to zero.
+    pub fn zero() -> Hash {
+        Hash([0; HASH_LEN])
+    }
+
     /// Creates a random hash value, without any associated binary information.
     ///
     /// This function uses [`getrandom`] to create a hash value. If creating a lot of

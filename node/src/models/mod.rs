@@ -11,7 +11,8 @@ pub use bookmark::{Bookmark, BookmarkType};
 pub use collection::{CollectionItem, CollectionRef, Inventory, ItemPath, ItemPathBuf, Locator};
 pub use hub::Hub;
 pub use object::{
-    ContentStream, ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior, CHUNK_SIZE, get_chunk,
+    get_chunk, ContentStream, ObjectHeader, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior,
+    CHUNK_SIZE,
 };
 pub use series::{Edition, SeriesOwner, SeriesRef};
 pub use subscription::{Subscription, SubscriptionKind, SubscriptionRef};

@@ -114,6 +114,7 @@ impl Hub for HubServer {
                 content_riddles: query.content_riddles,
                 location_message_riddle,
                 validation_nonces: vec![],
+                hint: query.hint,
                 kind: query.kind,
             };
 

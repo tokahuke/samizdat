@@ -114,6 +114,34 @@ impl MessageRiddle {
     }
 }
 
+/// A hint on the solution of a riddle. This gives the prefix of the solution, up to a given
+/// length.
+#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
+pub struct Hint {
+    /// The prefix of the solution of the riddle.
+    prefix: Hash,
+    /// The length in bytes of the prefix. Everything after this length in the `prefix` hash is
+    /// ignored.
+    length: u8,
+}
+
+impl Hint {
+    pub fn new(content_hash: Hash, length: usize) -> Hint {
+        assert!(length < 256, "Length has to fit in a byte");
+        let mut prefix = Hash::zero();
+        for i in 0..length {
+            prefix.0[i] = content_hash.0[i];
+        }
+        Hint {
+            prefix,
+            length: length as u8,
+        }
+    }
+    pub fn prefix(&self) -> &[u8] {
+        &self.prefix.0[..(self.length as usize)]
+    }
+}
+
 // #[cfg(test)]
 // mod tests {
 //     use super::*;

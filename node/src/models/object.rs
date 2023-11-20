@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use futures::prelude::*;
-use rocksdb::{IteratorMode, WriteBatch};
+use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use std::time::Duration;
 use std::{collections::BTreeMap, convert::TryInto};
 use tokio::sync::mpsc;
 
-use samizdat_common::{Hash, MerkleTree, Riddle};
+use samizdat_common::{Hash, Hint, MerkleTree, Riddle};
 
 use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK, STATISTICS_MUTEXES};
 
@@ -412,8 +412,8 @@ impl ObjectRef {
     }
 
     /// Tries to resolve a content riddle against all objects currently in the database.
-    pub fn find(content_riddle: &Riddle) -> Result<Option<ObjectRef>, crate::Error> {
-        let iter = db().iterator_cf(Table::Objects.get(), IteratorMode::Start);
+    pub fn find(content_riddle: &Riddle, hint: &Hint) -> Result<Option<ObjectRef>, crate::Error> {
+        let iter = db().prefix_iterator_cf(Table::Objects.get(), hint.prefix());
 
         for item in iter {
             let (key, _) = item?;

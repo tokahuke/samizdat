@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use crate::{Hash, HASH_LEN};
 
 /// A symmetric cypher for coding data using `AES256-GCM-SIV`.
+#[derive(Clone)]
 pub struct TransferCipher {
     /// A nonce for the cipher.
     nonce: Nonce,

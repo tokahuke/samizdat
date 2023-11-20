@@ -30,7 +30,7 @@ impl NodeServer {
         } else {
             return ResolutionResponse::EmptyResolution;
         };
-        let object = match ObjectRef::find(content_riddle) {
+        let object = match ObjectRef::find(content_riddle, &resolution.hint) {
             Ok(Some(object)) if !object.is_draft().unwrap_or(true) => object,
             Ok(Some(_)) => {
                 log::info!("Hash found but object is draft");

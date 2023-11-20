@@ -9,6 +9,22 @@ from dataclasses import dataclass
 from time import sleep
 
 
+IS_RELEASE = True
+
+
+def folder():
+    if IS_RELEASE:
+        return "release"
+    else:
+        return "debug"
+    
+def opt_flag():
+    if IS_RELEASE:
+        return ["--release"]
+    else:
+        return []
+    
+
 def wait_all(processes: list[subprocess.Popen]) -> None:
     for process in processes:
         process.wait()
@@ -50,14 +66,14 @@ class Node:
 
     def command(self) -> list[str]:
         return [
-            "target/debug/samizdat-node",
+            f"target/{folder()}/samizdat-node",
             f"--port={self.port()}",
             f"--data=data/{self.node_id}",
         ]
 
     def connect_to_hub(self, hub: Hub) -> list[str]:
         return [
-            "target/debug/samizdat",
+            f"target/{folder()}/samizdat",
             f"--data=data/{self.node_id}",
             "hub",
             "new",
@@ -90,7 +106,7 @@ class Hub:
 
     def command(self, hubs: list[Hub]) -> list[str]:
         return [
-            "target/debug/samizdat-hub",
+            f"target/{folder()}/samizdat-hub",
             f"--addresses={self.address()}",
             f"--data=data/{self.hub_id}",
             f"--http-port={self.http_port()}",
@@ -144,9 +160,9 @@ class Graph:
 
         # Compile stuff:
         wait_all([
-            subprocess.Popen(["cargo", "build", "--bin", "samizdat-node"]),
-            subprocess.Popen(["cargo", "build", "--bin", "samizdat-hub"]),
-            subprocess.Popen(["cargo", "build", "--bin", "samizdat"]),
+            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat-node"]),
+            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat-hub"]),
+            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat"]),
         ])
 
         # Launch processes:

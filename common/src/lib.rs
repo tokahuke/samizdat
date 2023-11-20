@@ -21,7 +21,7 @@ pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
-pub use riddles::{MessageRiddle, Riddle};
+pub use riddles::{Hint, MessageRiddle, Riddle};
 pub use transport::BincodeOverQuic;
 
 use rand::SeedableRng;
