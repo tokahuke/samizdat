@@ -7,6 +7,7 @@ use futures::prelude::*;
 use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -248,12 +249,18 @@ impl Iterator for ContentIter {
 /// A stream over the chunks of an object.
 #[must_use]
 pub struct ContentStream {
+    /// The object this content stream is streaming.
+    object_ref: ObjectRef,
     /// A stream over the chunk hashes, in order.
     hashes: Pin<Box<dyn Send + Stream<Item = Result<Hash, crate::Error>>>>,
     /// Indicates whether an error has occurred.
     is_error: bool,
+    /// Indicates whether this is the first chunk or not.
+    is_first: bool,
     /// Indicates whether an object header must be skipped for the next chunk.
     skip_header: bool,
+    ///
+    content_size: AtomicUsize,
 }
 
 impl Stream for ContentStream {
@@ -280,9 +287,22 @@ impl Stream for ContentStream {
                 // If an object header must be skipped, then skip it!
                 let chunk = if self.skip_header {
                     let mut iter = chunk.into_iter();
-                    ObjectHeader::read((&mut iter).map(Ok))?;
+                    let (header_size, _) = ObjectHeader::read((&mut iter).map(Ok))?;
+                    self.content_size.store(
+                        self.object_ref.metadata()?.unwrap().content_size - header_size,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     self.skip_header = false;
+
                     iter.collect()
+                } else if self.is_first {
+                    self.is_first = false;
+                    self.content_size.store(
+                        self.object_ref.metadata()?.unwrap().content_size,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+
+                    chunk
                 } else {
                     chunk
                 };
@@ -546,6 +566,7 @@ impl ObjectRef {
         query_duration: Duration,
         chunks: impl 'static + Send + Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
     ) -> ContentStream {
+        let hash = merkle_tree.root();
         let (send, recv) = mpsc::unbounded_channel();
         let task_send = send.clone();
         let mut next_to_send = 0usize;
@@ -581,9 +602,12 @@ impl ObjectRef {
         .try_flatten();
 
         ContentStream {
+            object_ref: ObjectRef::new(hash),
             hashes: Box::pin(hashes),
             is_error: false,
+            is_first: true,
             skip_header: true,
+            content_size: AtomicUsize::default(),
         }
     }
 
@@ -746,9 +770,12 @@ impl ObjectRef {
         self.touch()?;
 
         Ok(Some(ContentStream {
+            object_ref: self.clone(),
             hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
             is_error: false,
+            is_first: true,
             skip_header,
+            content_size: AtomicUsize::default(),
         }))
     }
 
