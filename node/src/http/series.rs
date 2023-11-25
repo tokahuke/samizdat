@@ -1,5 +1,6 @@
 //! Series API.
 
+use chrono::{SubsecRound, Utc};
 use serde_derive::Deserialize;
 use std::time::{Duration, SystemTime};
 use warp::path::Tail;
@@ -8,7 +9,10 @@ use warp::Filter;
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
-use crate::models::{CollectionRef, Droppable, EditionKind, SeriesOwner, SeriesRef};
+use crate::models::{
+    CollectionRef, Droppable, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner,
+    SeriesRef,
+};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
@@ -119,12 +123,14 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
     #[derive(Deserialize)]
     struct Request {
         kind: EditionKind,
-        collection: String,
         #[serde(default)]
         #[serde(with = "humantime_serde")]
         ttl: Option<std::time::Duration>,
         #[serde(default)]
         no_announce: bool,
+        #[serde(default)]
+        is_draft: bool,
+        hashes: Vec<(String, String)>,
     }
 
     warp::path!("_seriesowners" / String / "editions")
@@ -133,11 +139,33 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(warp::body::json())
         .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let edition = series_owner.advance(
-                    CollectionRef::new(request.collection.parse()?),
-                    request.ttl,
-                    request.kind,
-                )?;
+                // Set edition timestamp:
+                let timestamp = Utc::now().trunc_subsecs(0);
+
+                // Decode hashes:
+                let hashes = request
+                    .hashes
+                    .into_iter()
+                    .map(|(name, hash)| {
+                        Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
+                    })
+                    .collect::<Result<Vec<_>, crate::Error>>()?;
+
+                // Create edition inventory:
+                let inventory_path = match request.kind {
+                    EditionKind::Base => ItemPathBuf::from("_inventory"),
+                    EditionKind::Layer => ItemPathBuf::from(format!("_changelogs/{timestamp}")),
+                };
+                let hashes_with_inventory =
+                    Inventory::insert_into_list(request.is_draft, inventory_path, hashes)?;
+
+                // Create collection:
+                // TODO: can be intensive. Wrap in a `spawn_blocking`.
+                let collection = CollectionRef::build(request.is_draft, hashes_with_inventory)?;
+
+                // Create edition:
+                let edition =
+                    series_owner.advance(collection, timestamp, request.ttl, request.kind)?;
 
                 if !request.no_announce {
                     let announcement = edition.announcement();

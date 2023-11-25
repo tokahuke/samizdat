@@ -234,12 +234,6 @@ pub async fn commit(
 
     log::debug!("hashes: {:#?}", hashes);
 
-    let collection = api::post_collection(api::PostCollectionRequest {
-        hashes: &hashes,
-        is_draft: !is_release,
-    })
-    .await?;
-
     let series_name = if is_release {
         manifest.series.name
     } else {
@@ -255,9 +249,10 @@ pub async fn commit(
         &series_name,
         api::PostEditionRequest {
             kind,
-            collection: &collection,
             ttl: ttl.as_deref(),
             no_announce,
+            hashes: &hashes,
+            is_draft: !is_release,
         },
     )
     .await?;

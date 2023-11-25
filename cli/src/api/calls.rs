@@ -245,6 +245,7 @@ pub struct PostCollectionRequest<'a> {
     pub is_draft: bool,
 }
 
+#[allow(unused)]
 pub async fn post_collection(request: PostCollectionRequest<'_>) -> Result<String, anyhow::Error> {
     post("/_collections", request).await
 }
@@ -311,9 +312,10 @@ impl FromStr for EditionKind {
 #[derive(Debug, Serialize)]
 pub struct PostEditionRequest<'a> {
     pub kind: EditionKind,
-    pub collection: &'a str,
     pub ttl: Option<&'a str>,
     pub no_announce: bool,
+    pub is_draft: bool,
+    pub hashes: &'a [(String, String)],
 }
 
 #[derive(Debug, Clone, Deserialize)]

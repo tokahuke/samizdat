@@ -102,7 +102,8 @@ impl<'a> ItemPath<'a> {
 
 /// An association of paths with all object hashes for a given collection. Inventories
 /// are automatically included in all collections as a JSON file under the key
-/// `_inventory` and work much the same way like sitemaps do on the regular Web.
+/// `_inventory` in base editions and `_changelogs/<edition timestamp>` in layer editions.
+/// They work much the same way like sitemaps do on the regular Web.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Inventory {
@@ -131,6 +132,31 @@ impl<'a> IntoIterator for &'a Inventory {
 }
 
 impl Inventory {
+    /// Creates an object in the database with the provided objects.
+    pub fn insert_into_list(
+        is_draft: bool,
+        name: ItemPathBuf,
+        mut objects: Vec<(ItemPathBuf, ObjectRef)>,
+    ) -> Result<Vec<(ItemPathBuf, ObjectRef)>, crate::Error> {
+        let serialized = serde_json::to_string_pretty(
+            &objects
+                .iter()
+                .map(|(path, object_ref)| (path.clone(), *object_ref.hash()))
+                .collect::<Inventory>(),
+        )
+        .expect("can serialize");
+
+        let object = ObjectRef::build(
+            ObjectHeader::new("application/json".to_owned(), is_draft)?,
+            false,
+            serialized.into_bytes().into_iter().map(Ok),
+        )?;
+
+        objects.push((name, object));
+
+        Ok(objects)
+    }
+
     /// Iterates through all key-value pairs in this inventory.
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
         self.into_iter()
@@ -314,29 +340,12 @@ impl CollectionRef {
     where
         I: Sync + Send + AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
-        // Create inventory document:
-        let inventory = serde_json::to_string_pretty(
-            &objects
-                .as_ref()
-                .iter()
-                .map(|(path, object_ref)| (path.clone(), *object_ref.hash()))
-                .collect::<Inventory>(),
-        )
-        .expect("can serialize");
-        let inventory_path = ItemPathBuf::from("_inventory");
-        let inventory_object = ObjectRef::build(
-            ObjectHeader::new("application/json".to_owned(), is_draft)?,
-            false,
-            inventory.into_bytes().into_iter().map(Ok),
-        )?;
-
         // Note: this is the slow part of the process (by a long stretch)
-        let mut patricia_map = objects
+        let patricia_map = objects
             .as_ref()
             .iter()
             .map(|(name, object)| (name.hash(), *object.hash()))
             .collect::<PatriciaMap>();
-        patricia_map.insert(inventory_path.hash(), *inventory_object.hash());
 
         let root = *patricia_map.root();
         let collection = CollectionRef { hash: root };
@@ -355,18 +364,6 @@ impl CollectionRef {
 
             item.insert_with(&mut batch);
         }
-
-        let inventory_item = CollectionItem {
-            collection: collection.clone(),
-            name: inventory_path.clone(),
-            inclusion_proof: patricia_map
-                .proof_for(inventory_path.hash())
-                .expect("name exists in map"),
-            is_draft,
-        };
-        inventory_item.insert_with(&mut batch);
-
-        // batch.put_cf(Table::Collections.get(), collection.hash, &[]);
 
         db().write(batch)?;
 

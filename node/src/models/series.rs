@@ -1,7 +1,7 @@
 //! Series are temporal sequences of collections that are authenticated by the same
 //! private key.
 
-use chrono::SubsecRound;
+use chrono::Utc;
 use ed25519_dalek::Keypair;
 use futures::prelude::*;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
@@ -19,7 +19,7 @@ use crate::db::Table;
 use crate::system::ReceivedItem;
 use crate::{cli, db, hubs};
 
-use super::{BookmarkType, CollectionRef, Droppable, Inventory, ObjectRef};
+use super::{BookmarkType, CollectionRef, Droppable, Inventory, ItemPath, ObjectRef};
 
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
@@ -144,13 +144,19 @@ impl SeriesOwner {
 
     /// Creates a new edition by signing a collection reference. If the supplied
     /// time-to-leave is `None`, the default TTL will be used.
-    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>, kind: EditionKind) -> Edition {
+    fn sign(
+        &self,
+        collection: CollectionRef,
+        timestamp: chrono::DateTime<Utc>,
+        ttl: Option<Duration>,
+        kind: EditionKind,
+    ) -> Edition {
         Edition {
             signed: Signed::new(
                 EditionContent {
                     kind,
                     collection,
-                    timestamp: chrono::Utc::now().trunc_subsecs(0),
+                    timestamp,
                     ttl: ttl.unwrap_or(self.default_ttl),
                 },
                 &self.keypair,
@@ -164,6 +170,7 @@ impl SeriesOwner {
     pub fn advance(
         &self,
         collection: CollectionRef,
+        timestamp: chrono::DateTime<Utc>,
         ttl: Option<Duration>,
         kind: EditionKind,
     ) -> Result<Edition, crate::Error> {
@@ -185,7 +192,7 @@ impl SeriesOwner {
                 .mark_with(&mut batch);
         }
 
-        let edition = self.sign(collection, ttl, kind);
+        let edition = self.sign(collection, timestamp, ttl, kind);
 
         batch.put_cf(
             Table::Editions.get(),
@@ -521,7 +528,13 @@ impl Edition {
         let exp_backoff = || [0, 10, 30, 70, 150].into_iter().map(Duration::from_secs);
 
         let collection = self.collection();
-        let inventory_content_hash = collection.locator_for("_inventory".into()).hash();
+        let inventory_location = match self.kind() {
+            EditionKind::Base => "_inventory".to_owned(),
+            EditionKind::Layer => format!("_changelogs/{}", self.timestamp()),
+        };
+        let inventory_content_hash = collection
+            .locator_for(ItemPath::from(inventory_location.as_str()))
+            .hash();
 
         let series = self.series();
         series.advance(self)?;
@@ -607,7 +620,7 @@ fn validate_edition() {
     let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
     let _series = owner.series();
     let current_collection = CollectionRef::rand();
-    let edition = owner.sign(current_collection, None, EditionKind::Base);
+    let edition = owner.sign(current_collection, Utc::now(), None, EditionKind::Base);
 
     assert!(edition.is_valid())
 }
@@ -622,7 +635,7 @@ fn not_validate_edition() {
 
     let current_collection = CollectionRef::rand();
 
-    let mut edition = owner.sign(current_collection, None, EditionKind::Base);
+    let mut edition = owner.sign(current_collection, Utc::now(), None, EditionKind::Base);
     edition.public_key = other_series.public_key;
 
     assert!(!edition.is_valid())

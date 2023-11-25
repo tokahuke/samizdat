@@ -2,7 +2,6 @@
 fn main() -> Result<(), windows_service::Error> {
     use std::ffi::OsString;
     use std::fs::File;
-    use std::fs::File;
     use std::process::{Command, Stdio};
 
     use windows_service::define_windows_service;
@@ -11,6 +10,9 @@ fn main() -> Result<(), windows_service::Error> {
     define_windows_service!(ffi_service_main, my_service_main);
 
     pub fn my_service_main(arguments: Vec<OsString>) {
+        // The entry point where execution will start on a background thread after a call to
+        // `service_dispatcher::start` from `main`.
+
         let maybe_create_file = |name: &str| {
             if let Ok(file) = File::create(name) {
                 Stdio::from(file)
@@ -19,17 +21,15 @@ fn main() -> Result<(), windows_service::Error> {
                 Stdio::inherit()
             }
         };
-        let stdout_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stdout.log");
-        let stderr_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stderr.log");
 
         loop {
-            // The entry point where execution will start on a background thread after a call to
-            // `service_dispatcher::start` from `main`.
+            let stdout_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stdout.log");
+            let stderr_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stderr.log");
             let mut command = Command::new("samizdat-node.exe");
             command.args(arguments.clone());
             command.env("RUST_BACKTRACE", "1");
-            command.stdout(stdout);
-            command.stderr(stderr);
+            command.stdout(stdout_log);
+            command.stderr(stderr_log);
 
             match command.spawn() {
                 Ok(mut child) => match child.wait() {
