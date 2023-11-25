@@ -6,7 +6,7 @@ use ed25519_dalek::Keypair;
 use futures::prelude::*;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use samizdat_common::rpc::QueryKind;
-use samizdat_common::Hint;
+use samizdat_common::{Hint, HASH_LEN};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
@@ -511,7 +511,7 @@ impl Edition {
         let rand = Hash::rand();
         let content_hash = self.public_key.hash();
         let key_riddle = Riddle::new(&content_hash);
-        let hint = Hint::new(content_hash, cli().hint_size as usize);
+        let hint = Hint::new(Hash::new(&self.public_key.as_bytes()[..HASH_LEN]), cli().hint_size as usize);
         let cipher = TransferCipher::new(&content_hash, &rand);
         let edition = OpaqueEncrypted::new(&self, &cipher);
 
