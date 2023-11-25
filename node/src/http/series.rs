@@ -9,6 +9,7 @@ use warp::Filter;
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
+use crate::http::async_api_reply;
 use crate::models::{
     CollectionRef, Droppable, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner,
     SeriesRef,
@@ -137,31 +138,35 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(warp::post())
         .and(authenticate([AccessRight::ManageSeries]))
         .and(warp::body::json())
-        .map(|series_owner_name: String, request: Request| {
+        .map(|series_owner_name: String, request: Request| async move {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
                 // Set edition timestamp:
                 let timestamp = Utc::now().trunc_subsecs(0);
 
-                // Decode hashes:
-                let hashes = request
-                    .hashes
-                    .into_iter()
-                    .map(|(name, hash)| {
-                        Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
-                    })
-                    .collect::<Result<Vec<_>, crate::Error>>()?;
+                // Build collection:
+                let collection = tokio::task::spawn_blocking(move || {
+                    // Decode hashes:
+                    let hashes = request
+                        .hashes
+                        .into_iter()
+                        .map(|(name, hash)| {
+                            Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
+                        })
+                        .collect::<Result<Vec<_>, crate::Error>>()?;
 
-                // Create edition inventory:
-                let inventory_path = match request.kind {
-                    EditionKind::Base => ItemPathBuf::from("_inventory"),
-                    EditionKind::Layer => ItemPathBuf::from(format!("_changelogs/{timestamp}")),
-                };
-                let hashes_with_inventory =
-                    Inventory::insert_into_list(request.is_draft, inventory_path, hashes)?;
+                    // Create edition inventory:
+                    let inventory_path = match request.kind {
+                        EditionKind::Base => ItemPathBuf::from("_inventory"),
+                        EditionKind::Layer => ItemPathBuf::from(format!("_changelogs/{timestamp}")),
+                    };
+                    let hashes_with_inventory =
+                        Inventory::insert_into_list(request.is_draft, inventory_path, hashes)?;
 
-                // Create collection:
-                // TODO: can be intensive. Wrap in a `spawn_blocking`.
-                let collection = CollectionRef::build(request.is_draft, hashes_with_inventory)?;
+                    // Create collection:
+                    CollectionRef::build(request.is_draft, hashes_with_inventory)
+                })
+                .await
+                .expect("Collection build task failed")?;
 
                 // Create edition:
                 let edition =
@@ -186,7 +191,7 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
                 )))
             }
         })
-        .map(api_reply)
+        .and_then(async_api_reply)
 }
 
 /// Gets the content of a collection item using the series public key. This will give the
