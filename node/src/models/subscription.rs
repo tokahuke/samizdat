@@ -6,7 +6,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
 
-use samizdat_common::{Key, Riddle};
+use samizdat_common::{Hint, Key, Riddle};
 
 use crate::db::Table;
 use crate::{db, hubs};
@@ -144,8 +144,8 @@ impl SubscriptionRef {
 
     /// Runs through the database looking for a subscription the matches the supplied
     /// riddle. Returns `None` if no subscription matches the riddle.
-    pub fn find(riddle: &Riddle) -> Result<Option<SubscriptionRef>, crate::Error> {
-        let it = db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start);
+    pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SubscriptionRef>, crate::Error> {
+        let it = db().prefix_iterator_cf(Table::Subscriptions.get(), hint.prefix());
 
         for item in it {
             let (key, value) = item?;

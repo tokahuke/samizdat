@@ -36,17 +36,20 @@ pub fn post_collection(
         .and(authenticate([AccessRight::ManageCollections]))
         .and(warp::body::json())
         .map(|request: Request| async move {
-            let collection = CollectionRef::build(
-                request.is_draft,
-                request
-                    .hashes
-                    .into_iter()
-                    .map(|(name, hash)| {
-                        Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
-                    })
-                    .collect::<Result<Vec<_>, crate::Error>>()?,
-            )
-            .await?;
+            let collection = tokio::task::spawn_blocking(move || {
+                CollectionRef::build(
+                    request.is_draft,
+                    request
+                        .hashes
+                        .into_iter()
+                        .map(|(name, hash)| {
+                            Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
+                        })
+                        .collect::<Result<Vec<_>, crate::Error>>()?,
+                )
+            })
+            .await
+            .expect("Collection build task panicked")?;
             Ok(collection.hash().to_string())
         })
         .and_then(async_api_reply)

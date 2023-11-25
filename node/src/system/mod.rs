@@ -274,12 +274,13 @@ impl HubConnection {
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_edition(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = Riddle::new(&series.public_key.hash());
+        let hint = Hint::new(series.public_key.hash(), cli().hint_size as usize);
         let guard = self.inner.get().await;
         let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         let response = inner
             .client
-            .get_edition(context::current(), EditionRequest { key_riddle })
+            .get_edition(context::current(), EditionRequest { key_riddle, hint })
             .await?;
 
         let mut most_recent: Option<Edition> = None;

@@ -10,7 +10,7 @@ use samizdat_common::rpc::QueryKind;
 
 use crate::hubs;
 use crate::identity_dapp::identity_provider;
-use crate::models::{ItemPath, Locator, ObjectRef, SeriesRef};
+use crate::models::{EditionKind, ItemPath, Locator, ObjectRef, SeriesRef};
 use crate::system::{ReceivedItem, ReceivedObject};
 
 /// Am HTTP response for an object that has been resolved.
@@ -118,6 +118,14 @@ pub async fn resolve_object(
     deadline: SystemTime,
 ) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
     log::info!("Resolving {object:?}");
+
+    if object.is_null() {
+        return Ok(NotResolved {
+            message: format!("Object {} not found", object.hash()),
+        }
+        .try_into());
+    }
+
     if object.exists()? {
         log::info!("Found local hash {}", object.hash());
         return Ok(resolve_existing_object(object, ext_headers)?.try_into());
@@ -177,7 +185,10 @@ pub async fn resolve_item(
         .query(locator.hash(), QueryKind::Item, deadline)
         .await
     {
-        // This should not be possible!!
+        Some(ReceivedItem::ExistingObject(object)) if object.is_null() => Ok(NotResolved {
+            message: format!("Item {locator} not found"),
+        }
+        .try_into()),
         Some(ReceivedItem::ExistingObject(object)) => {
             log::warn!(
                 "After querying hubs, found local hash {} for item {locator}",
@@ -230,8 +241,7 @@ pub async fn resolve_series(
     log::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
-    // Was a `for`. Now, we look only at the top edition.
-    if let Some(edition) = series.get_editions().next() {
+    for edition in series.get_editions() {
         let edition = edition?;
         empty = false;
         log::info!("Trying collection {:?}", edition.collection());
@@ -262,6 +272,10 @@ pub async fn resolve_series(
                 deadline,
             )
             .await;
+        }
+
+        if edition.kind() == EditionKind::Base {
+            break;
         }
     }
 

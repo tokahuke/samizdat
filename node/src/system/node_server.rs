@@ -10,6 +10,7 @@ use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
 
+use crate::cli;
 use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
 
 use super::file_transfer;
@@ -30,6 +31,16 @@ impl NodeServer {
         } else {
             return ResolutionResponse::EmptyResolution;
         };
+
+        if resolution.hint.len() < cli().min_hint_size as usize {
+            log::warn!(
+                "Resolution hint length is {}, smaller than the minimum of {}. Ignoring...",
+                resolution.hint.len(),
+                cli().min_hint_size
+            );
+            return ResolutionResponse::NotFound;
+        }
+
         let object = match ObjectRef::find(content_riddle, &resolution.hint) {
             Ok(Some(object)) if !object.is_draft().unwrap_or(true) => object,
             Ok(Some(_)) => {
@@ -86,7 +97,17 @@ impl NodeServer {
         let Some(content_riddle) = resolution.content_riddles.first() else {
             return ResolutionResponse::EmptyResolution;
         };
-        let item = match CollectionItem::find(content_riddle) {
+
+        if resolution.hint.len() < cli().min_hint_size as usize {
+            log::warn!(
+                "Resolution hint length is {}, smaller than the minimum of {}. Ignoring...",
+                resolution.hint.len(),
+                cli().min_hint_size
+            );
+            return ResolutionResponse::NotFound;
+        }
+
+        let item = match CollectionItem::find(content_riddle, &resolution.hint) {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
                 log::info!("hash found, but item is draft");
@@ -162,29 +183,39 @@ impl Node for NodeServer {
     ) -> Vec<EditionResponse> {
         log::info!("got {latest:?}");
 
-        let maybe_response = if let Some(series) = SeriesRef::find(&latest.key_riddle).transpose() {
-            match series.and_then(|s| s.get_last_edition()) {
-                Ok(None) => None,
-                // Do not publish draft editions in non-draft series!
-                Ok(Some(latest)) if latest.is_draft() => None,
-                Ok(Some(latest)) => {
-                    let cipher_key = latest.public_key().hash();
-                    let rand = Hash::rand();
-                    let cipher = TransferCipher::new(&cipher_key, &rand);
+        if latest.hint.len() < cli().min_hint_size as usize {
+            log::warn!(
+                "Edition request hint length is {}, smaller than the minimum of {}. Ignoring...",
+                latest.hint.len(),
+                cli().min_hint_size
+            );
+            return vec![];
+        }
 
-                    Some(EditionResponse {
-                        rand,
-                        series: cipher.encrypt_opaque(&latest),
-                    })
+        let maybe_response =
+            if let Some(series) = SeriesRef::find(&latest.key_riddle, &latest.hint).transpose() {
+                match series.and_then(|s| s.get_last_edition()) {
+                    Ok(None) => None,
+                    // Do not publish draft editions in non-draft series!
+                    Ok(Some(latest)) if latest.is_draft() => None,
+                    Ok(Some(latest)) => {
+                        let cipher_key = latest.public_key().hash();
+                        let rand = Hash::rand();
+                        let cipher = TransferCipher::new(&cipher_key, &rand);
+
+                        Some(EditionResponse {
+                            rand,
+                            series: cipher.encrypt_opaque(&latest),
+                        })
+                    }
+                    Err(err) => {
+                        log::error!("error resolving edition for {latest:?}: {err}");
+                        None
+                    }
                 }
-                Err(err) => {
-                    log::error!("error resolving edition for {latest:?}: {err}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         if let Some(response) = maybe_response.as_ref() {
             log::info!("Edition found: {response:?}");
@@ -197,7 +228,17 @@ impl Node for NodeServer {
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
         log::info!("Got announcement from hub");
-        match SubscriptionRef::find(&announcement.key_riddle) {
+
+        if announcement.hint.len() < cli().min_hint_size as usize {
+            log::warn!(
+                "Announcement hint length is {}, smaller than the minimum of {}. Ignoring...",
+                announcement.hint.len(),
+                cli().min_hint_size
+            );
+            return;
+        }
+
+        match SubscriptionRef::find(&announcement.key_riddle, &announcement.hint) {
             Err(err) => log::error!("error processing {announcement:?}: {err}"),
             Ok(None) => {
                 log::info!("No subscription found for announcement");

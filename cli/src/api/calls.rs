@@ -1,7 +1,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use samizdat_common::{Hash, Key, Signed};
 
@@ -287,8 +287,30 @@ pub async fn get_all_subscriptions() -> Result<Vec<GetSubscriptionResponse>, any
 
 // Editions:
 
+/// The kind of an edition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum EditionKind {
+    /// Forget everything that came before. All the content will start from scratch.
+    Base,
+    /// Add to what came before. If an item is not found in the current edition, search for the
+    /// content in previous editions (unless _explicitely deleted_).
+    Layer,
+}
+
+impl FromStr for EditionKind {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "base" => Ok(EditionKind::Base),
+            "layer" => Ok(EditionKind::Layer),
+            oops => anyhow::bail!("Edition kind must be either `base` or `layer`, got {oops}"),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct PostEditionRequest<'a> {
+    pub kind: EditionKind,
     pub collection: &'a str,
     pub ttl: Option<&'a str>,
     pub no_announce: bool,
@@ -301,6 +323,7 @@ pub struct CollectionRef {
 
 #[derive(Debug, Deserialize)]
 pub struct EditionContent {
+    pub kind: EditionKind,
     pub collection: CollectionRef,
     pub timestamp: chrono::DateTime<chrono::Utc>,
     #[serde(with = "humantime_serde")]

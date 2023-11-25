@@ -137,8 +137,13 @@ impl Hint {
             length: length as u8,
         }
     }
+
     pub fn prefix(&self) -> &[u8] {
         &self.prefix.0[..(self.length as usize)]
+    }
+
+    pub fn len(&self) -> usize {
+        self.length as usize
     }
 }
 

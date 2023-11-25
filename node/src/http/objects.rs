@@ -67,9 +67,11 @@ fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
         .map(
             |content_type: String, query: Query, bytes: bytes::Bytes| async move {
                 let header = ObjectHeader::new(content_type, query.is_draft)?;
-                let object =
+                let object = tokio::task::spawn_blocking(move || {
                     ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))
-                        .await?;
+                })
+                .await
+                .expect("Object build task failed")?;
                 Ok(object.hash().to_string())
             },
         )
@@ -155,10 +157,13 @@ fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(authenticate([AccessRight::ManageObjects]))
         .and(warp::query())
         .map(|hash, query: Query| async move {
-            ObjectRef::new(hash)
-                .reissue(query.bookmark)
-                .await
-                .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
+            tokio::task::spawn_blocking(move || {
+                ObjectRef::new(hash)
+                    .reissue(query.bookmark)
+                    .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
+            })
+            .await
+            .expect("Object reissue task panicked")
         })
         .and_then(async_api_reply)
 }

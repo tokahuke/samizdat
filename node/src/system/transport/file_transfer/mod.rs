@@ -477,10 +477,15 @@ pub async fn recv_item(
     let object_ref = ObjectRef::new(merkle_tree.root());
 
     // Go away if you already have what you wanted:
-    if object_ref.exists()? {
-        // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
-        // the object in the database.
-        log::info!("Object {} exists. Ending transmission", object_ref.hash());
+    if object_ref.exists()? || object_ref.is_null() {
+        if object_ref.is_null() {
+            log::info!("Got null object as response. Ending transmission");
+        } else {
+            // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
+            // the object in the database.
+            log::info!("Object {} exists. Ending transmission", object_ref.hash());
+        }
+
         // Ending transmission from all potential candidates that might arrive:
         tokio::spawn(
             stream::once(async move { master })

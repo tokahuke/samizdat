@@ -20,7 +20,7 @@ fn main() -> Result<(), windows_service::Error> {
             }
         };
         let stdout_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stdout.log");
-        let stderr_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stderr.log"); 
+        let stderr_log = maybe_create_file(r"C:\ProgramData\Samizdat\Node\stderr.log");
 
         loop {
             // The entry point where execution will start on a background thread after a call to

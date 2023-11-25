@@ -8,7 +8,7 @@ use warp::Filter;
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
-use crate::models::{CollectionRef, Droppable, SeriesOwner, SeriesRef};
+use crate::models::{CollectionRef, Droppable, EditionKind, SeriesOwner, SeriesRef};
 use crate::{balanced_or_tree, hubs};
 
 use super::resolvers::resolve_series;
@@ -118,6 +118,7 @@ fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = war
 fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct Request {
+        kind: EditionKind,
         collection: String,
         #[serde(default)]
         #[serde(with = "humantime_serde")]
@@ -132,8 +133,11 @@ fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Re
         .and(warp::body::json())
         .map(|series_owner_name: String, request: Request| {
             if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                let edition = series_owner
-                    .advance(CollectionRef::new(request.collection.parse()?), request.ttl)?;
+                let edition = series_owner.advance(
+                    CollectionRef::new(request.collection.parse()?),
+                    request.ttl,
+                    request.kind,
+                )?;
 
                 if !request.no_announce {
                     let announcement = edition.announcement();

@@ -1,7 +1,7 @@
 //! Collections are a set of objects indexed by human-readable names. Collections are
 //! powered by Patricia trees and inclusion proofs.
 
-use rocksdb::{IteratorMode, WriteBatch};
+use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::borrow::Cow;
@@ -10,7 +10,7 @@ use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
-use samizdat_common::{Hash, PatriciaMap, PatriciaProof, Riddle};
+use samizdat_common::{Hash, Hint, PatriciaMap, PatriciaProof, Riddle};
 
 use crate::db::{db, Table};
 
@@ -217,8 +217,11 @@ impl CollectionItem {
 
     /// Runs through the database trying to find an item that fits to the supplied
     /// content riddle. Returns `Ok(None)` if no matching item is found.
-    pub fn find(content_riddle: &Riddle) -> Result<Option<CollectionItem>, crate::Error> {
-        let iter = db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start);
+    pub fn find(
+        content_riddle: &Riddle,
+        hint: &Hint,
+    ) -> Result<Option<CollectionItem>, crate::Error> {
+        let iter = db().prefix_iterator_cf(Table::CollectionItems.get(), hint.prefix());
 
         for item in iter {
             let (key, value) = item?;
@@ -307,7 +310,7 @@ impl CollectionRef {
 
     /// Builds a new collection from a list of paths and objects, returning the collection
     /// reference.
-    pub async fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
+    pub fn build<I>(is_draft: bool, objects: I) -> Result<CollectionRef, crate::Error>
     where
         I: Sync + Send + AsRef<[(ItemPathBuf, ObjectRef)]>,
     {
@@ -325,8 +328,7 @@ impl CollectionRef {
             ObjectHeader::new("application/json".to_owned(), is_draft)?,
             false,
             inventory.into_bytes().into_iter().map(Ok),
-        )
-        .await?;
+        )?;
 
         // Note: this is the slow part of the process (by a long stretch)
         let mut patricia_map = objects

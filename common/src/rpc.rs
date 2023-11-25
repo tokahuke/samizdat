@@ -68,6 +68,9 @@ pub enum QueryResponse {
 pub struct EditionRequest {
     /// The riddle defining the series public key.
     pub key_riddle: Riddle,
+    /// A hint to the solution of the key hash. This can set the degree of toughness of solving
+    /// the riddle.
+    pub hint: Hint,
 }
 
 /// The response to an edition request.
@@ -85,6 +88,9 @@ pub struct EditionResponse {
 pub struct EditionAnnouncement {
     /// The riddle defining the series public key.
     pub key_riddle: Riddle,
+    /// A hint to the solution of the key hash. This can set the degree of toughness of solving
+    /// the riddle.
+    pub hint: Hint,
     /// The information for the new edition.
     pub edition: OpaqueEncrypted,
     /// The random initialization to be used when decoding the encrypted value of

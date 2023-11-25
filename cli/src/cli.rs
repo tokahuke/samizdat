@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-use crate::commands;
+use crate::{api::EditionKind, commands};
 
 static mut CLI: Option<Cli> = None;
 
@@ -72,6 +72,11 @@ pub enum Command {
         /// Whether to announce this new edition to he network or to keep quiet.
         #[structopt(long)]
         no_announce: bool,
+        /// The kind of the commited edition. Either `base` (the default) or `layer`. Choosing
+        /// base will override all the data while layer allows files not present in an edition
+        /// to be found in previous editions.
+        #[structopt(long, default_value = "base")]
+        kind: EditionKind,
     },
     /// Watches the current directory for changes, rebuilding and committing at
     /// every change.
@@ -82,6 +87,11 @@ pub enum Command {
         /// Suppresses opening web browser on first commit.
         #[structopt(long)]
         no_browser: bool,
+        /// The kind of the commited edition. Either `base` (the default) or `layer`. Choosing
+        /// base will override all the data while layer allows files not present in an edition
+        /// to be found in previous editions.
+        #[structopt(long, default_value = "base")]
+        kind: EditionKind,
     },
     /// Uploads a single file as an object. Use "-" to upload from stdin.
     Upload {
@@ -173,8 +183,13 @@ impl Command {
                 release,
                 skip_build,
                 no_announce,
-            } => commands::commit(&ttl, skip_build, release, no_announce, None).await,
-            Command::Watch { ttl, no_browser } => commands::watch(&ttl, no_browser).await,
+                kind,
+            } => commands::commit(&ttl, skip_build, release, no_announce, kind, None).await,
+            Command::Watch {
+                ttl,
+                no_browser,
+                kind,
+            } => commands::watch(&ttl, no_browser, kind).await,
             Command::Upload {
                 file,
                 content_type,

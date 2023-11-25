@@ -86,7 +86,7 @@ impl Hash {
     }
 
     /// Creates the hash with all the bits set to zero.
-    pub fn zero() -> Hash {
+    pub const fn zero() -> Hash {
         Hash([0; HASH_LEN])
     }
 

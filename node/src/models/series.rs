@@ -6,6 +6,7 @@ use ed25519_dalek::Keypair;
 use futures::prelude::*;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use samizdat_common::rpc::QueryKind;
+use samizdat_common::Hint;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
@@ -16,7 +17,7 @@ use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, S
 
 use crate::db::Table;
 use crate::system::ReceivedItem;
-use crate::{db, hubs};
+use crate::{cli, db, hubs};
 
 use super::{BookmarkType, CollectionRef, Droppable, Inventory, ObjectRef};
 
@@ -143,10 +144,11 @@ impl SeriesOwner {
 
     /// Creates a new edition by signing a collection reference. If the supplied
     /// time-to-leave is `None`, the default TTL will be used.
-    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>) -> Edition {
+    fn sign(&self, collection: CollectionRef, ttl: Option<Duration>, kind: EditionKind) -> Edition {
         Edition {
             signed: Signed::new(
                 EditionContent {
+                    kind,
                     collection,
                     timestamp: chrono::Utc::now().trunc_subsecs(0),
                     ttl: ttl.unwrap_or(self.default_ttl),
@@ -163,6 +165,7 @@ impl SeriesOwner {
         &self,
         collection: CollectionRef,
         ttl: Option<Duration>,
+        kind: EditionKind,
     ) -> Result<Edition, crate::Error> {
         let mut batch = WriteBatch::default();
 
@@ -182,7 +185,7 @@ impl SeriesOwner {
                 .mark_with(&mut batch);
         }
 
-        let edition = self.sign(collection, ttl);
+        let edition = self.sign(collection, ttl, kind);
 
         batch.put_cf(
             Table::Editions.get(),
@@ -247,8 +250,8 @@ impl SeriesRef {
 
     /// Runs through the database looking for a series that matches the supplied riddle.
     /// Returns `Ok(None)` if none is found.
-    pub fn find(riddle: &Riddle) -> Result<Option<SeriesRef>, crate::Error> {
-        let it = db().iterator_cf(Table::Series.get(), IteratorMode::Start);
+    pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SeriesRef>, crate::Error> {
+        let it = db().prefix_iterator_cf(Table::Series.get(), hint.prefix());
 
         for item in it {
             let (key, value) = item?;
@@ -404,10 +407,22 @@ impl SeriesRef {
     }
 }
 
+/// The kind of an edition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum EditionKind {
+    /// Forget everything that came before. All the content will start from scratch.
+    Base,
+    /// Add to what came before. If an item is not found in the current edition, search for the
+    /// content in previous editions (unless _explicitely deleted_).
+    Layer,
+}
+
 /// The content of an edition. This is the data that is assured by the signature of the
 /// edition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EditionContent {
+    /// The kind of this edition.
+    kind: EditionKind,
     /// The collection reference of this edition. This includes the root hash of the
     /// collection.
     collection: CollectionRef,
@@ -433,6 +448,11 @@ pub struct Edition {
 }
 
 impl Edition {
+    /// The kind of this edition.
+    pub fn kind(&self) -> EditionKind {
+        self.signed.kind
+    }
+
     /// The collection pointed by this edition.
     pub fn collection(&self) -> CollectionRef {
         self.signed.collection.clone()
@@ -484,12 +504,14 @@ impl Edition {
         let rand = Hash::rand();
         let content_hash = self.public_key.hash();
         let key_riddle = Riddle::new(&content_hash);
+        let hint = Hint::new(content_hash, cli().hint_size as usize);
         let cipher = TransferCipher::new(&content_hash, &rand);
         let edition = OpaqueEncrypted::new(&self, &cipher);
 
         EditionAnnouncement {
             rand,
             key_riddle,
+            hint,
             edition,
         }
     }
@@ -585,7 +607,7 @@ fn validate_edition() {
     let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
     let _series = owner.series();
     let current_collection = CollectionRef::rand();
-    let edition = owner.sign(current_collection, None);
+    let edition = owner.sign(current_collection, None, EditionKind::Base);
 
     assert!(edition.is_valid())
 }
@@ -600,7 +622,7 @@ fn not_validate_edition() {
 
     let current_collection = CollectionRef::rand();
 
-    let mut edition = owner.sign(current_collection, None);
+    let mut edition = owner.sign(current_collection, None, EditionKind::Base);
     edition.public_key = other_series.public_key;
 
     assert!(!edition.is_valid())

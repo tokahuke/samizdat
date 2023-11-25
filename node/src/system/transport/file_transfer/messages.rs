@@ -158,6 +158,13 @@ impl ObjectMessage {
     ///
     /// If object does not exist locally.
     pub fn for_object(object: &ObjectRef) -> Result<ObjectMessage, crate::Error> {
+        if object.is_null() {
+            return Ok(ObjectMessage {
+                nonce: Hash::rand(),
+                metadata: ObjectMetadata::for_null_object(),
+            });
+        }
+
         let mut metadata = object
             .metadata()?
             .ok_or_else(|| format!("Object message for inexistent object: {object:?}"))?;

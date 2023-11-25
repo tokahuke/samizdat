@@ -2,7 +2,7 @@
 //! hash. Objects are powered by Merkle trees to allow torrent-like download and better
 //! storage of similar content.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use futures::prelude::*;
 use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
@@ -149,6 +149,21 @@ pub struct ObjectMetadata {
     pub content_size: usize,
     /// The timestamp this object was received on. This field is not transmitted through the network.
     pub received_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl ObjectMetadata {
+    pub fn for_null_object() -> ObjectMetadata {
+        ObjectMetadata {
+            hashes: vec![Hash::zero()],
+            header: ObjectHeader {
+                content_type: "application/x-empty".to_owned(),
+                is_draft: false,
+                nonce: 0,
+            },
+            content_size: 0,
+            received_at: chrono::Utc.timestamp_nanos(0),
+        }
+    }
 }
 
 /// An iterator over the bytes of an object, including its header.
@@ -326,6 +341,9 @@ impl ContentStream {
     }
 }
 
+/// The null object. An object that is guaranteed to return a 404 not found.
+pub const NULL_OBJECT: ObjectRef = ObjectRef { hash: Hash::zero() };
+
 /// A handle to an object. The object does not necessarily needs to exist in the database.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ObjectRef {
@@ -377,6 +395,10 @@ impl ObjectRef {
     /// Returns the hash associated with this object.
     pub fn hash(&self) -> &Hash {
         &self.hash
+    }
+
+    pub fn is_null(&self) -> bool {
+        self == &NULL_OBJECT
     }
 
     /// Returns whether an object exists in the database or not;
@@ -493,69 +515,63 @@ impl ObjectRef {
     }
 
     /// Build a new object from data coming from a _trusted_ source.
-    pub async fn build(
+    pub fn build(
         header: ObjectHeader,
         bookmark: bool,
         source: impl 'static + Send + IntoIterator<Item = Result<u8, crate::Error>>,
     ) -> Result<ObjectRef, crate::Error> {
-        // HACK: need to wrap this around a spawn blocking because I ran into an **compiler bug**!
-        // See: https://github.com/rust-lang/rust/issues/102211
-        tokio::task::spawn_blocking(move || {
-            let mut content_size = 0;
-            let mut buffer = header.buffer(); // start the first chunk with the serialized header
-            let mut hashes = Vec::new();
-            let mut source = source.into_iter();
-            // Locks are expected to be infrequent and short-lived. And we need this function
-            // not to be async (why?).
-            let chunk_lock = CHUNK_RW_LOCK.blocking_read();
+        let mut content_size = 0;
+        let mut buffer = header.buffer(); // start the first chunk with the serialized header
+        let mut hashes = Vec::new();
+        let mut source = source.into_iter();
+        // Locks are expected to be infrequent and short-lived. And we need this function
+        // not to be async.
+        let chunk_lock = CHUNK_RW_LOCK.blocking_read();
 
-            loop {
-                // Extend buffer until (a) source stops (b) error (c) reaches limit.
-                for byte in &mut source {
-                    buffer.push(byte?);
+        loop {
+            // Extend buffer until (a) source stops (b) error (c) reaches limit.
+            for byte in &mut source {
+                buffer.push(byte?);
 
-                    if buffer.len() == CHUNK_SIZE {
-                        break;
-                    }
-                }
-
-                content_size += buffer.len();
-
-                let chunk_hash = Hash::from_bytes(&buffer);
-                db().put_cf(Table::ObjectChunks.get(), chunk_hash, &buffer)?;
-                hashes.push(chunk_hash);
-
-                // Buffer not fille to the brim: it's over!
-                if buffer.len() < CHUNK_SIZE {
+                if buffer.len() == CHUNK_SIZE {
                     break;
                 }
-
-                // Else clean buffer!
-                buffer.clear();
             }
 
-            let merkle_tree = MerkleTree::from(hashes);
-            let hash = merkle_tree.root();
-            let metadata = ObjectMetadata {
-                hashes: merkle_tree.hashes().to_vec(),
-                header,
-                content_size,
-                received_at: chrono::Utc::now(),
-            };
-            let statistics = ObjectStatistics::new(content_size, Duration::from_secs(0));
+            content_size += buffer.len();
 
-            log::info!("New object {} with metadata: {:#?}", hash, metadata);
+            let chunk_hash = Hash::from_bytes(&buffer);
+            db().put_cf(Table::ObjectChunks.get(), chunk_hash, &buffer)?;
+            hashes.push(chunk_hash);
 
-            let mut batch = rocksdb::WriteBatch::default();
-            ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, bookmark);
-            db().write(batch)?;
+            // Buffer not fille to the brim: it's over!
+            if buffer.len() < CHUNK_SIZE {
+                break;
+            }
 
-            drop(chunk_lock);
+            // Else clean buffer!
+            buffer.clear();
+        }
 
-            Ok(ObjectRef { hash })
-        })
-        .await
-        .unwrap()
+        let merkle_tree = MerkleTree::from(hashes);
+        let hash = merkle_tree.root();
+        let metadata = ObjectMetadata {
+            hashes: merkle_tree.hashes().to_vec(),
+            header,
+            content_size,
+            received_at: chrono::Utc::now(),
+        };
+        let statistics = ObjectStatistics::new(content_size, Duration::from_secs(0));
+
+        log::info!("New object {} with metadata: {:#?}", hash, metadata);
+
+        let mut batch = rocksdb::WriteBatch::default();
+        ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, bookmark);
+        db().write(batch)?;
+
+        drop(chunk_lock);
+
+        Ok(ObjectRef { hash })
     }
 
     /// Imports an existing object in the database from an external _already validated_ data source,
@@ -722,10 +738,10 @@ impl ObjectRef {
 
     /// Create a copy of this object, but with a different nonce header value. This new object
     /// will have a new content hash.
-    pub async fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
+    pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter_bytes(false)? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
-            let reissued = ObjectRef::build(header.reissue(), bookmark, iter).await?;
+            let reissued = ObjectRef::build(header.reissue(), bookmark, iter)?;
 
             Ok(Some(reissued))
         } else {
