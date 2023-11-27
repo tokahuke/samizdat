@@ -57,6 +57,13 @@ impl HubAsNodeServer {
 
 #[tarpc::server]
 impl Node for HubAsNodeServer {
+    async fn config(self, _: context::Context) -> NodeConfig {
+        NodeConfig {
+            max_queries: CLI.max_queries_per_hub,
+            max_query_rate: CLI.max_query_rate_per_hub,
+        }
+    }
+
     async fn resolve(
         self,
         ctx: context::Context,

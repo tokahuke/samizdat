@@ -11,28 +11,38 @@ pub async fn get_provider() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub async fn create(identity: String, entity: String, ttl: u64) -> Result<(), anyhow::Error> {
+pub async fn create(
+    identity: String,
+    entity: String,
+    ttl: u64,
+    endpoint: Option<String>,
+) -> Result<(), anyhow::Error> {
     // Check if entity is a well-formed Samizdat public key.
     anyhow::ensure!(
         entity.parse::<samizdat_common::Key>().is_ok(),
         "Entity is not a valid series"
     );
-    crate::identity_dapp::create(identity, entity, ttl).await?;
+    crate::identity_dapp::create(identity, entity, ttl, endpoint).await?;
     Ok(())
 }
 
-pub async fn update(identity: String, entity: String, ttl: u64) -> Result<(), anyhow::Error> {
+pub async fn update(
+    identity: String,
+    entity: String,
+    ttl: u64,
+    endpoint: Option<String>,
+) -> Result<(), anyhow::Error> {
     // Check if entity is a well-formed Samizdat public key.
     anyhow::ensure!(
         entity.parse::<samizdat_common::Key>().is_ok(),
         "Entity is not a valid series"
     );
-    crate::identity_dapp::update(identity, entity, ttl).await?;
+    crate::identity_dapp::update(identity, entity, ttl, endpoint).await?;
     Ok(())
 }
 
-pub async fn get(identity: String) -> Result<(), anyhow::Error> {
-    let entity = crate::identity_dapp::get(identity).await?;
+pub async fn get(identity: String, endpoint: Option<String>) -> Result<(), anyhow::Error> {
+    let entity = crate::identity_dapp::get(identity, endpoint).await?;
     println!("{entity}");
     Ok(())
 }

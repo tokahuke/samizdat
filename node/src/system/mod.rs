@@ -9,6 +9,7 @@ pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
 use samizdat_common::HASH_LEN;
 use samizdat_common::Hint;
+use samizdat_common::HASH_LEN;
 use tokio::time::Instant;
 pub use transport::PEER_CONNECTIONS;
 
@@ -275,7 +276,10 @@ impl HubConnection {
     /// Tries to resolve the latest edition of a given series.
     pub async fn get_edition(&self, series: &SeriesRef) -> Result<Option<Edition>, crate::Error> {
         let key_riddle = Riddle::new(&series.public_key.hash());
-        let hint = Hint::new(Hash::new(&series.public_key.as_bytes()[..HASH_LEN]), cli().hint_size as usize);
+        let hint = Hint::new(
+            Hash::new(&series.public_key.as_bytes()[..HASH_LEN]),
+            cli().hint_size as usize,
+        );
         let guard = self.inner.get().await;
         let inner = guard.as_ref().ok_or("Not yet connected")?;
 

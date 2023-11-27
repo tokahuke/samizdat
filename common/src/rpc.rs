@@ -169,9 +169,20 @@ pub enum ResolutionResponse {
     NotFound,
 }
 
+/// The configuration of a node for a given hub.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NodeConfig {
+    /// Maximum number of concurrent queries.
+    pub max_queries: usize,
+    /// Maximum number of queries per second.
+    pub max_query_rate: f64,
+}
+
 /// The Samizdat node RPC interface.
 #[tarpc::service]
 pub trait Node {
+    /// Queries the configuration of this node.
+    async fn config() -> NodeConfig;
     /// Tries to resolve an object or item query.
     async fn resolve(resolution: Arc<Resolution>) -> ResolutionResponse;
     /// Receives a candidate to start transferring the contents of a previously run query.

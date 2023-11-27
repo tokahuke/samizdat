@@ -23,14 +23,22 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_RESOLUTIONS_PER_QUERY", long, default_value = "12")]
     pub max_resolutions_per_query: usize,
     /// The maximum number of _simultaneous_ requests a node can make.
-    #[structopt(env = "SAMIZDAT_MAX_QUERY_PER_NODE", long, default_value = "12")]
+    #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_NODE", long, default_value = "12")]
     pub max_queries_per_node: usize,
     /// The inverse of the interval that we delay if a node is requesting too many queries.
     /// (e.g., 2 => delay 500ms).
     #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_NODE", long, default_value = "12")]
     pub max_query_rate_per_node: f64,
+    /// The maximum number of _simultaneous_ requests a hub can make. This is sent
+    /// to the peers as part of the hub-as-node configuration.
+    #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_HUB", long, default_value = "120")]
+    pub max_queries_per_hub: usize,
+    /// The maximum number of requests per second that other hubs can query this hub. This is sent
+    /// to the peers as part of the hub-as-node configuration.
+    #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_HUB", long, default_value = "120")]
+    pub max_query_rate_per_hub: f64,
     /// The maximum number of candidates to return to the client.
-    #[structopt(env = "SAMIZDAT_MAX_CANDIDATES", long, default_value = "3")]
+    #[structopt(env = "SAMIZDAT_MAX_CANDIDATES", long, default_value = "24")]
     pub max_candidates: usize,
     /// Other servers to which to listen to.
     #[structopt(env = "SAMIZDAT_PARTNERS", long)]
