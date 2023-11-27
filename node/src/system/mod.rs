@@ -7,9 +7,6 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
-use samizdat_common::HASH_LEN;
-use samizdat_common::Hint;
-use samizdat_common::HASH_LEN;
 use tokio::time::Instant;
 pub use transport::PEER_CONNECTIONS;
 
@@ -31,6 +28,8 @@ use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::quic;
 use samizdat_common::rpc::*;
+use samizdat_common::Hint;
+use samizdat_common::HASH_LEN;
 use samizdat_common::{Hash, Riddle};
 
 use crate::cli;

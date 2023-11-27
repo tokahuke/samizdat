@@ -6,14 +6,14 @@ use ed25519_dalek::Keypair;
 use futures::prelude::*;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use samizdat_common::rpc::QueryKind;
-use samizdat_common::{Hint, HASH_LEN};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use samizdat_common::HASH_LEN;
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
+use samizdat_common::Hint;
+use samizdat_common::HASH_LEN;
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
 use crate::db::Table;
