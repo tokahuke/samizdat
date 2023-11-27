@@ -268,6 +268,7 @@ pub async fn resolve_series(
                         locator.collection().hash().to_string(),
                     ),
                     ("X-Samizdat-Series", series.public_key().to_string()),
+                    ("X-Samizdat-Edition", edition.timestamp().to_string()),
                 ]),
                 deadline,
             )

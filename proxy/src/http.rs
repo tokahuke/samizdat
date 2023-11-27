@@ -11,6 +11,7 @@ const PROXY_HEADERS: &[&str] = &[
     "X-Samizdat-Is-Draft",
     "X-Samizdat-Collection",
     "X-Samizdat-Series",
+    "X-Samizdat-Edition",
     "X-Samizdat-Query-Duration",
 ];
 

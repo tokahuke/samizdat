@@ -8,8 +8,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
-use crate::CLI;
-
 use super::node_sampler;
 use super::node_sampler::PrioritySampler;
 use super::Node;
@@ -88,6 +86,8 @@ impl Room {
         &'a self,
         sampler: impl 'a + PrioritySampler,
         current: SocketAddr,
+        concurrent: usize,
+        limit: usize,
         map: F,
     ) -> impl 'a + Stream<Item = U>
     where
@@ -112,9 +112,9 @@ impl Room {
                     filter_map
                 }
             })
-            .buffer_unordered(CLI.max_resolutions_per_query)
+            .buffer_unordered(concurrent)
             .filter_map(|outcome| async move { outcome })
-            .take(CLI.max_candidates)
+            .take(limit)
     }
 
     /// Gets a read handle to the underlying map backing this room.

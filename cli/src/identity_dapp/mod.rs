@@ -27,7 +27,7 @@ fn read(prompt: &str) -> String {
 fn get_wallet() -> Result<LocalWallet, anyhow::Error> {
     let wallet = rpassword::prompt_password(format!("{MARKER} Insert private key: "))?
         .parse::<LocalWallet>()
-        .context("Bad ETH private key")?
+        .context("Bad ethereum private key")?
         .with_chain_id(blockchain::BLOCKCHAIN_ID);
     println!();
 
@@ -40,19 +40,30 @@ fn get_etherscan() -> etherscan::Client {
         .expect("Invalid etherscan URL")
         .with_api_url(blockchain::ETHERSCAN_API_ENDPOINT)
         .expect("Invalid etherscan API URL")
+        .with_api_key(blockchain::ETHERSCAN_API_KEY)
         .build()
         .expect("Failed to build etherscan client")
 }
 
-async fn get_manager_contract(
-    wallet: LocalWallet,
-) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, anyhow::Error> {
-    let endpoint = crate::api::get_ethereum_provider().await?.endpoint;
-    let rpc_client = Arc::new(SignerMiddleware::new(
-        Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"),
-        wallet.clone(),
-    ));
+async fn client(endpoint: Option<String>) -> Result<Provider<Http>, anyhow::Error> {
+    let endpoint = if let Some(url) = endpoint {
+        url
+    } else {
+        crate::api::get_ethereum_provider().await?.endpoint
+    };
+    Ok(Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"))
+}
 
+async fn signing_client(
+    endpoint: Option<String>,
+    wallet: LocalWallet,
+) -> Result<SignerMiddleware<Provider<Http>, LocalWallet>, anyhow::Error> {
+    Ok(SignerMiddleware::new(client(endpoint).await?, wallet))
+}
+
+async fn get_manager_contract(
+    rpc_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
+) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, anyhow::Error> {
     let abi: Abi =
         serde_json::from_str(include_str!("../../../blockchain/SamizdatIdentityV1.json"))
             .expect("SamizdatStorage abi is valid");
@@ -65,8 +76,14 @@ async fn get_manager_contract(
     ))
 }
 
-async fn get_storage_contract() -> Result<Contract<Provider<Http>>, anyhow::Error> {
-    let endpoint = crate::api::get_ethereum_provider().await?.endpoint;
+async fn get_storage_contract(
+    endpoint: Option<String>,
+) -> Result<Contract<Provider<Http>>, anyhow::Error> {
+    let endpoint = if let Some(url) = endpoint {
+        url
+    } else {
+        crate::api::get_ethereum_provider().await?.endpoint
+    };
     let rpc_client = Arc::new(
         Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"),
     );
@@ -82,10 +99,16 @@ async fn get_storage_contract() -> Result<Contract<Provider<Http>>, anyhow::Erro
     ))
 }
 
-pub async fn create(identity: String, entity: String, ttl: u64) -> Result<(), anyhow::Error> {
+pub async fn create(
+    identity: String,
+    entity: String,
+    ttl: u64,
+    endpoint: Option<String>,
+) -> Result<(), anyhow::Error> {
     let wallet = get_wallet()?;
     let etherscan = get_etherscan();
-    let manager_contract = get_manager_contract(wallet.clone()).await?;
+    let rpc_client = Arc::new(signing_client(endpoint, wallet.clone()).await?);
+    let manager_contract = get_manager_contract(rpc_client.clone()).await?;
     let price_in_wei = manager_contract
         .method::<_, u64>("price", ())
         .expect("ABI was not declared as expected")
@@ -99,6 +122,7 @@ pub async fn create(identity: String, entity: String, ttl: u64) -> Result<(), an
         .value(price_in_wei)
         .from(wallet.address());
 
+    // Gas shenanigans:
     wait().await;
     let gas_estimate = match register.estimate_gas().await {
         Ok(estimate) => estimate,
@@ -109,16 +133,19 @@ pub async fn create(identity: String, entity: String, ttl: u64) -> Result<(), an
             anyhow::bail!("Contract says: {revert}");
         }
     };
-    // .context("Estimating gas for `register` transaction")?;
+    let gas_price = etherscan.gas_oracle().await?.propose_gas_price;
     register = register.gas(gas_estimate);
+    register = register.gas_price(gas_price);
 
     println!("{MARKER} Claiming {identity:?} as {entity:?} with TTL of {ttl}");
     println!("  Using funds from: {}", wallet.address());
     println!(
-        "  Price to register: {}ETH",
-        price_in_wei as f64 / 1_000_000_000_000_000_000f64
+        "  Price to register: {}{}",
+        price_in_wei as f64 / 1_000_000_000_000_000_000f64,
+        blockchain::TOKEN_NAME
     );
     println!("  Gas estimate: {gas_estimate:?}");
+    println!("  Gas price: {}Gwei", gas_price.as_u64() as f64 / 1e9);
     println!();
     let response = read("Type \"yes\" to proceed");
     if response.trim_end() != "yes" {
@@ -144,10 +171,16 @@ pub async fn create(identity: String, entity: String, ttl: u64) -> Result<(), an
     Ok(())
 }
 
-pub async fn update(identity: String, entity: String, ttl: u64) -> Result<(), anyhow::Error> {
+pub async fn update(
+    identity: String,
+    entity: String,
+    ttl: u64,
+    endpoint: Option<String>,
+) -> Result<(), anyhow::Error> {
     let wallet = get_wallet()?;
     let etherscan = get_etherscan();
-    let manager_contract = get_manager_contract(wallet.clone()).await?;
+    let rpc_client = Arc::new(signing_client(endpoint, wallet.clone()).await?);
+    let manager_contract = get_manager_contract(rpc_client.clone()).await?;
     let mut register = manager_contract
         .method::<_, ()>("registerWithTtl", (identity.clone(), entity.clone(), ttl))
         .expect("ABI was not declared as expected")
@@ -195,8 +228,8 @@ pub async fn update(identity: String, entity: String, ttl: u64) -> Result<(), an
     Ok(())
 }
 
-pub async fn get(identity: String) -> Result<String, anyhow::Error> {
-    let storage_contract = get_storage_contract().await?;
+pub async fn get(identity: String, endpoint: Option<String>) -> Result<String, anyhow::Error> {
+    let storage_contract = get_storage_contract(endpoint).await?;
     let (entity, _owner, _ttl, _data) = storage_contract
         .method::<_, (String, Address, u64, Vec<u8>)>("identities", identity.to_owned())
         .expect("ABI was not declared as expected")

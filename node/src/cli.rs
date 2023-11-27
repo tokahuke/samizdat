@@ -22,6 +22,14 @@ pub struct Cli {
     /// The maximum number of hubs to be queried simultaneously per query.
     #[structopt(env = "SAMIZDAT_MAX_PARALLEL_HUBS", long, default_value = "3")]
     pub max_parallel_hubs: usize,
+    /// The maximum number of _simultaneous_ requests a hub can make. This is sent
+    /// to the peers as part of the hub-as-node configuration.
+    #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_HUB", long, default_value = "120")]
+    pub max_queries_per_hub: usize,
+    /// The maximum number of queries that a hub can make. This is sent to the each hub as part of
+    /// the node configuration.
+    #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_HUB", long, default_value = "12")]
+    pub max_query_rate_per_hub: f64,
     /// (MB) The maximum total size of all cached files and _disposable_ files. Note that the total
     /// size may still exceed this value, since some of the allocated space is used to store
     /// data that is valuable to you.

@@ -398,6 +398,9 @@ pub enum IdentityCommand {
         /// The time-to-leave in seconds (time in cache) of this rule.
         #[structopt(long, default_value = "3600")]
         ttl: u64,
+        /// Use custom endpoint to the Ethereum blockchain.
+        #[structopt(long)]
+        endpoint: Option<String>,
     },
     /// Updatess and existing association in the smart contact in the Ethereum
     /// blockchain.
@@ -409,11 +412,17 @@ pub enum IdentityCommand {
         /// The time-to-leave in seconds (time in cache) of this rule.
         #[structopt(long, default_value = "3600")]
         ttl: u64,
+        /// Use custom endpoint to the Ethereum blockchain.
+        #[structopt(long)]
+        endpoint: Option<String>,
     },
     /// Gets the current key associated with a given identity.
     Get {
         /// The identity to be resolved.
         identity: String,
+        /// Use custom endpoint to the Ethereum blockchain.
+        #[structopt(long)]
+        endpoint: Option<String>,
     },
 }
 
@@ -428,13 +437,17 @@ impl IdentityCommand {
                 identity,
                 entity,
                 ttl,
-            } => commands::identity::create(identity, entity, ttl).await,
+                endpoint,
+            } => commands::identity::create(identity, entity, ttl, endpoint).await,
             IdentityCommand::Update {
                 identity,
                 entity,
                 ttl,
-            } => commands::identity::update(identity, entity, ttl).await,
-            IdentityCommand::Get { identity } => commands::identity::get(identity).await,
+                endpoint,
+            } => commands::identity::update(identity, entity, ttl, endpoint).await,
+            IdentityCommand::Get { identity, endpoint } => {
+                commands::identity::get(identity, endpoint).await
+            }
         }
     }
 }

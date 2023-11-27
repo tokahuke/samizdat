@@ -160,6 +160,13 @@ impl NodeServer {
 
 #[tarpc::server]
 impl Node for NodeServer {
+    async fn config(self, _: context::Context) -> NodeConfig {
+        NodeConfig {
+            max_queries: cli().max_queries_per_hub,
+            max_query_rate: cli().max_query_rate_per_hub,
+        }
+    }
+
     async fn resolve(self, _: context::Context, resolution: Arc<Resolution>) -> ResolutionResponse {
         match resolution.kind {
             QueryKind::Object => self.resolve_object(resolution).await,

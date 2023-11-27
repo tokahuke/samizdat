@@ -1,9 +1,11 @@
 use std::time::Duration;
 
-pub const DEFAULT_PROVIDER_ENDPOINT: &str = "https://eth-sepolia.public.blastapi.io";
-pub const ETHERSCAN_ENDPOINT: &str = "https://sepolia.etherscan.io";
-pub const ETHERSCAN_API_ENDPOINT: &str = "https://api-sepolia.etherscan.io/api";
-pub const STORAGE_CONTRACT_ADDRESS: &str = "0x99A3E5472B2f83555CDd0d0E674D84C6aEE88E53";
-pub const MANAGER_CONTRACT_ADDRESS: &str = "0x318b3fDdEb00Ba9193188B4e47Bf860EAE8D6F6D";
-pub const BLOCKCHAIN_ID: u64 = 11155111u64; // Sepolia
+pub const DEFAULT_PROVIDER_ENDPOINT: &str = "https://polygon.llamarpc.com";
+pub const ETHERSCAN_ENDPOINT: &str = "https://polygonscan.com";
+pub const ETHERSCAN_API_ENDPOINT: &str = "https://api.polygonscan.com/api";
+pub const ETHERSCAN_API_KEY: &str = "W7XB8EWTZ8IS32AZVTTUN69Y6MI4XVJAS3";
+pub const STORAGE_CONTRACT_ADDRESS: &str = "0xd0c69387e7b73c40ed712634f8738cdf28947c94";
+pub const MANAGER_CONTRACT_ADDRESS: &str = "0x1A59C958c9d3955b594bB2145817f7f000f1F498";
+pub const TOKEN_NAME: &str = "MATIC";
+pub const BLOCKCHAIN_ID: u64 = 137; // Polygon
 pub const THROTTLE_LIMIT: Duration = Duration::from_millis(1_000);
