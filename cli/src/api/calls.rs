@@ -162,19 +162,19 @@ type GetSeriesOwnerResponse = PostSeriesOwnerResponse;
 pub async fn post_series_owner(
     request: PostSeriesOwnerRequest<'_>,
 ) -> Result<PostSeriesOwnerResponse, anyhow::Error> {
-    post("/_seriesowners", request).await
+    post("/_series-owners", request).await
 }
 
 pub async fn delete_series_owner(series_name: &str) -> Result<bool, anyhow::Error> {
-    delete(format!("/_seriesowners/{series_name}")).await
+    delete(format!("/_series-owners/{series_name}")).await
 }
 
 pub async fn get_series_owner(series_name: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
-    get(format!("/_seriesowners/{series_name}")).await
+    get(format!("/_series-owners/{series_name}")).await
 }
 
 pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyhow::Error> {
-    get("/_seriesowners").await
+    get("/_series-owners").await
 }
 
 // Series:
@@ -322,6 +322,7 @@ pub struct CollectionRef {
     pub hash: Hash,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct EditionContent {
     pub kind: EditionKind,
@@ -340,9 +341,10 @@ pub async fn post_edition(
     series_name: &str,
     request: PostEditionRequest<'_>,
 ) -> Result<PostEditionResponse, anyhow::Error> {
-    post(format!("/_seriesowners/{series_name}/editions",), request).await
+    post(format!("/_series-owners/{series_name}/editions",), request).await
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct SeriesRef {
     pub public_key: Key,
@@ -356,7 +358,7 @@ pub struct PutEthereumProviderResponse {}
 pub async fn put_ethereum_provider(
     endpoint: String,
 ) -> Result<PutEthereumProviderResponse, anyhow::Error> {
-    put("/_ethereum_provider", GetEthereumProvider { endpoint }).await
+    put("/_ethereum-provider", GetEthereumProvider { endpoint }).await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -365,7 +367,7 @@ pub struct GetEthereumProvider {
 }
 
 pub async fn get_ethereum_provider() -> Result<GetEthereumProvider, anyhow::Error> {
-    get("/_ethereum_provider").await
+    get("/_ethereum-provider").await
 }
 
 // Vacuum:

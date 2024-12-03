@@ -28,6 +28,6 @@ rand = "0.8.5"
 rand_distr = "0.4.3"
 strum = "0.26.3"
 strum_macros = "0.26.4"
-warp = "0.3.3"
 http = "1.1.0"
 serde_json = "1.0.91"
+axum = { version = "0.7.9", features = ["macros", "tokio"] }

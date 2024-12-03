@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::sync::OnceLock;
 
 use samizdat_common::Hash;
 
@@ -13,11 +14,11 @@ use crate::cli;
 /// The access token is a file in the local filesystem that grants access to protected
 /// routes in the Samizdat HTTP API. This avoids unauthorized access from scripts running
 /// in webpages.
-static mut ACCESS_TOKEN: Option<String> = None;
+static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// Retrieves the access token. Must be called after initialization.
 pub fn access_token<'a>() -> &'a str {
-    unsafe { ACCESS_TOKEN.as_ref().expect("access token not initialized") }
+    ACCESS_TOKEN.get().expect("access token not initialized")
 }
 
 /// Generates a new access token value.
@@ -48,9 +49,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
 
     // Set static:
     log::info!("Node access token is {access_token:?}");
-    unsafe {
-        ACCESS_TOKEN = Some(access_token);
-    }
+    ACCESS_TOKEN.set(access_token).ok();
 
     // ... and also piggyback writing port here. I know this is hacky, but...
     let port_path = format!(

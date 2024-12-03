@@ -2,33 +2,34 @@
 
 mod migrations;
 
-use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::fmt::Display;
+use std::sync::LazyLock;
+use std::{collections::BTreeSet, sync::OnceLock};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
 use crate::cli;
 
-lazy_static! {
-    /// A lock that allows the _write_ holder to perform deletion operations on chunks.
-    /// This lock must be held in `write` mode by all operations attempting to
-    /// non-atomically __delete__ chunks from the database. It must also be held in
-    /// `read` mode by all operations writing to chunks.
-    pub static ref CHUNK_RW_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::default();
-    /// A set of locks (to reduce lock contention) that allow the holder to write on
-    /// [`Table::ObjectStatistics`]. This can be blocking because the lock holding
-    /// operations are very fast.
-    pub static ref STATISTICS_MUTEXES: [std::sync::Mutex<()>; 12] = Default::default();
-}
+/// A lock that allows the _write_ holder to perform deletion operations on chunks.
+/// This lock must be held in `write` mode by all operations attempting to
+/// non-atomically __delete__ chunks from the database. It must also be held in
+/// `read` mode by all operations writing to chunks.
+pub static CHUNK_RW_LOCK: LazyLock<tokio::sync::RwLock<()>> =
+    LazyLock::new(tokio::sync::RwLock::default);
+
+/// A set of locks (to reduce lock contention) that allow the holder to write on
+/// [`Table::ObjectStatistics`]. This can be blocking because the lock holding
+/// operations are very fast.
+pub static STATISTICS_MUTEXES: LazyLock<[std::sync::Mutex<()>; 12]> =
+    LazyLock::new(Default::default);
 
 /// The handle to the RocksDB database.
-static mut DB: Option<rocksdb::DB> = None;
+static DB: OnceLock<rocksdb::DB> = OnceLock::new();
 
 /// Retrieves a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
-    unsafe { DB.as_ref().expect("db not initialized") }
+    DB.get().expect("database should be initialized first")
 }
 
 /// Initializes the RocksDB for use by the Samizdat node.
@@ -61,17 +62,12 @@ pub fn init_db() -> Result<(), crate::Error> {
         Table::descriptors().chain(useless_cfs),
     )?;
 
-    // Set static:
-    // SAFETY: this is the only write to this variable an this happens before any reads are done.
-    // This is a single-threaded initialization function.
-    unsafe {
-        DB = Some(db);
+    DB.set(db).ok();
 
-        // Run possible migrations (needs DB set, but still requires exclusive access):
-        log::info!("RocksDB up. Running migrations...");
-        migrations::migrate()?;
-        log::info!("... done running all migrations.");
-    }
+    // Run possible migrations (needs DB set, but still requires exclusive access):
+    log::info!("RocksDB up. Running migrations...");
+    migrations::migrate()?;
+    log::info!("... done running all migrations.");
 
     Ok(())
 }

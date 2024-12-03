@@ -149,17 +149,17 @@ impl IntoResponse for PageResponse {
 }
 
 /// The entrypoint of the Samizdat node public HTTP API.
-fn api_next() -> Router {
+fn api() -> Router {
     Router::new()
         .merge(identities::api())
         .nest("/_kvstore", kvstore::api())
         .nest("/_objects", objects::api())
         .nest("/_collections", collections::api())
         .nest("/_series", series::api())
-        .nest("/_series_owners", series_owners::api())
+        .nest("/_series-owners", series_owners::api())
         .nest("/_editions", editions::api())
         .nest("/_subscriptions", subscriptions::api())
-        .nest("_ethereum_provider", ethereum_provider::api())
+        .nest("/_ethereum-provider", ethereum_provider::api())
         .nest("/_auth", auth::api())
         .nest("/_hubs", hubs::api())
         .nest("/_connections", connections::api())
@@ -205,7 +205,7 @@ async fn deny_outside_requests(
 pub async fn serve() -> Result<(), crate::Error> {
     let server = Router::new()
         .route("/", get(|| async { Html(include_str!("../index.html")) }))
-        .merge(api_next())
+        .merge(api())
         .layer(
             tower::ServiceBuilder::new()
                 .layer(axum::middleware::from_fn(deny_outside_requests))

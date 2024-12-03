@@ -1,8 +1,10 @@
 use chrono::{Duration, Utc};
 use ethers::abi::Abi;
 use ethers::prelude::*;
-use lazy_static::lazy_static;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, LazyLock, OnceLock},
+};
 use tokio::sync::RwLock;
 
 use samizdat_common::blockchain;
@@ -12,11 +14,10 @@ use crate::{
     models::SeriesRef,
 };
 
-lazy_static! {
-    pub static ref IDENTITY_CACHE: RwLock<BTreeMap<String, Arc<Identity>>> = RwLock::default();
-}
+pub static IDENTITY_CACHE: LazyLock<RwLock<BTreeMap<String, Arc<Identity>>>> =
+    LazyLock::new(RwLock::default);
 
-static mut IDENTITY_PROVIDER: Option<IdentityProvider> = None;
+static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 
 pub fn init_identity_provider() -> Result<(), crate::Error> {
     let provider =
@@ -30,19 +31,15 @@ pub fn init_identity_provider() -> Result<(), crate::Error> {
             IdentityProvider::new(blockchain::DEFAULT_PROVIDER_ENDPOINT)
         };
 
-    unsafe {
-        IDENTITY_PROVIDER = Some(provider);
-    }
+    IDENTITY_PROVIDER.set(provider).ok();
 
     Ok(())
 }
 
 pub fn identity_provider<'a>() -> &'a IdentityProvider {
-    unsafe {
-        IDENTITY_PROVIDER
-            .as_ref()
-            .expect("identity provider not initialized")
-    }
+    IDENTITY_PROVIDER
+        .get()
+        .expect("identity provider not initialized")
 }
 
 #[derive(Debug)]

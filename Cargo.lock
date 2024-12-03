@@ -4378,6 +4378,7 @@ dependencies = [
 name = "samizdat-hub"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "base64-url",
  "bincode",
  "chashmap",
@@ -4401,7 +4402,6 @@ dependencies = [
  "tarpc",
  "tokio",
  "tokio-stream",
- "warp",
 ]
 
 [[package]]

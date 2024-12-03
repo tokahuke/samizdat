@@ -6,7 +6,6 @@ mod http;
 mod models;
 mod replay_resistance;
 mod rpc;
-mod slow_compiler_workaround;
 mod utils;
 
 pub use db::db;

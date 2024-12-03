@@ -1,4 +1,4 @@
-#![feature(ip, try_blocks, result_flattening, stmt_expr_attributes, proc_macro_hygiene)]
+#![feature(ip, try_blocks, result_flattening)]
 
 mod access;
 mod cli;
@@ -6,7 +6,6 @@ mod db;
 mod http;
 mod identity_dapp;
 mod models;
-mod slow_compiler_workaround;
 mod system;
 mod utils;
 mod vacuum;
@@ -16,7 +15,7 @@ pub use samizdat_common::Error;
 pub use cli::cli;
 pub use db::db;
 
-use std::panic;
+use std::{panic, sync::OnceLock};
 use tokio::task;
 
 use samizdat_common::logger;
@@ -28,22 +27,19 @@ use identity_dapp::init_identity_provider;
 use system::Hubs;
 
 /// The variable holding a list of all the connections to the hubs.
-static mut HUBS: Option<Hubs> = None;
+static HUBS: OnceLock<Hubs> = OnceLock::new();
 
 /// Initiates [`HUBS`] by connecting to all hubs defined in the command line.
 async fn init_hubs() -> Result<(), crate::Error> {
     let hubs = Hubs::init().await?;
-
-    unsafe {
-        HUBS = Some(hubs);
-    }
+    HUBS.set(hubs).ok();
 
     Ok(())
 }
 
 /// Retrieves a reference to the list of hubs. Needs to be called just after initialization.
 pub fn hubs<'a>() -> &'a Hubs {
-    unsafe { HUBS.as_ref().expect("hubs not initialized") }
+    HUBS.get().expect("hubs not initialized")
 }
 
 /// Utility for propagating panics through tasks.

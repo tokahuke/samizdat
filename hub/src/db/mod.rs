@@ -2,19 +2,19 @@
 
 mod migrations;
 
-use std::collections::BTreeSet;
 use std::fmt::Display;
+use std::{collections::BTreeSet, sync::OnceLock};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
 use crate::CLI;
 
 /// The handle to the RocksDB database.
-static mut DB: Option<rocksdb::DB> = None;
+static DB: OnceLock<rocksdb::DB> = OnceLock::new();
 
 /// Retrieves a reference to the RocksDB database. Must be called after initialization.
 pub fn db<'a>() -> &'a rocksdb::DB {
-    unsafe { DB.as_ref().expect("db not initialized") }
+    DB.get().expect("db not initialized")
 }
 
 /// Initializes the RocksDB for use by the Samizdat hub.
@@ -47,12 +47,7 @@ pub fn init_db() -> Result<(), crate::Error> {
         Table::descriptors().chain(useless_cfs),
     )?;
 
-    // Set static:
-    // SAFETY: this is the only write to this variable an this happens before any reads are done.
-    // This is a single-threaded initialization function.
-    unsafe {
-        DB = Some(db);
-    }
+    DB.set(db).ok();
 
     // Run possible migrations (needs DB set, but still requires exclusive access):
     log::info!("RocksDB up. Running migrations...");

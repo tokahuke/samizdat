@@ -2,14 +2,18 @@
 
 mod blacklisted_ips;
 
-use futures::{Future, StreamExt};
+use axum::extract::{ConnectInfo, Query, Request};
+use axum::middleware::Next;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
+use futures::{FutureExt, StreamExt};
 use serde_derive::Deserialize;
-use std::net::SocketAddr;
-use warp::Filter;
+use std::net::{Ipv6Addr, SocketAddr};
 
 use crate::rpc::node_sampler::QuerySampler;
 use crate::rpc::ROOM;
-use crate::{balanced_or_tree, CLI};
+use crate::CLI;
 
 /// Mapping of Samizdat errors into HTTP status codes.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
@@ -31,105 +35,112 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
-/// The response format for the Samizdat hub HTTP API.
-fn api_reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
+/// The standardized JSON reply for the API.
+pub struct ApiResponse<T>(Result<T, crate::Error>);
+
+impl<T> IntoResponse for ApiResponse<T>
 where
     T: serde::Serialize,
 {
-    let status = t
-        .as_ref()
-        .map_err(error_status_code)
-        .err()
-        .unwrap_or_default();
-    let json = t.map_err(|err| err.to_string());
-    warp::reply::with_header(
-        warp::reply::with_status(
-            serde_json::to_string_pretty(&json).expect("can serialize JSON"),
-            status,
-        ),
-        http::header::CONTENT_TYPE,
-        "application/json",
-    )
+    fn into_response(self) -> Response {
+        let status = self
+            .0
+            .as_ref()
+            .map_err(error_status_code)
+            .err()
+            .unwrap_or_default();
+        let json = self.0.map_err(|err| err.to_string());
+
+        Response::builder()
+            .status(status)
+            .body(
+                serde_json::to_string(&json)
+                    .expect("can serialize API response")
+                    .into(),
+            )
+            .expect("can create API response")
+    }
 }
 
-/// Utility to create a tuple of one value _very explicitly_.
-fn tuple<T>(t: T) -> (T,) {
-    (t,)
+async fn deny_outside_requests(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !addr.ip().to_canonical().is_loopback() {
+        return Response::builder()
+            .status(http::StatusCode::FORBIDDEN)
+            .body("403 Forbidden".into())
+            .expect("can build stadard error message");
+    }
+
+    next.run(request).await
 }
 
 /// Serves the Samizdat hub HTTP API.
-pub fn serve() -> impl Future<Output = ()> {
-    let server = warp::filters::addr::remote()
-        .and_then(|addr: Option<std::net::SocketAddr>| async move {
-            if let Some(addr) = addr {
-                if addr.ip().to_canonical().is_loopback() {
-                    return Err(warp::reject::not_found());
-                }
-            }
+pub async fn serve() -> Result<(), crate::Error> {
+    let server = Router::new()
+        .route("/", get(|| async { Html(include_str!("../index.html")) }))
+        .merge(api())
+        .layer(axum::middleware::from_fn(deny_outside_requests));
 
-            Ok(warp::reply::with_status(
-                "cannot connect outside loopback",
-                ::http::StatusCode::FORBIDDEN,
-            ))
-        })
-        .or(warp::get().and(warp::path::end()).map(|| {
-            warp::reply::with_header(include_str!("../index.html"), "Content-Type", "text/html")
-        }))
-        .or(self::api())
-        .with(warp::log("api"));
+    axum::serve(
+        tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, CLI.http_port)).await?,
+        server.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
-    // Run public server:
-    warp::serve(server).run(([0; 16], CLI.http_port))
+    Ok(())
 }
 
 /// All the endpoints for the Samizdat HTTP API.
-fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        connected_ips(),
-        resolution_order(),
-        blacklisted_ips::api(),
-        warp::get().and(warp::path::end()).map(|| {
-            warp::reply::with_header(include_str!("../index.html"), "Content-Type", "text/html")
+fn api() -> Router {
+    Router::new()
+        .nest("connected-ips", connected_ips())
+        .nest("resolution-order", resolution_order())
+        .nest("blacklisted-ips", blacklisted_ips::api())
+}
+
+/// Returns all the currently connected IPs to this hub.
+fn connected_ips() -> Router {
+    Router::new().route(
+        "/",
+        get(|| {
+            async move {
+                let ips = ROOM
+                    .raw_participants()
+                    .await
+                    .iter()
+                    .map(|(addr, _)| *addr)
+                    .collect::<Vec<_>>();
+                Ok(ips)
+            }
+            .map(ApiResponse)
         }),
     )
 }
 
-/// Returns all the currently connected IPs to this hub.
-fn connected_ips() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path("connected-ips")
-        .and(warp::get())
-        .and_then(|| async {
-            let ips = ROOM
-                .raw_participants()
-                .await
-                .iter()
-                .map(|(addr, _)| *addr)
-                .collect::<Vec<_>>();
-            Ok(api_reply(Ok(ips))) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
-}
-
 /// Gets the current resolution order of the peers, that is, the order in which peers
 /// will be queried.
-fn resolution_order() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn resolution_order() -> Router {
     #[derive(Deserialize)]
     struct QueryParameters {
         addr: SocketAddr,
     }
 
-    warp::path!("resolution-order")
-        .and(warp::get())
-        .and(warp::query())
-        .and_then(|QueryParameters { addr }| async move {
-            let resolution_order = ROOM
-                .stream_peers(QuerySampler, addr)
-                .await
-                .map(|(peer_ip, _)| peer_ip)
-                .collect::<Vec<_>>()
-                .await;
-            Ok(api_reply(Ok(resolution_order))) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
+    Router::new().route(
+        "/",
+        get(|Query(QueryParameters { addr }): Query<QueryParameters>| {
+            async move {
+                let resolution_order = ROOM
+                    .stream_peers(QuerySampler, addr)
+                    .await
+                    .map(|(peer_ip, _)| peer_ip)
+                    .collect::<Vec<_>>()
+                    .await;
+                Ok(resolution_order)
+            }
+            .map(ApiResponse)
+        }),
+    )
 }
