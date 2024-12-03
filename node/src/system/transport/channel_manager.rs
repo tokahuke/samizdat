@@ -1,11 +1,10 @@
 use futures::prelude::*;
-use lazy_static::lazy_static;
 use quinn::{ReadToEndError, RecvStream};
 use samizdat_common::address::{ChannelAddr, ChannelId};
 use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::OwnedMutexGuard;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -15,9 +14,9 @@ use super::multiplexed::Multiplexed;
 
 pub type PeerEntry = Arc<Mutex<Option<Arc<Multiplexed>>>>;
 
-lazy_static! {
-    pub static ref PEER_CONNECTIONS: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = {
-        let peers: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = Arc::new(RwLock::default());
+pub static PEER_CONNECTIONS: LazyLock<Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>>> =
+    LazyLock::new(|| {
+        let peers: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = Arc::default();
 
         // Remove closed and erred connections from time to time:
         let peers_task = peers.clone();
@@ -40,8 +39,7 @@ lazy_static! {
         });
 
         peers
-    };
-}
+    });
 
 pub struct ChannelManager {
     connection_manager: Arc<ConnectionManager>,
@@ -200,7 +198,7 @@ fn read_error_to_io(error: ReadToEndError) -> io::Error {
 
 impl ChannelReceiver {
     pub async fn recv(&mut self, max_len: usize) -> Result<Option<Vec<u8>>, crate::Error> {
-        if let Some(recv_stream) = self.receiver.recv().await {
+        if let Some(mut recv_stream) = self.receiver.recv().await {
             recv_stream
                 .read_to_end(max_len)
                 .await
@@ -217,7 +215,7 @@ impl ChannelReceiver {
         max_len: usize,
     ) -> impl 'a + Stream<Item = Result<Vec<u8>, crate::Error>> {
         stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
-            move |recv_stream| async move {
+            move |mut recv_stream| async move {
                 recv_stream
                     .read_to_end(max_len)
                     .await
@@ -232,7 +230,7 @@ impl ChannelReceiver {
         max_len: usize,
     ) -> impl Stream<Item = Result<Vec<u8>, crate::Error>> {
         stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
-            move |recv_stream| async move {
+            move |mut recv_stream| async move {
                 recv_stream
                     .read_to_end(max_len)
                     .await

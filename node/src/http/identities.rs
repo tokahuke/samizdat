@@ -2,75 +2,21 @@
 
 use std::fmt::Display;
 use std::str::FromStr;
-use std::time::SystemTime;
 
+use axum::extract::Path;
+use axum::routing::get;
+use axum::Router;
+use futures::FutureExt;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
-use warp::path::Tail;
-use warp::Filter;
+use serde_with::DisplayFromStr;
+use tokio::time::Instant;
 
-use crate::db::Table;
-use crate::http::api_reply;
-use crate::identity_dapp::identity_provider;
-use crate::{balanced_or_tree, db};
+use crate::access::AccessRight;
+use crate::http::{PageResponse, SamizdatTimeout};
+use crate::security_scope;
 
 use super::resolvers::resolve_identity;
-use super::{get_timeout, tuple};
-
-/// The entrypoint of the object API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        // Query item using identity
-        get_item(),
-        get_ethereum_provider(),
-        put_ethereum_provider(),
-    )
-}
-
-/// Sets the Ethereum Network Provider to be used.
-fn put_ethereum_provider(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[serde_as]
-    #[derive(Deserialize)]
-    struct Request {
-        endpoint: String,
-    }
-
-    #[derive(Serialize)]
-    struct Response {}
-
-    warp::path!("_ethereum_provider")
-        .and(warp::put())
-        .and(warp::body::json())
-        .map(|request: Request| {
-            tokio::spawn(async move { identity_provider().set_endpoint(&request.endpoint).await });
-            Ok(Response {})
-        })
-        .map(api_reply)
-}
-
-/// Gets the Ethereum Network Provider to be used.
-fn get_ethereum_provider(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[derive(Serialize)]
-    struct Response {
-        endpoint: String,
-    }
-
-    warp::path!("_ethereum_provider")
-        .and(warp::get())
-        .map(|| {
-            Ok(Response {
-                endpoint: db()
-                    .get_cf(Table::Global.get(), "ethereum_provider_endpoint")?
-                    .map(|e| String::from_utf8_lossy(&e).into_owned())
-                    .unwrap_or_else(|| {
-                        samizdat_common::blockchain::DEFAULT_PROVIDER_ENDPOINT.to_owned()
-                    }),
-            })
-        })
-        .map(api_reply)
-}
 
 /// A reference to an identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -110,19 +56,32 @@ impl IdentityRef {
 }
 
 /// Gets the contents of an item using identity.
-fn get_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!(IdentityRef / ..)
-        .and(warp::path::tail())
-        .and(warp::get())
-        .and(get_timeout())
-        .and_then(|identity: IdentityRef, name: Tail, timeout| async move {
-            Ok(resolve_identity(
-                identity.handle(),
-                name.as_str().into(),
-                [],
-                SystemTime::now() + timeout,
-            )
-            .await?) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
+pub fn api() -> Router {
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct GetIdentityPath {
+        #[serde_as(as = "DisplayFromStr")]
+        identity: IdentityRef,
+        name: String,
+    }
+
+    Router::new().route(
+        ":identity/*name",
+        get(
+            |Path(GetIdentityPath { identity, name }): Path<GetIdentityPath>,
+             SamizdatTimeout(timeout): SamizdatTimeout| {
+                async move {
+                    Ok(resolve_identity(
+                        identity.handle(),
+                        name.as_str().into(),
+                        [],
+                        Instant::now() + timeout,
+                    )
+                    .await?)
+                }
+                .map(PageResponse)
+            },
+        )
+        .layer(security_scope!(AccessRight::Public)),
+    )
 }

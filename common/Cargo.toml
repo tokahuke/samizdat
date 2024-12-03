@@ -10,16 +10,13 @@ crate-type = ["lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-flatbuffers = "22.10.26"
 log = "0.4.17"
 log4rs = "1.2.0"
-tokio = { version = "1.23.0", features = ["rt-multi-thread", "macros", "net", "time"] }
-failure = "0.1.8"
-failure_derive = "0.1.8"
-rocksdb = { version = "0.19.0", default-features = false, features = [] }
+tokio = { version = "1.41.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+rocksdb = { version = "0.22.0", default-features = false, features = [] }
 futures = "0.3.25"
-tarpc = { version = "0.31.0", features = ["tokio1", "serde-transport", "tcp"] }
-base64-url = "1.4.13"
+tarpc = { version = "0.35.0", features = ["tokio1", "serde-transport", "tcp"] }
+base64-url = "3.0.0"
 serde_derive = "1.0.152"
 serde = { version = "1.0.152", features = ["rc"] }
 tokio-util = "0.7.4"
@@ -29,17 +26,19 @@ tokio-stream = { version = "0.1.11", features = ["net"] }
 sha3 = "0.10.6"
 warp = { version = "0.3.3", default-features = false }
 getrandom = "0.2.8"
-quinn = "0.9.3" # do NOT upgrade until quinn bugfix!
-rustls = { version = "0.20.7", default-features = false, features = ["quic", "dangerous_configuration"] }
+quinn = "0.11.6" # do NOT upgrade until quinn bugfix!
+rustls = { version = "0.23.18" }
 webpki = "0.22.0"
-rcgen = "0.10.0"
+rcgen = "0.13.1"
 chrono = { version = "0.4.23", features = ["serde"] }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
-ed25519-dalek = { version = "1.0.1", features = ["serde"] }
+ed25519-dalek = { version = "2.1.1", features = ["serde"] }
 aes-gcm-siv = "0.11.1"
 anyhow = "1.0.68"
-rustls-pemfile = "1.0.1"
+rustls-pemfile = "2.2.0"
 typenum = "1.16.0"
 serde_json = "1.0.91"
 serde_with = "3.3.0"
+rustls-pki-types = "1.10.0"
+thiserror = "2.0.3"

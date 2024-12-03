@@ -14,7 +14,6 @@ use futures::prelude::*;
 use futures::stream;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::SystemTime;
 use tarpc::client::NewClient;
 use tarpc::context;
 use tarpc::server::{self, Channel};
@@ -77,13 +76,17 @@ impl HubConnectionInner {
     ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
         let transport = connection_manager.transport(reverse_addr).await?;
-        let server_task = server::BaseChannel::with_defaults(transport).execute(
-            NodeServer {
-                channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),
-                candidate_channels,
-            }
-            .serve(),
-        );
+        let server_task = server::BaseChannel::with_defaults(transport)
+            .execute(
+                NodeServer {
+                    channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),
+                    candidate_channels,
+                }
+                .serve(),
+            )
+            .for_each(|request_task| async move {
+                tokio::spawn(request_task);
+            });
         let handler = tokio::spawn(server_task);
 
         Ok(handler)
@@ -170,7 +173,7 @@ impl HubConnection {
         &self,
         content_hash: Hash,
         kind: QueryKind,
-        deadline: SystemTime,
+        deadline: Instant,
     ) -> Result<ReceivedItem, crate::Error> {
         // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
@@ -184,12 +187,10 @@ impl HubConnection {
         let inner = guard.as_ref().ok_or("Not yet connected")?;
 
         // Get the deadline of the request:
-        let query_start = SystemTime::now();
+        let query_start = Instant::now();
         let mut context = context::current();
-        context.deadline = deadline;
-        let request_duration = deadline
-            .duration_since(query_start)
-            .expect("deadline is in the future");
+        context.deadline = deadline.into_std();
+        let request_duration = deadline.duration_since(query_start);
         let deadline_instant = Instant::now() + request_duration;
 
         // Do the RPC call:
@@ -433,7 +434,7 @@ impl Hubs {
         &self,
         content_hash: Hash,
         kind: QueryKind,
-        deadline: SystemTime,
+        deadline: Instant,
     ) -> Option<ReceivedItem> {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
@@ -462,7 +463,7 @@ impl Hubs {
         &self,
         content_hash: Hash,
         kind: QueryKind,
-        deadline: SystemTime,
+        deadline: Instant,
         retries: I,
     ) -> Option<ReceivedItem>
     where

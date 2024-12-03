@@ -60,7 +60,7 @@ async fn recv_message<R>(connection: Connection, max_length: usize) -> Result<R,
 where
     R: for<'a> Deserialize<'a>,
 {
-    let recv_stream = connection.accept_uni().await?;
+    let mut recv_stream = connection.accept_uni().await?;
     let serialized = recv_stream.read_to_end(max_length).await;
 
     match serialized {
@@ -133,7 +133,7 @@ where
             let mut send_stream = connection.open_uni().await?;
             let serialized = bincode::serialize(&item).expect("can serialize");
             send_stream.write_all(&serialized).await?;
-            send_stream.finish().await?;
+            send_stream.finish()?;
 
             Ok(())
         };

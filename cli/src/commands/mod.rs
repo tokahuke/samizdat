@@ -31,7 +31,10 @@ use crate::util::MARKER;
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
-    println!("{}", Table::new(t).with(tabled::Style::markdown()))
+    println!(
+        "{}",
+        Table::new(t).with(tabled::settings::Style::markdown())
+    )
 }
 
 pub async fn upload(
@@ -332,7 +335,7 @@ pub async fn watch(
     if !no_browser {
         if let Err(err) = webbrowser::open(&format!(
             "http://localhost:{}/_series/{}",
-            crate::access_token::port(),
+            crate::access_token::port()?,
             private_manifest.public_key_debug
         )) {
             println!("WARNING: could not open browser: {err}")
@@ -343,7 +346,7 @@ pub async fn watch(
     println!();
     println!(
         "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
-        crate::access_token::port(),
+        crate::access_token::port()?,
         private_manifest.public_key_debug
     );
     if !no_browser {
@@ -373,7 +376,7 @@ pub async fn watch(
                 println!();
                 println!(
                     "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
-                    crate::access_token::port(),
+                    crate::access_token::port()?,
                     private_manifest.public_key_debug
                 );
                 println!();

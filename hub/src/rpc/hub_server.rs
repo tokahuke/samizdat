@@ -70,7 +70,6 @@ impl HubServer {
     }
 }
 
-#[tarpc::server]
 impl Hub for HubServer {
     // Saving for future use.
     async fn set_property(

@@ -70,16 +70,16 @@ pub async fn post_object(
     bookmark: bool,
     is_draft: bool,
 ) -> Result<String, anyhow::Error> {
-    let url = format!("{}/_objects", crate::server());
+    let url = format!("{}/_objects", crate::server()?);
     let response = CLIENT
         .post(&format!(
             "{}/_objects?bookmark={}&is-draft={}",
-            crate::server(),
+            crate::server()?,
             bookmark,
             is_draft,
         ))
         .header("Content-Type", content_type)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .body(content)
         .send()
         .await
@@ -102,10 +102,10 @@ pub async fn get_object<F>(hash: &str, timeout: u64, mut each_chunk: F) -> Resul
 where
     F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>,
 {
-    let url = format!("{}/_objects/{}", crate::server(), hash);
+    let url = format!("{}/_objects/{}", crate::server()?, hash);
     let response = CLIENT
         .get(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .header("X-Samizdat-Timeout", timeout)
         .send()
         .await
@@ -152,7 +152,7 @@ pub struct PostSeriesOwnerRequest<'a> {
 #[derive(Deserialize)]
 pub struct PostSeriesOwnerResponse {
     pub name: String,
-    pub keypair: ed25519_dalek::Keypair,
+    pub keypair: ed25519_dalek::SigningKey,
     #[serde(with = "humantime_serde")]
     pub default_ttl: Duration,
 }
@@ -274,8 +274,7 @@ pub async fn post_subscription(
 }
 
 pub async fn get_subscription_refresh(public_key: &str) -> Result<(), anyhow::Error> {
-    get(format!("/_subscriptions/{public_key}/refresh")).await?;
-    Ok(())
+    get(format!("/_subscriptions/{public_key}/refresh")).await
 }
 
 pub async fn delete_subscription(public_key: &str) -> Result<bool, anyhow::Error> {

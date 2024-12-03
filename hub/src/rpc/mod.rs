@@ -358,7 +358,11 @@ pub async fn run_direct(
             // Set up server:
             let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
             let server = HubServer::new(client_addr, candidate_channels.clone());
-            let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
+            let server_task = server::BaseChannel::with_defaults(transport)
+                .execute(server.serve())
+                .for_each(|request_task| async move {
+                    tokio::spawn(request_task);
+                });
 
             log::info!("Connection from node (as server) {client_addr} accepted");
 

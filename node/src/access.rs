@@ -1,6 +1,7 @@
 //! Access rights infrastructure for the node.
 
 use serde_derive::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -67,8 +68,11 @@ pub fn init_access_token() -> Result<(), crate::Error> {
 }
 
 /// Access rights that can be granted to web applications.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum AccessRight {
+    /// Can access public content. This is granted by default to everyone.
+    Public,
     /// Can create and delete objects.
     ManageObjects,
     /// Can get statistics on object usage.
@@ -85,6 +89,16 @@ pub enum AccessRight {
     ManageIdentities,
     /// Can create and delete connection to Samizdat Hubs.
     ManageHubs,
+}
+
+impl PartialOrd for AccessRight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match (self, other) {
+            (this, that) if *this as u8 == *that as u8 => Ordering::Equal,
+            (Self::Public, _) => Ordering::Less,
+            _ => return None,
+        })
+    }
 }
 
 /// A name of an entity inside the Samizdat network. An entity can be an object, a

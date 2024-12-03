@@ -55,7 +55,6 @@ impl HubAsNodeServer {
     }
 }
 
-#[tarpc::server]
 impl Node for HubAsNodeServer {
     async fn config(self, _: context::Context) -> NodeConfig {
         NodeConfig {
@@ -197,7 +196,10 @@ async fn connect_reverse(
     let transport = BincodeOverQuic::new(connection.clone(), MAX_TRANSFER_SIZE);
 
     let server_task = server::BaseChannel::with_defaults(transport)
-        .execute(HubAsNodeServer::new(reverse_addr, client, candidate_channels).serve());
+        .execute(HubAsNodeServer::new(reverse_addr, client, candidate_channels).serve())
+        .for_each(|request_task| async move {
+            tokio::spawn(request_task);
+        });
 
     Ok(tokio::spawn(server_task))
 }

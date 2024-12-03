@@ -1,4 +1,4 @@
-#![feature(ip, try_blocks, result_flattening)]
+#![feature(ip, try_blocks, result_flattening, stmt_expr_attributes, proc_macro_hygiene)]
 
 mod access;
 mod cli;

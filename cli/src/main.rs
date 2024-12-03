@@ -1,6 +1,6 @@
 //! Command line interface for Samizdat node and hub.
 
-#![feature(try_blocks)]
+#![feature(try_blocks, once_cell_try)]
 
 mod access_token;
 mod api;
@@ -20,11 +20,8 @@ pub use manifest::{Manifest, PrivateManifest};
 #[tokio::main]
 async fn main() {
     let outcome: Result<(), anyhow::Error> = try {
-        cli::init_cli()?;
-
         let _ = logger::init_logger(cli::cli().verbose);
 
-        access_token::init_access_token()?;
         access_token::init_port()?;
 
         api::validate_node_is_up().await?;

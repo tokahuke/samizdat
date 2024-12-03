@@ -71,8 +71,8 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
                 .into_iter()
                 .map(|series_owner| Row {
                     name: series_owner.name,
-                    public_key: series_owner.keypair.public.into(),
-                    private_key: series_owner.keypair.secret.into(),
+                    public_key: series_owner.keypair.verifying_key().into(),
+                    private_key: series_owner.keypair.to_scalar_bytes().into(),
                     default_ttl: format!("{:?}", series_owner.default_ttl),
                 })
                 .collect::<Vec<_>>(),

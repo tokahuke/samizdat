@@ -4,6 +4,7 @@ mod auth;
 mod collections;
 mod connections;
 mod editions;
+mod ethereum_provider;
 mod hubs;
 mod identities;
 mod kvstore;
@@ -12,16 +13,28 @@ mod peers;
 mod redirects;
 mod resolvers;
 mod series;
+mod series_owners;
 mod subscriptions;
 
-use std::time::Duration;
+use std::{
+    convert::Infallible,
+    net::{Ipv6Addr, SocketAddr},
+    num::ParseIntError,
+    time::Duration,
+};
 
-pub use auth::authenticate;
+use axum::{
+    extract::{ConnectInfo, FromRequestParts, Request},
+    middleware::Next,
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
+    Router,
+};
+use futures::FutureExt;
+use http::request::Parts;
+use redirects::redirect_request;
 
-use futures::Future;
-use warp::{reject::Rejection, Filter};
-
-use crate::{balanced_or_tree, cli};
+use crate::cli;
 
 /// Gets the corresponding HTTP status code for a Samizdat error.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
@@ -43,132 +56,167 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
-/// Retrieves the timeout from the `X-Samizdat-Timeout` header.
-fn get_timeout() -> impl Filter<Extract = (Duration,), Error = Rejection> + Clone {
-    warp::header::optional("X-Samizdat-Timeout")
-        .map(|maybe_timeout: Option<u64>| Duration::from_secs(maybe_timeout.unwrap_or(10)))
+struct SamizdatTimeoutRejection(ParseIntError);
+
+impl IntoResponse for SamizdatTimeoutRejection {
+    fn into_response(self) -> Response {
+        Response::builder()
+            .status(400)
+            .body(format!("Bad X-Samizdat-Timout header value: {}", self.0).into())
+            .expect("can build error response")
+    }
+}
+
+struct SamizdatTimeout(Duration);
+
+#[axum::async_trait]
+impl<S> FromRequestParts<S> for SamizdatTimeout {
+    type Rejection = SamizdatTimeoutRejection;
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> Result<SamizdatTimeout, Self::Rejection> {
+        parts
+            .headers
+            .get("X-Samizdat-Timeout")
+            .map(|header| {
+                String::from_utf8_lossy(header.as_bytes())
+                    .parse::<u64>()
+                    .map(Duration::from_secs)
+            })
+            .unwrap_or(Ok(Duration::from_secs(10)))
+            .map(SamizdatTimeout)
+            .map_err(SamizdatTimeoutRejection)
+    }
+}
+
+struct ContentType(String);
+
+#[axum::async_trait]
+impl<S> FromRequestParts<S> for ContentType {
+    type Rejection = Infallible;
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<ContentType, Self::Rejection> {
+        Ok(parts
+            .headers
+            .get("Content-Type")
+            .map(|header| String::from_utf8_lossy(header.as_bytes()).into_owned())
+            .map(ContentType)
+            .unwrap_or_else(|| ContentType("application/octet-stream".to_owned())))
+    }
 }
 
 /// The standardized JSON reply for the API.
-fn api_reply<T>(t: Result<T, crate::Error>) -> impl warp::Reply
+pub struct ApiResponse<T>(Result<T, crate::Error>);
+
+impl<T> IntoResponse for ApiResponse<T>
 where
     T: serde::Serialize,
 {
-    let status = t
-        .as_ref()
-        .map_err(error_status_code)
-        .err()
-        .unwrap_or_default();
-    let json = t.map_err(|err| err.to_string());
-    warp::reply::with_header(
-        warp::reply::with_status(
-            serde_json::to_string_pretty(&json).expect("can serialize JSON"),
-            status,
-        ),
-        http::header::CONTENT_TYPE,
-        "application/json",
-    )
+    fn into_response(self) -> Response {
+        let status = self
+            .0
+            .as_ref()
+            .map_err(error_status_code)
+            .err()
+            .unwrap_or_default();
+        let json = self.0.map_err(|err| err.to_string());
+
+        Response::builder()
+            .status(status)
+            .body(
+                serde_json::to_string(&json)
+                    .expect("can serialize API response")
+                    .into(),
+            )
+            .expect("can create API response")
+    }
 }
 
-async fn async_api_reply<F, T>(f: F) -> Result<impl warp::Reply, warp::Rejection>
-where
-    T: serde::Serialize,
-    F: Future<Output = Result<T, crate::Error>>,
-{
-    Ok(api_reply(f.await))
-}
+/// A response that is not a response from the API directly, but "anything else". Used
+/// mainly for serving content.
+pub struct PageResponse(Result<Response, crate::Error>);
 
-/// Utility to create a tuple of one value _very explicitly_.
-fn tuple<T>(t: T) -> (T,) {
-    (t,)
-}
-
-/// Transforms a rendered string into an HTML reply.
-fn html(rendered: String) -> impl warp::Reply {
-    warp::reply::with_header(
-        warp::reply::with_status(rendered, http::StatusCode::OK),
-        http::header::CONTENT_TYPE,
-        "text/html; charset=UTF-8",
-    )
+impl IntoResponse for PageResponse {
+    fn into_response(self) -> Response {
+        match self.0 {
+            Ok(response) => response,
+            Err(err) => Response::builder()
+                .status(error_status_code(&err))
+                .body(err.to_string().into())
+                .expect("can build error response"),
+        }
+    }
 }
 
 /// The entrypoint of the Samizdat node public HTTP API.
-fn api() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        kvstore::api(),                // kvstore not subject to redirect rules.
-        redirects::general_redirect(), // redirect rules here...
-        objects::api(),
-        collections::api(),
-        series::api(),
-        editions::api(),
-        identities::api(),
-        subscriptions::api(),
-        auth::api(),
-        hubs::api(),
-        connections::api(),
-        peers::api(),
-        vacuum(),
-    )
-    .recover(|rejection: warp::Rejection| async move {
-        if let Some(forbidden) = rejection.find::<auth::Forbidden>() {
-            Ok(warp::reply::with_status(
-                forbidden.to_string(),
-                http::StatusCode::FORBIDDEN,
-            ))
-        } else if let Some(unauthorized) = rejection.find::<auth::Unauthorized>() {
-            Ok(warp::reply::with_status(
-                unauthorized.to_string(),
-                http::StatusCode::UNAUTHORIZED,
-            ))
-        } else if let Some(error) = rejection.find::<crate::Error>() {
-            Ok(warp::reply::with_status(
-                error.to_string(),
-                http::StatusCode::BAD_REQUEST,
-            ))
-        } else {
-            Err(rejection)
-        }
-    })
+fn api_next() -> Router {
+    Router::new()
+        .merge(identities::api())
+        .nest("/_kvstore", kvstore::api())
+        .nest("/_objects", objects::api())
+        .nest("/_collections", collections::api())
+        .nest("/_series", series::api())
+        .nest("/_series_owners", series_owners::api())
+        .nest("/_editions", editions::api())
+        .nest("/_subscriptions", subscriptions::api())
+        .nest("_ethereum_provider", ethereum_provider::api())
+        .nest("/_auth", auth::api())
+        .nest("/_hubs", hubs::api())
+        .nest("/_connections", connections::api())
+        .nest("/_peers", peers::api())
+        .nest("/_vacuum", vacuum())
 }
 
 /// Triggers a manual vacuum round.
-fn vacuum() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        warp::post()
-            .and(warp::path!("_vacuum"))
-            .map(crate::vacuum::vacuum)
-            .map(api_reply),
-        warp::post()
-            .and(warp::path!("_vacuum" / "flush-all"))
-            .map(|| {
-                crate::vacuum::flush_all();
-                Ok(())
-            })
-            .map(api_reply)
-    )
+fn vacuum() -> Router {
+    Router::new()
+        .route(
+            "/",
+            post(|| async { crate::vacuum::vacuum() }.map(ApiResponse)),
+        )
+        .route(
+            "/flush-all",
+            post(|| {
+                async {
+                    crate::vacuum::flush_all();
+                    Ok(())
+                }
+                .map(ApiResponse)
+            }),
+        )
+}
+
+async fn deny_outside_requests(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !addr.ip().to_canonical().is_loopback() {
+        return Response::builder()
+            .status(http::StatusCode::FORBIDDEN)
+            .body("403 Forbidden".into())
+            .expect("can build stadard error message");
+    }
+
+    next.run(request).await
 }
 
 /// Runs the HTTP API server.
-pub fn serve() -> impl Future<Output = ()> {
-    let public_server = warp::filters::addr::remote()
-        .and_then(|addr: Option<std::net::SocketAddr>| async move {
-            if let Some(addr) = addr {
-                if addr.ip().to_canonical().is_loopback() {
-                    return Err(warp::reject::not_found());
-                }
-            }
+pub async fn serve() -> Result<(), crate::Error> {
+    let server = Router::new()
+        .route("/", get(|| async { Html(include_str!("../index.html")) }))
+        .merge(api_next())
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(deny_outside_requests))
+                .layer(axum::middleware::from_fn(redirect_request)),
+        );
 
-            Ok(warp::reply::with_status(
-                "cannot connect outside loopback",
-                ::http::StatusCode::FORBIDDEN,
-            ))
-        })
-        .or(warp::get().and(warp::path::end()).map(|| {
-            warp::reply::with_header(include_str!("../index.html"), "Content-Type", "text/html")
-        }))
-        .or(self::api())
-        .with(warp::log("api"));
+    axum::serve(
+        tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, cli().port)).await?,
+        server.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
-    // Run public server:
-    warp::serve(public_server).run(([0; 16], cli().port))
+    Ok(())
 }

@@ -1,5 +1,5 @@
 use futures::future::join;
-use quinn::{Connecting, Connection, Endpoint};
+use quinn::{Connection, Endpoint, Incoming};
 use samizdat_common::{quic, BincodeOverQuic};
 use std::net::SocketAddr;
 
@@ -17,20 +17,20 @@ pub enum DropMode {
 
 pub struct ConnectionManager {
     endpoint: Endpoint,
-    matcher: Matcher<SocketAddr, Connecting>,
+    matcher: Matcher<SocketAddr, Incoming>,
 }
 
 impl ConnectionManager {
     pub fn new(endpoint: Endpoint) -> ConnectionManager {
-        let matcher: Matcher<SocketAddr, Connecting> = Matcher::default();
+        let matcher: Matcher<SocketAddr, Incoming> = Matcher::default();
 
         let matcher_task = matcher.clone();
         let endpoint_task = endpoint.clone();
         tokio::spawn(async move {
-            while let Some(connecting) = endpoint_task.accept().await {
-                let peer_addr = utils::socket_to_canonical(connecting.remote_address());
+            while let Some(incoming) = endpoint_task.accept().await {
+                let peer_addr = utils::socket_to_canonical(incoming.remote_address());
                 log::info!("{peer_addr} arrived");
-                matcher_task.arrive(peer_addr, connecting).await;
+                matcher_task.arrive(peer_addr, incoming).await;
             }
         });
 

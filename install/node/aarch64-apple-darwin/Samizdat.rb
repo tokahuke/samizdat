@@ -3,8 +3,11 @@ class Samizdat < Formula
     homepage "https://github.com/tokahuke/samizdat"
     version "0.1.0"
     url "https://proxy.hubfederation.com/get-samizdat/$VERSION/node/aarch64-apple-darwin/samizdat.tar.gz"
+    revision $REVISION_COUNT
     # sha256 "$SHA256SUM"
     license "AGPLv3"
+
+    depends_on arch: :aarch64
 
     def install
         bin.install "samizdat"

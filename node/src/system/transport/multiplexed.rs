@@ -115,7 +115,7 @@ impl Multiplexed {
         stream.write_all(payload).await.map_err(io::Error::from)?;
         log::debug!("payload streamed for {}", channel_id);
 
-        stream.finish().await.map_err(io::Error::from)?;
+        stream.finish().map_err(io::Error::from)?;
         log::debug!("payload sent for {}", channel_id);
 
         Ok(())

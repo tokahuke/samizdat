@@ -1,7 +1,7 @@
 //! A process to keep the size of the database under control and to purge junk
 //! that is not used anymore.
 
-use decorum::NotNan;
+use ordered_float::NotNan;
 use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -62,7 +62,10 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
         let (key, value) = item?;
         let statistics: ObjectStatistics = bincode::deserialize(&value)?;
         heap.push(HeapEntry {
-            priority: Reverse(NotNan::from(statistics.byte_usefulness(&use_prior))),
+            priority: Reverse(
+                NotNan::try_from(statistics.byte_usefulness(&use_prior))
+                    .expect("byte usefulness was nan"),
+            ),
             content: (key, statistics.size()),
         });
     }

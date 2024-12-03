@@ -158,7 +158,6 @@ impl NodeServer {
     }
 }
 
-#[tarpc::server]
 impl Node for NodeServer {
     async fn config(self, _: context::Context) -> NodeConfig {
         NodeConfig {

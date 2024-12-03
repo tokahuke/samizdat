@@ -1,9 +1,11 @@
 //! Default configuration for QUIC used by Samizdat. Samizdat has its own way of dealing
 //! with security. Therefore, much of the complexity involving security in QUIC can be igonred.
 
+use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{
     ClientConfig, Connection, Endpoint, IdleTimeout, ServerConfig, TransportConfig, VarInt,
 };
+use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,25 +17,57 @@ const DEFAULT_SERVER_NAME: &str = "spartacus";
 /// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
 ///
 /// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
-struct SkipServerVerification;
+#[derive(Debug)]
+struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
 
 impl SkipServerVerification {
     fn new() -> Arc<Self> {
-        Arc::new(Self)
+        Arc::new(Self(Arc::new(rustls::crypto::ring::default_provider())))
     }
 }
 
-impl rustls::client::ServerCertVerifier for SkipServerVerification {
+impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
-    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::ServerCertVerified::assertion())
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp: &[u8],
+        _now: UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
     }
 }
 
@@ -56,11 +90,11 @@ fn transport_config(keep_alive: bool) -> TransportConfig {
 /// Creates a default client configuration for QUIC.
 fn client_config(keep_alive: bool) -> ClientConfig {
     let crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
+        .dangerous()
         .with_custom_certificate_verifier(SkipServerVerification::new())
         .with_no_client_auth();
-
-    let mut client_config = ClientConfig::new(Arc::new(crypto));
+    let mut client_config =
+        ClientConfig::new(Arc::new(QuicClientConfig::try_from(crypto).unwrap()));
     client_config.transport_config(Arc::new(transport_config(keep_alive)));
 
     client_config
@@ -69,11 +103,11 @@ fn client_config(keep_alive: bool) -> ClientConfig {
 /// Creates a default server configuration for QUIC.
 fn server_config() -> ServerConfig {
     let cert = rcgen::generate_simple_self_signed(vec![DEFAULT_SERVER_NAME.into()]).unwrap();
-    let key = rustls::PrivateKey(cert.serialize_private_key_der());
-    let cert = rustls::Certificate(cert.serialize_der().unwrap());
+    let cert_der = CertificateDer::from(cert.cert);
+    let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
 
-    let mut server_config =
-        quinn::ServerConfig::with_single_cert(vec![cert], key).expect("can build server config");
+    let mut server_config = quinn::ServerConfig::with_single_cert(vec![cert_der], priv_key.into())
+        .expect("can build server config");
     server_config.transport = Arc::new(transport_config(true));
 
     server_config

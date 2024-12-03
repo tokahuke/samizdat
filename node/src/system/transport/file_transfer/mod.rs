@@ -6,7 +6,7 @@ mod messages;
 use std::collections::VecDeque;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use brotli::{CompressorReader, Decompressor};
 use futures::prelude::*;
@@ -261,7 +261,7 @@ impl ReceivedObject {
 pub async fn recv_object(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     hash: Hash,
-    query_start: SystemTime,
+    query_start: Instant,
     deadline_instant: Instant,
 ) -> Result<ReceivedObject, crate::Error> {
     let mut negotiated = Box::pin(
@@ -292,9 +292,7 @@ pub async fn recv_object(
     };
 
     // Now, the query is considered done.
-    let query_duration = SystemTime::now()
-        .duration_since(query_start)
-        .expect("time error");
+    let query_duration = Instant::now().duration_since(query_start);
 
     // Prepare to receive content:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
@@ -428,7 +426,7 @@ impl ReceivedItem {
 pub async fn recv_item(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     locator_hash: Hash,
-    query_start: SystemTime,
+    query_start: Instant,
     deadline_instant: Instant,
 ) -> Result<ReceivedItem, crate::Error> {
     let mut negotiated = Box::pin(
@@ -459,9 +457,7 @@ pub async fn recv_item(
     };
 
     // Now, the query is considered done.
-    let query_duration = SystemTime::now()
-        .duration_since(query_start)
-        .expect("time error");
+    let query_duration = Instant::now().duration_since(query_start);
 
     // Prepare to receive data:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();

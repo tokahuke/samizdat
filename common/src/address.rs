@@ -237,16 +237,18 @@ pub struct AddrToResolve {
 }
 
 impl FromStr for AddrToResolve {
-    type Err = ParseIntError;
-    fn from_str(s: &str) -> Result<Self, ParseIntError> {
+    type Err = crate::Error;
+    fn from_str(s: &str) -> Result<Self, crate::Error> {
         if let Some(pos) = s.find('/') {
-            let direct_addr = s[..pos].parse::<SocketOrDomain>()?;
+            let direct_addr = s[..pos]
+                .parse::<SocketOrDomain>()
+                .map_err(|err| err.to_string())?;
             Ok(AddrToResolve {
                 direct_addr,
-                reverse_port: s[pos + 1..].parse::<u16>()?,
+                reverse_port: s[pos + 1..].parse::<u16>().map_err(|err| err.to_string())?,
             })
         } else {
-            let direct_addr = s.parse::<SocketOrDomain>()?;
+            let direct_addr = s.parse::<SocketOrDomain>().map_err(|err| err.to_string())?;
             Ok(AddrToResolve {
                 reverse_port: direct_addr.port() + 1,
                 direct_addr,

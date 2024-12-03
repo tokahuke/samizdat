@@ -1,6 +1,8 @@
 //! Redirects for the HTTP API.
 
-use warp::Filter;
+use std::borrow::Cow;
+
+use axum::{extract::Request, middleware::Next, response::Response};
 
 /// Optionally implements the "tilde redirect". Similarly to Unix platforms, the `~`
 /// represents the "home folder" of a collection or a series.
@@ -123,28 +125,53 @@ fn maybe_redirect(path: &str) -> Option<String> {
         .or_else(|| maybe_redirect_empty(path))
 }
 
+// pub fn general_redirect(
+// ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+//     warp::get()
+//         .and(warp::path::tail())
+//         .and_then(|initial_path: warp::path::Tail| async move {
+//             let mut path = initial_path.as_str().to_owned();
+//             let mut was_redirected = false;
+
+//             while let Some(new_path) = maybe_redirect(&path) {
+//                 path = new_path;
+//                 was_redirected = true;
+//             }
+
+//             if was_redirected {
+//                 log::info!("location {}", path);
+//                 let uri = path
+//                     .parse::<http::uri::Uri>()
+//                     .expect("bad route on redirect");
+//                 Ok(warp::redirect(uri))
+//             } else {
+//                 Err(warp::reject::reject())
+//             }
+//         })
+// }
+
 /// Does all the redirection dances and shenanigans.
-pub fn general_redirect(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::get()
-        .and(warp::path::tail())
-        .and_then(|initial_path: warp::path::Tail| async move {
-            let mut path = initial_path.as_str().to_owned();
-            let mut was_redirected = false;
+pub async fn redirect_request(request: Request, next: Next) -> Response {
+    // Exceptions:
+    if request.uri().path().starts_with("/_kvstore/") {
+        return next.run(request).await;
+    }
 
-            while let Some(new_path) = maybe_redirect(&path) {
-                path = new_path;
-                was_redirected = true;
-            }
+    let mut path = Cow::Borrowed(request.uri().path());
+    let mut was_redirected = false;
 
-            if was_redirected {
-                log::info!("location {}", path);
-                let uri = path
-                    .parse::<http::uri::Uri>()
-                    .expect("bad route on redirect");
-                Ok(warp::redirect(uri))
-            } else {
-                Err(warp::reject::reject())
-            }
-        })
+    while let Some(new_path) = maybe_redirect(&path) {
+        path = Cow::Owned(new_path);
+        was_redirected = true;
+    }
+
+    if was_redirected {
+        return Response::builder()
+            .status(http::StatusCode::PERMANENT_REDIRECT)
+            .header("Location", path.as_ref())
+            .body("308 Permanent Redirect".into())
+            .expect("can create redirect response");
+    }
+
+    next.run(request).await
 }
