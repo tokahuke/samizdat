@@ -1,19 +1,16 @@
 mod cli;
 mod html;
 mod http;
-mod slow_compiler_workaround;
 
 use std::time::Duration;
 
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use cli::cli;
 
-// const DOMAIN: &str = "proxy.hubfederation.com";
-// const OWNER: &str = "pedrobittencourt3@gmail.com";
-
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
+    cli::init_cli()?;
 
     // Run server:
     if cli().https {

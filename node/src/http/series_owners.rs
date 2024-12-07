@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use axum::extract::Path;
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{SubsecRound, Utc};
@@ -106,8 +106,8 @@ pub fn api() -> Router {
         )
         .route(
             // Pushes a new collection to the series owner, creating a new edition.
-            "/_seriesowners/:series_owner_name/editions",
-            get(
+            "/:series_owner_name/editions",
+            post(
                 |Path(series_owner_name): Path<String>, Json(request): Json<PostEditionRequest>| {
                     async move {
                         let Some(series_owner) = SeriesOwner::get(&series_owner_name)? else {
@@ -163,7 +163,7 @@ pub fn api() -> Router {
                             tokio::spawn({
                                 let edition = edition.clone();
                                 async move {
-                                    log::info!("Announcing edition {edition:?}");
+                                    tracing::info!("Announcing edition {edition:?}");
                                     hubs().announce_edition(&announcement).await
                                 }
                             });
@@ -174,6 +174,10 @@ pub fn api() -> Router {
                     .map(ApiResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::ManageSeries)),
+            .layer(
+                tower::ServiceBuilder::new()
+                    .layer(security_scope!(AccessRight::ManageSeries))
+                    .layer(DefaultBodyLimit::disable()),
+            ),
         )
 }

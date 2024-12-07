@@ -24,7 +24,7 @@ pub fn init_identity_provider() -> Result<(), crate::Error> {
         if let Some(endpoint) = db().get_cf(Table::Global.get(), "ethereum_provider_endpoint")? {
             IdentityProvider::new(String::from_utf8_lossy(&endpoint).as_ref())
         } else {
-            log::warn!(
+            tracing::warn!(
                 "Ethereum provider endpoint not set. Using default: {}",
                 blockchain::DEFAULT_PROVIDER_ENDPOINT
             );
@@ -132,11 +132,11 @@ impl IdentityProvider {
 
     pub async fn get_cached(&self, identity: &str) -> Result<Option<Arc<Identity>>, crate::Error> {
         if let Some(identity) = IDENTITY_CACHE.read().await.get(identity) {
-            log::debug!("Found cached identity");
+            tracing::debug!("Found cached identity");
             if identity.valid_until > Utc::now() {
                 return Ok(Some(identity.clone()));
             } else {
-                log::debug!("Cached identity is outdated. Will have to ask the Network again")
+                tracing::debug!("Cached identity is outdated. Will have to ask the Network again")
             }
         }
 

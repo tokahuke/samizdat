@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::OwnedMutexGuard;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
-use super::connection_manager::{ConnectionManager, DropMode};
+use super::connection_manager::{connection_manager, DropMode};
 use super::multiplexed::Multiplexed;
 
 pub type PeerEntry = Arc<Mutex<Option<Arc<Multiplexed>>>>;
@@ -41,132 +41,116 @@ pub static PEER_CONNECTIONS: LazyLock<Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>
         peers
     });
 
-pub struct ChannelManager {
-    connection_manager: Arc<ConnectionManager>,
+fn create_connection(
+    mut locked: OwnedMutexGuard<Option<Arc<Multiplexed>>>,
+    peer_addr: SocketAddr,
+    drop_mode: DropMode,
+) {
+    tokio::spawn(async move {
+        match connection_manager()
+            .punch_hole_to(peer_addr, drop_mode)
+            .await
+        {
+            Ok(conn) => {
+                *locked = Some(Arc::new(Multiplexed::new(conn)));
+            }
+            Err(err) => {
+                tracing::error!("Failed to create connection to {peer_addr}: {err}")
+            }
+        }
+    });
 }
 
-impl ChannelManager {
-    pub fn new(connection_manager: Arc<ConnectionManager>) -> ChannelManager {
-        ChannelManager { connection_manager }
-    }
+async fn connect_to(
+    peer_addr: SocketAddr,
+    drop_mode: DropMode,
+) -> Result<Arc<Multiplexed>, crate::Error> {
+    tracing::debug!("fetching connection for {}", peer_addr);
+    let mut guard = PEER_CONNECTIONS.write().await;
+    tracing::debug!("connection guard acquired");
 
-    fn create_connection(
-        &self,
-        mut locked: OwnedMutexGuard<Option<Arc<Multiplexed>>>,
-        peer_addr: SocketAddr,
-        drop_mode: DropMode,
-    ) {
-        let connection_manager = self.connection_manager.clone();
-        tokio::spawn(async move {
-            match connection_manager.punch_hole_to(peer_addr, drop_mode).await {
-                Ok(conn) => {
-                    *locked = Some(Arc::new(Multiplexed::new(conn)));
-                }
-                Err(err) => {
-                    log::error!("Failed to create connection to {peer_addr}: {err}")
-                }
-            }
-        });
-    }
+    // Get the mutex referring to the connection.
+    let (multiplexed_mutex, is_new) = if let Some(mutex) = guard.get(&peer_addr).cloned() {
+        (mutex, false)
+    } else {
+        let lock = Arc::new(Mutex::new(None));
+        let locked = lock.clone().try_lock_owned().expect("resolves immediately");
+        create_connection(locked, peer_addr, drop_mode);
 
-    async fn connect_to(
-        &self,
-        peer_addr: SocketAddr,
-        drop_mode: DropMode,
-    ) -> Result<Arc<Multiplexed>, crate::Error> {
-        log::debug!("fetching connection for {}", peer_addr);
-        let mut guard = PEER_CONNECTIONS.write().await;
-        log::debug!("connection guard acquired");
+        guard.insert(peer_addr, lock.clone());
+        (lock, true)
+    };
 
-        // Get the mutex referring to the connection.
-        let (multiplexed_mutex, is_new) = if let Some(mutex) = guard.get(&peer_addr).cloned() {
-            (mutex, false)
+    drop(guard); // Drop outer guard before awaiting for inner guard (prevents deadlock).
+    let multiplexed_guard = multiplexed_mutex.clone().lock_owned().await;
+
+    // Return active connection, if found.
+    if let Some(multiplexed) = multiplexed_guard.as_ref() {
+        if !multiplexed.is_closed() {
+            tracing::debug!("found existing connection");
+            return Ok(multiplexed.clone());
         } else {
-            let lock = Arc::new(Mutex::new(None));
-            let locked = lock.clone().try_lock_owned().expect("resolves immediately");
-            self.create_connection(locked, peer_addr, drop_mode);
+            tracing::debug!("existing connection already closed.");
+        }
+    } else {
+        tracing::debug!("existing connection was unsuccessful.");
+    }
 
-            guard.insert(peer_addr, lock.clone());
-            (lock, true)
-        };
-
-        drop(guard); // Drop outer guard before awaiting for inner guard (prevents deadlock).
-        let multiplexed_guard = multiplexed_mutex.clone().lock_owned().await;
+    // Else, if this is a bad, but old connection, try to create a new one.
+    if !is_new {
+        create_connection(multiplexed_guard, peer_addr, drop_mode);
+        let new_guard = multiplexed_mutex.lock_owned().await;
 
         // Return active connection, if found.
-        if let Some(multiplexed) = multiplexed_guard.as_ref() {
+        if let Some(multiplexed) = new_guard.as_ref() {
             if !multiplexed.is_closed() {
-                log::debug!("found existing connection");
+                tracing::debug!("got new connection");
                 return Ok(multiplexed.clone());
             } else {
-                log::debug!("existing connection already closed.");
+                tracing::debug!("new connection already closed.");
             }
         } else {
-            log::debug!("existing connection was unsuccessful.");
+            tracing::debug!("new connection was unsuccessful.");
         }
-
-        // Else, if this is a bad, but old connection, try to create a new one.
-        if !is_new {
-            self.create_connection(multiplexed_guard, peer_addr, drop_mode);
-            let new_guard = multiplexed_mutex.lock_owned().await;
-
-            // Return active connection, if found.
-            if let Some(multiplexed) = new_guard.as_ref() {
-                if !multiplexed.is_closed() {
-                    log::debug!("got new connection");
-                    return Ok(multiplexed.clone());
-                } else {
-                    log::debug!("new connection already closed.");
-                }
-            } else {
-                log::debug!("new connection was unsuccessful.");
-            }
-        }
-
-        // If no attempt was successful, you have an error.
-        Err(format!("Connection attempt to {peer_addr} was unsuccessful").into())
     }
 
-    /// Waits for a given channel to be opened (i.e., the first message for it to arrive).
-    pub async fn expect(
-        &self,
-        channel_addr: ChannelAddr,
-    ) -> Result<(ChannelSender, ChannelReceiver), crate::Error> {
-        let multiplexed = self
-            .connect_to(channel_addr.peer_addr(), DropMode::DropOutgoing)
-            .await?;
-        let receiver = multiplexed
-            .expect(channel_addr.channel_id())
-            .await
-            .ok_or_else(|| format!("channel {} was not initiated in time", channel_addr))?;
+    // If no attempt was successful, you have an error.
+    Err(format!("Connection attempt to {peer_addr} was unsuccessful").into())
+}
 
-        Ok((
-            ChannelSender {
-                channel_id: channel_addr.channel_id(),
-                multiplexed,
-            },
-            ChannelReceiver { receiver },
-        ))
-    }
+/// Waits for a given channel to be opened (i.e., the first message for it to arrive).
+pub async fn expect(
+    channel_addr: ChannelAddr,
+) -> Result<(ChannelSender, ChannelReceiver), crate::Error> {
+    let multiplexed = connect_to(channel_addr.peer_addr(), DropMode::DropOutgoing).await?;
+    let receiver = multiplexed
+        .expect(channel_addr.channel_id())
+        .await
+        .ok_or_else(|| format!("channel {} was not initiated in time", channel_addr))?;
 
-    /// Initiates a given channel.
-    pub async fn initiate(
-        &self,
-        channel_addr: ChannelAddr,
-    ) -> Result<(ChannelSender, ChannelReceiver), crate::Error> {
-        let multiplexed = self
-            .connect_to(channel_addr.peer_addr(), DropMode::DropIncoming)
-            .await?;
-        let receiver = multiplexed.initiate(channel_addr.channel_id()).await;
+    Ok((
+        ChannelSender {
+            channel_id: channel_addr.channel_id(),
+            multiplexed,
+        },
+        ChannelReceiver { receiver },
+    ))
+}
 
-        Ok((
-            ChannelSender {
-                channel_id: channel_addr.channel_id(),
-                multiplexed,
-            },
-            ChannelReceiver { receiver },
-        ))
-    }
+/// Initiates a given channel.
+pub async fn initiate(
+    channel_addr: ChannelAddr,
+) -> Result<(ChannelSender, ChannelReceiver), crate::Error> {
+    let multiplexed = connect_to(channel_addr.peer_addr(), DropMode::DropIncoming).await?;
+    let receiver = multiplexed.initiate(channel_addr.channel_id()).await;
+
+    Ok((
+        ChannelSender {
+            channel_id: channel_addr.channel_id(),
+            multiplexed,
+        },
+        ChannelReceiver { receiver },
+    ))
 }
 
 #[derive(Clone)]

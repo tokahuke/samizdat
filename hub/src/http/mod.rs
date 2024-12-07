@@ -96,9 +96,9 @@ pub async fn serve() -> Result<(), crate::Error> {
 /// All the endpoints for the Samizdat HTTP API.
 fn api() -> Router {
     Router::new()
-        .nest("connected-ips", connected_ips())
-        .nest("resolution-order", resolution_order())
-        .nest("blacklisted-ips", blacklisted_ips::api())
+        .nest("/connected-ips", connected_ips())
+        .nest("/resolution-order", resolution_order())
+        .nest("/blacklisted-ips", blacklisted_ips::api())
 }
 
 /// Returns all the currently connected IPs to this hub.

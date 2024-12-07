@@ -1,14 +1,15 @@
 //! Objects API.
 
 use axum::body::Bytes;
-use axum::extract::{Path, Query};
+use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use futures::FutureExt;
-use serde_derive::Deserialize;
-use tokio::time::Instant;
-
 use samizdat_common::Hash;
+use serde_derive::Deserialize;
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
+use tokio::time::Instant;
 
 use crate::access::AccessRight;
 use crate::http::ContentType;
@@ -28,6 +29,13 @@ pub fn api() -> Router {
 
 /// Manages the `_objects` route.
 fn object() -> Router {
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct ObjectPath {
+        #[serde_as(as = "DisplayFromStr")]
+        hash: Hash,
+    }
+
     #[derive(Deserialize)]
     #[serde(rename = "kebab-case")]
     struct PostObjectQuery {
@@ -48,7 +56,8 @@ fn object() -> Router {
         .route(
             "/:hash",
             get(
-                |Path(hash): Path<Hash>, SamizdatTimeout(timeout): SamizdatTimeout| {
+                |Path(ObjectPath { hash }): Path<ObjectPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
                         Ok(
                             resolve_object(ObjectRef::new(hash), vec![], Instant::now() + timeout)
@@ -82,11 +91,15 @@ fn object() -> Router {
                     .map(ApiResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::ManageObjects)),
+            .layer(
+                tower::ServiceBuilder::new()
+                    .layer(security_scope!(AccessRight::ManageObjects))
+                    .layer(DefaultBodyLimit::disable()),
+            ),
         )
         .route(
             "/:hash",
-            delete(|Path(hash): Path<Hash>| {
+            delete(|Path(ObjectPath { hash }): Path<ObjectPath>| {
                 async move { ObjectRef::new(hash).drop_if_exists() }.map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::ManageObjects)),
@@ -94,7 +107,8 @@ fn object() -> Router {
         .route(
             "/:hash/reissue",
             post(
-                |Path(hash): Path<Hash>, Query(query): Query<PostReissueQuery>| {
+                |Path(ObjectPath { hash }): Path<ObjectPath>,
+                 Query(query): Query<PostReissueQuery>| {
                     async move {
                         tokio::task::spawn_blocking(move || {
                             ObjectRef::new(hash)

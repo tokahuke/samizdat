@@ -48,7 +48,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     };
 
     // Set static:
-    log::info!("Node access token is {access_token:?}");
+    tracing::info!("Node access token is {access_token:?}");
     ACCESS_TOKEN.set(access_token).ok();
 
     // ... and also piggyback writing port here. I know this is hacky, but...

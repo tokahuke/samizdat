@@ -12,19 +12,18 @@ use samizdat_common::{Hash, Riddle};
 
 use crate::cli;
 use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
+use crate::system::transport::channel_manager;
 
 use super::file_transfer;
-use super::transport::ChannelManager;
 
 #[derive(Clone)]
 pub struct NodeServer {
-    pub channel_manager: Arc<ChannelManager>,
     pub candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl NodeServer {
     async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
-        log::info!("got object {resolution:?}");
+        tracing::info!("got object {resolution:?}");
 
         let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
             content_riddle
@@ -33,7 +32,7 @@ impl NodeServer {
         };
 
         if resolution.hint.len() < cli().min_hint_size as usize {
-            log::warn!(
+            tracing::warn!(
                 "Resolution hint length is {}, smaller than the minimum of {}. Ignoring...",
                 resolution.hint.len(),
                 cli().min_hint_size
@@ -44,41 +43,42 @@ impl NodeServer {
         let object = match ObjectRef::find(content_riddle, &resolution.hint) {
             Ok(Some(object)) if !object.is_draft().unwrap_or(true) => object,
             Ok(Some(_)) => {
-                log::info!("Hash found but object is draft");
+                tracing::info!("Hash found but object is draft");
                 return ResolutionResponse::NotFound;
             }
             Ok(None) => {
-                log::info!("Hash not found for resolution");
+                tracing::info!("Hash not found for resolution");
                 return ResolutionResponse::NotFound;
             }
             Err(err) => {
-                log::error!("Error while looking for object {resolution:?}: {err}");
+                tracing::error!("Error while looking for object {resolution:?}: {err}");
                 return ResolutionResponse::NotFound;
             }
         };
 
         let hash = *object.hash();
 
-        log::info!("Found hash {}", hash);
+        tracing::info!("Found hash {}", hash);
         let Some(peer_addr) = resolution
             .location_message_riddle
             .resolve::<ChannelAddr>(&hash)
         else {
-            log::warn!("Failed to resolve message riddle after resolving content riddle");
+            tracing::warn!("Failed to resolve message riddle after resolving content riddle");
             return ResolutionResponse::NotFound;
         };
 
-        log::info!("Found peer at {peer_addr}");
+        tracing::info!("Found peer at {peer_addr}");
 
         tokio::spawn(
             async move {
-                log::info!("Starting task to transfer object {} to {}", hash, peer_addr);
-                let (sender, receiver) = self.channel_manager.initiate(peer_addr).await?;
+                tracing::info!("Starting task to transfer object {} to {}", hash, peer_addr);
+                let (sender, receiver) = channel_manager::initiate(peer_addr).await?;
                 file_transfer::send_object(sender, receiver, &object).await
             }
             .map(move |outcome| {
-                outcome
-                    .map_err(|err| log::error!("Failed to send {} to {}: {}", hash, peer_addr, err))
+                outcome.map_err(|err| {
+                    tracing::error!("Failed to send {} to {}: {}", hash, peer_addr, err)
+                })
             }),
         );
 
@@ -92,14 +92,14 @@ impl NodeServer {
     }
 
     async fn resolve_item(self, resolution: Arc<Resolution>) -> ResolutionResponse {
-        log::info!("got item {:?}", resolution);
+        tracing::info!("got item {:?}", resolution);
 
         let Some(content_riddle) = resolution.content_riddles.first() else {
             return ResolutionResponse::EmptyResolution;
         };
 
         if resolution.hint.len() < cli().min_hint_size as usize {
-            log::warn!(
+            tracing::warn!(
                 "Resolution hint length is {}, smaller than the minimum of {}. Ignoring...",
                 resolution.hint.len(),
                 cli().min_hint_size
@@ -110,15 +110,15 @@ impl NodeServer {
         let item = match CollectionItem::find(content_riddle, &resolution.hint) {
             Ok(Some(item)) if !item.is_draft => item,
             Ok(Some(_)) => {
-                log::info!("hash found, but item is draft");
+                tracing::info!("hash found, but item is draft");
                 return ResolutionResponse::NotFound;
             }
             Ok(None) => {
-                log::info!("hash not found for resolution");
+                tracing::info!("hash not found for resolution");
                 return ResolutionResponse::NotFound;
             }
             Err(e) => {
-                log::error!("error looking for hash: {}", e);
+                tracing::error!("error looking for hash: {}", e);
                 return ResolutionResponse::NotFound;
             }
         };
@@ -126,25 +126,26 @@ impl NodeServer {
         // Code smell?
         let hash = item.locator().hash();
 
-        log::info!("found hash {}", hash);
+        tracing::info!("found hash {}", hash);
         let Some(peer_addr) = resolution
             .location_message_riddle
             .resolve::<ChannelAddr>(&hash)
         else {
-            log::warn!("failed to resolve message riddle after resolving content riddle");
+            tracing::warn!("failed to resolve message riddle after resolving content riddle");
             return ResolutionResponse::NotFound;
         };
 
-        log::info!("found peer at {}", peer_addr);
+        tracing::info!("found peer at {}", peer_addr);
 
         tokio::spawn(
             async move {
-                let (sender, receiver) = self.channel_manager.initiate(peer_addr).await?;
+                let (sender, receiver) = channel_manager::initiate(peer_addr).await?;
                 file_transfer::send_item(sender, receiver, item).await
             }
             .map(move |outcome| {
-                outcome
-                    .map_err(|err| log::error!("failed to send {} to {}: {}", hash, peer_addr, err))
+                outcome.map_err(|err| {
+                    tracing::error!("failed to send {} to {}: {}", hash, peer_addr, err)
+                })
             }),
         );
 
@@ -187,10 +188,10 @@ impl Node for NodeServer {
         _: context::Context,
         latest: Arc<EditionRequest>,
     ) -> Vec<EditionResponse> {
-        log::info!("got {latest:?}");
+        tracing::info!("got {latest:?}");
 
         if latest.hint.len() < cli().min_hint_size as usize {
-            log::warn!(
+            tracing::warn!(
                 "Edition request hint length is {}, smaller than the minimum of {}. Ignoring...",
                 latest.hint.len(),
                 cli().min_hint_size
@@ -215,7 +216,7 @@ impl Node for NodeServer {
                         })
                     }
                     Err(err) => {
-                        log::error!("error resolving edition for {latest:?}: {err}");
+                        tracing::error!("error resolving edition for {latest:?}: {err}");
                         None
                     }
                 }
@@ -224,19 +225,19 @@ impl Node for NodeServer {
             };
 
         if let Some(response) = maybe_response.as_ref() {
-            log::info!("Edition found: {response:?}");
+            tracing::info!("Edition found: {response:?}");
         } else {
-            log::info!("Edition not found");
+            tracing::info!("Edition not found");
         }
 
         maybe_response.into_iter().collect()
     }
 
     async fn announce_edition(self, _: context::Context, announcement: Arc<EditionAnnouncement>) {
-        log::info!("Got announcement from hub");
+        tracing::info!("Got announcement from hub");
 
         if announcement.hint.len() < cli().min_hint_size as usize {
-            log::warn!(
+            tracing::warn!(
                 "Announcement hint length is {}, smaller than the minimum of {}. Ignoring...",
                 announcement.hint.len(),
                 cli().min_hint_size
@@ -245,12 +246,12 @@ impl Node for NodeServer {
         }
 
         match SubscriptionRef::find(&announcement.key_riddle, &announcement.hint) {
-            Err(err) => log::error!("error processing {announcement:?}: {err}"),
+            Err(err) => tracing::error!("error processing {announcement:?}: {err}"),
             Ok(None) => {
-                log::info!("No subscription found for announcement");
+                tracing::info!("No subscription found for announcement");
             }
             Ok(Some(subscription)) => {
-                log::info!("Found {subscription} for announcement");
+                tracing::info!("Found {subscription} for announcement");
 
                 let cipher =
                     TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
@@ -259,7 +260,7 @@ impl Node for NodeServer {
                     let edition: Edition = announcement.edition.clone().decrypt_with(&cipher)?;
 
                     if !edition.is_valid() {
-                        log::warn!("an invalid edition was announced: {:?}", edition);
+                        tracing::warn!("an invalid edition was announced: {:?}", edition);
                         return Ok(());
                     }
 
@@ -275,7 +276,7 @@ impl Node for NodeServer {
                     // the same time.
                     tokio::time::sleep(std::time::Duration::from_secs_f32(rand::random())).await;
                     if let Err(err) = try_refresh.await {
-                        log::warn!("{}", err);
+                        tracing::warn!("{}", err);
                     }
                 });
             }

@@ -1,6 +1,7 @@
 //! Series API.
 
 use axum::extract::Path;
+use axum::response::Redirect;
 use axum::routing::get;
 use axum::Router;
 use futures::FutureExt;
@@ -22,9 +23,10 @@ use super::resolvers::resolve_series;
 pub fn api() -> Router {
     #[serde_as]
     #[derive(Deserialize)]
-    struct GetSeriesPath {
+    struct SeriesPath {
         #[serde_as(as = "DisplayFromStr")]
         series_key: Key,
+        #[serde(default)]
         name: String,
     }
 
@@ -34,7 +36,7 @@ pub fn api() -> Router {
             // best-effort latest version for this item.
             "/:series_key/*name",
             get(
-                |Path(GetSeriesPath { series_key, name }): Path<GetSeriesPath>,
+                |Path(SeriesPath { series_key, name }): Path<SeriesPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
                         let series = SeriesRef::new(series_key);
@@ -42,6 +44,33 @@ pub fn api() -> Router {
                             .await
                     }
                     .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            // Gets the content of a collection item using the series public key. This will give the
+            // best-effort latest version for this item.
+            "/:series_key/",
+            get(
+                |Path(SeriesPath { series_key, .. }): Path<SeriesPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        let series = SeriesRef::new(series_key);
+                        resolve_series(series, "".into(), [], Instant::now() + timeout).await
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            // Gets the content of a collection item using the series public key. This will give the
+            // best-effort latest version for this item.
+            "/:series_key",
+            get(
+                |Path(SeriesPath { series_key, .. }): Path<SeriesPath>| async move {
+                    Redirect::permanent(&format!("{series_key}/"))
                 },
             ),
         )

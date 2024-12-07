@@ -19,7 +19,7 @@ pub fn db<'a>() -> &'a rocksdb::DB {
 
 /// Initializes the RocksDB for use by the Samizdat hub.
 pub fn init_db() -> Result<(), crate::Error> {
-    log::info!("Starting RocksDB");
+    tracing::info!("Starting RocksDB");
 
     let db_path = format!("{}/db", CLI.data.as_str());
 
@@ -50,9 +50,9 @@ pub fn init_db() -> Result<(), crate::Error> {
     DB.set(db).ok();
 
     // Run possible migrations (needs DB set, but still requires exclusive access):
-    log::info!("RocksDB up. Running migrations...");
+    tracing::info!("RocksDB up. Running migrations...");
     migrations::migrate()?;
-    log::info!("... done running all migrations.");
+    tracing::info!("... done running all migrations.");
 
     Ok(())
 }

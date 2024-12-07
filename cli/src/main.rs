@@ -8,7 +8,6 @@ mod cli;
 mod commands;
 mod html;
 mod identity_dapp;
-mod logger;
 mod manifest;
 mod util;
 mod ws;
@@ -20,8 +19,10 @@ pub use manifest::{Manifest, PrivateManifest};
 #[tokio::main]
 async fn main() {
     let outcome: Result<(), anyhow::Error> = try {
-        let _ = logger::init_logger(cli::cli().verbose);
-
+        if cli::cli().verbose {
+            tracing_subscriber::fmt().init();
+        }
+        
         access_token::init_port()?;
 
         api::validate_node_is_up().await?;

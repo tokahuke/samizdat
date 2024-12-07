@@ -11,8 +11,7 @@ pub async fn ls() -> Result<(), anyhow::Error> {
     struct Row {
         name: String,
         status: String,
-        direct_addr: String,
-        reverse_addr: String,
+        addr: String,
     }
 
     show_table(
@@ -21,8 +20,7 @@ pub async fn ls() -> Result<(), anyhow::Error> {
             .map(|conn| Row {
                 name: conn.name,
                 status: conn.status,
-                direct_addr: conn.direct_addr,
-                reverse_addr: conn.reverse_addr,
+                addr: conn.addr,
             })
             .collect::<Vec<_>>(),
     );

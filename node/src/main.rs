@@ -18,8 +18,6 @@ pub use db::db;
 use std::{panic, sync::OnceLock};
 use tokio::task;
 
-use samizdat_common::logger;
-
 use access::init_access_token;
 use cli::init_cli;
 use db::init_db;
@@ -57,9 +55,9 @@ async fn main() -> Result<(), crate::Error> {
     init_cli()?;
 
     // Init logger:
-    let _ = logger::init_logger(cli().verbose);
+    tracing_subscriber::fmt().init();
 
-    log::info!(
+    tracing::info!(
         "Starting SAMIZDAT node in folder {:?}",
         cli().data.canonicalize()?
     );

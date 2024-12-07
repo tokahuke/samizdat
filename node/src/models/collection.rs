@@ -192,7 +192,7 @@ impl Droppable for CollectionItem {
         let path = self.name.as_path();
         let locator = self.collection.locator_for(path);
 
-        log::info!("Removing item {}: {:#?}", locator, self);
+        tracing::info!("Removing item {}: {:#?}", locator, self);
 
         batch.delete_cf(Table::CollectionItemLocators.get(), locator.path());
         batch.delete_cf(Table::CollectionItems.get(), locator.hash());
@@ -211,12 +211,12 @@ impl CollectionItem {
         let key = Hash::from_bytes(self.name.0.as_bytes());
 
         if !is_included {
-            log::error!("Inclusion proof failed for {:?}", self);
+            tracing::error!("Inclusion proof failed for {:?}", self);
             return false;
         }
 
         if &key != self.inclusion_proof.claimed_key() {
-            log::error!("Key is different from claimed key: {:?}", self);
+            tracing::error!("Key is different from claimed key: {:?}", self);
             return false;
         }
 
@@ -254,7 +254,7 @@ impl CollectionItem {
             let hash: Hash = match key.as_ref().try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             };
@@ -285,7 +285,7 @@ impl CollectionItem {
             locator.hash(),
         );
 
-        log::info!("Inserting item {}: {:#?}", locator, self);
+        tracing::info!("Inserting item {}: {:#?}", locator, self);
     }
 
     /// Inserts this collection item in the database.

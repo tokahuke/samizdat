@@ -206,32 +206,31 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
     Ok(entity)
 }
 
-fn referer_from_request(request: &Request) -> Result<Url, SecurityScopeRejection> {
-    String::from_utf8_lossy(
-        request
-            .headers()
-            .get("referer")
-            .ok_or(SecurityScopeRejection::MissingReferer)?
-            .as_bytes(),
-    )
-    .parse::<Url>()
-    .map_err(SecurityScopeRejection::UrlParseError)
+fn referer_from_request(request: &Request) -> Result<Option<Url>, SecurityScopeRejection> {
+    let Some(header) = request.headers().get("referer") else {
+        return Ok(None);
+    };
+    String::from_utf8_lossy(header.as_bytes())
+        .parse::<Url>()
+        .map(Some)
+        .map_err(SecurityScopeRejection::UrlParseError)
 }
 
-fn referer_from_parts(parts: &Parts) -> Result<Url, SecurityScopeRejection> {
-    String::from_utf8_lossy(
-        parts
-            .headers
-            .get("referer")
-            .ok_or(SecurityScopeRejection::MissingReferer)?
-            .as_bytes(),
-    )
-    .parse::<Url>()
-    .map_err(SecurityScopeRejection::UrlParseError)
+fn referer_from_parts(parts: &Parts) -> Result<Option<Url>, SecurityScopeRejection> {
+    let Some(header) = parts.headers.get("referer") else {
+        return Ok(None);
+    };
+    String::from_utf8_lossy(header.as_bytes())
+        .parse::<Url>()
+        .map(Some)
+        .map_err(SecurityScopeRejection::UrlParseError)
 }
 
-fn entity_from_request(request: &Request) -> Result<Entity, SecurityScopeRejection> {
-    entity_from_referrer(&referer_from_request(request)?)
+fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScopeRejection> {
+    let Some(referer) = referer_from_request(request)? else {
+        return Ok(None);
+    };
+    entity_from_referrer(&referer).map(Some)
 }
 
 pub struct SecurityScope(pub Entity);
@@ -240,7 +239,10 @@ pub struct SecurityScope(pub Entity);
 impl<S> FromRequestParts<S> for SecurityScope {
     type Rejection = SecurityScopeRejection;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        entity_from_referrer(&referer_from_parts(parts)?).map(SecurityScope)
+        let Some(referer) = referer_from_parts(parts)? else {
+            return Err(SecurityScopeRejection::MissingReferer);
+        };
+        entity_from_referrer(&referer).map(SecurityScope)
     }
 }
 
@@ -395,22 +397,22 @@ fn do_authenticate_security_scope<const N: usize>(
     required_rights: [AccessRight; N],
     request: &Request,
 ) -> Result<(), SecurityScopeRejection> {
+    // Get entity from request:
     let entity = entity_from_request(&request)?;
 
-    // Get rights from db:
-    let serialized_opt = db()
-        .get_cf(
-            Table::AccessRights.get(),
-            bincode::serialize(&entity).expect("can serialize"),
-        )
-        .unwrap();
-    let serialized = if let Some(serialized) = serialized_opt {
-        serialized
-    } else {
-        return Err(SecurityScopeRejection::InsufficientPrivilege);
-    };
+    // Get rights from db (if possible):
+    let mut granted_rights: Vec<AccessRight> = entity
+        .and_then(|entity| {
+            let serialized = db()
+                .get_cf(
+                    Table::AccessRights.get(),
+                    bincode::serialize(&entity).expect("can serialize"),
+                )
+                .unwrap()?;
 
-    let mut granted_rights: Vec<AccessRight> = bincode::deserialize(&serialized).unwrap();
+            Some(bincode::deserialize(&serialized).unwrap())
+        })
+        .unwrap_or_default();
 
     // Public is always granted, unconditionally.
     granted_rights.push(AccessRight::Public);
@@ -443,7 +445,9 @@ async fn authenticate_trusted_context(request: Request, next: Next) -> Response 
 
 /// Authenticates a call from a trusted context.
 fn do_authenticate_trusted_context(request: &Request) -> Result<(), SecurityScopeRejection> {
-    let referer = referer_from_request(&request)?;
+    let Some(referer) = referer_from_request(&request)? else {
+        return Err(SecurityScopeRejection::MissingReferer);
+    };
 
     if is_trusted_context(&referer) {
         check_origin(&referer).map_err(SecurityScopeRejection::BadOrigin)

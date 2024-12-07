@@ -1,10 +1,13 @@
 //! Collections API.
 
-use axum::extract::Path;
+use axum::extract::{DefaultBodyLimit, Path};
+use axum::response::Redirect;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::FutureExt;
 use serde_derive::Deserialize;
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
 use tokio::time::Instant;
 
 use samizdat_common::Hash;
@@ -29,9 +32,12 @@ fn collection() -> Router {
         hashes: Vec<(String, String)>,
     }
 
+    #[serde_as]
     #[derive(Deserialize)]
     struct GetItemPath {
+        #[serde_as(as = "DisplayFromStr")]
         hash: Hash,
+        #[serde(default)]
         name: String,
     }
 
@@ -59,7 +65,11 @@ fn collection() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::ManageCollections)),
+            .layer(
+                tower::ServiceBuilder::new()
+                    .layer(security_scope!(AccessRight::ManageCollections))
+                    .layer(DefaultBodyLimit::disable()),
+            ),
         )
         .route(
             // Gets the contents of a collection item.
@@ -78,5 +88,31 @@ fn collection() -> Router {
                 },
             )
             .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            // Gets the contents of a collection item.
+            "/:hash/",
+            get(
+                |Path(GetItemPath { hash, .. }): Path<GetItemPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        let collection = CollectionRef::new(hash);
+                        let path = "".into();
+                        let locator = collection.locator_for(path);
+
+                        resolve_item(locator, [], Instant::now() + timeout).await
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            "/:hash",
+            get(
+                |Path(GetItemPath { hash, .. }): Path<GetItemPath>| async move {
+                    Redirect::permanent(&format!("{hash}/"))
+                },
+            ),
         )
 }

@@ -42,8 +42,7 @@ pub async fn delete_hub(address: &str) -> Result<bool, anyhow::Error> {
 pub struct GetConnectionResponse {
     pub name: String,
     pub status: String,
-    pub direct_addr: String,
-    pub reverse_addr: String,
+    pub addr: String,
 }
 
 pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow::Error> {
@@ -90,7 +89,7 @@ pub async fn post_object(
         .await
         .with_context(|| "error from samizdat-node response POST /_objects")?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<String, ApiError> = serde_json::from_str(&text)
         .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
@@ -111,7 +110,7 @@ where
         .await
         .with_context(|| "error from samizdat-node request POST /_objects")?;
     let status = response.status();
-    log::info!("{} GET {}", status, url);
+    tracing::info!("{} GET {}", status, url);
 
     if !status.is_success() {
         anyhow::bail!(

@@ -1,159 +1,148 @@
-use futures::future::Fuse;
-use futures::prelude::*;
-use quinn::{Connection, ReadToEndError};
+use futures::future;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::future::Future;
-use std::io;
-use std::marker::PhantomData;
 use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::task::JoinHandle;
+use tarpc::tokio_serde::{Deserializer, Serializer};
 
-/// A [`Stream`] and [`Sink`] implementation for objects that are seriaizable to be
-/// passed over QUIC to (and received from) a remote peer.
-pub struct BincodeOverQuic<S, R> {
-    /// The QUIC connection
-    connection: Connection,
-    /// The current ongoing send operation.
-    ongoing_send: Option<Fuse<JoinHandle<Result<(), io::Error>>>>,
-    /// The current ongoing receive operation.
-    ongoing_recv: Option<Fuse<JoinHandle<Result<R, io::Error>>>>,
-    /// Max length that the objects can have when serialized.
-    max_length: usize,
-    /// A token for the data type to be sent.
-    _request: PhantomData<S>,
-    /// A token for the data type to be received.
-    _response: PhantomData<R>,
+struct BincodeCodec;
+
+impl<T: Serialize> Serializer<T> for BincodeCodec {
+    type Error = crate::Error;
+    fn serialize(
+        self: Pin<&mut Self>,
+        item: &T,
+    ) -> Result<tarpc::tokio_util::bytes::Bytes, Self::Error> {
+        Ok(bincode::serialize(item)?.into())
+    }
 }
 
-impl<S, R> BincodeOverQuic<S, R>
+impl<T: for<'a> Deserialize<'a>> Deserializer<T> for BincodeCodec {
+    type Error = crate::Error;
+    fn deserialize(
+        self: Pin<&mut Self>,
+        src: &tarpc::tokio_util::bytes::BytesMut,
+    ) -> Result<T, Self::Error> {
+        Ok(bincode::deserialize(&*src)?)
+    }
+}
+
+pub fn bincode_transport<S, R>(
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+    max_size: usize,
+) -> impl tarpc::Transport<S, R>
 where
     S: 'static + Send + Serialize,
     R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    /// Creates a new [`BincodeOverQuic`] over an existing connection.
-    pub fn new(connection: Connection, max_length: usize) -> BincodeOverQuic<S, R> {
-        BincodeOverQuic {
-            connection,
-            ongoing_recv: None,
-            ongoing_send: None,
-            max_length,
-            _request: PhantomData,
-            _response: PhantomData,
-        }
-    }
-
-    /// Restores the underlying connection.
-    pub fn into_inner(self) -> Connection {
-        self.connection
-    }
+    let mut limiter = tarpc::tokio_util::codec::LengthDelimitedCodec::new();
+    limiter.set_max_frame_length(max_size);
+    tarpc::serde_transport::new(
+        tarpc::tokio_util::codec::Framed::new(tokio::io::join(recv, send), limiter),
+        BincodeCodec,
+    )
 }
 
-/// Transforms a bincode error into an [`io::Error`].
-fn bincode_error_to_io(err: Box<bincode::ErrorKind>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, err)
-}
-
-/// Receives a single bincode message:
-async fn recv_message<R>(connection: Connection, max_length: usize) -> Result<R, io::Error>
+pub async fn open_bincode_transport<S, R>(
+    connection: quinn::Connection,
+    max_size: usize,
+) -> Result<impl tarpc::Transport<S, R>, crate::Error>
 where
-    R: for<'a> Deserialize<'a>,
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    let mut recv_stream = connection.accept_uni().await?;
-    let serialized = recv_stream.read_to_end(max_length).await;
-
-    match serialized {
-        Ok(serialized) => bincode::deserialize(&serialized).map_err(bincode_error_to_io),
-        Err(ReadToEndError::TooLong) => Err(io::Error::new(io::ErrorKind::InvalidData, "too long")),
-        Err(ReadToEndError::Read(read)) => Err(read.into()),
-    }
+    let (send, recv) = connection.open_bi().await?;
+    Ok(bincode_transport(send, recv, max_size))
 }
 
-impl<S, R> Stream for BincodeOverQuic<S, R>
+pub async fn accept_bincode_transport<S, R>(
+    connection: quinn::Connection,
+    max_size: usize,
+) -> Result<impl tarpc::Transport<S, R>, crate::Error>
 where
-    S: 'static + Send + Serialize + Unpin,
-    R: 'static + Send + Unpin + fmt::Debug + for<'a> Deserialize<'a>,
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    type Item = Result<R, io::Error>;
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        log::trace!("poll next");
-        let this = self.get_mut();
-
-        if let Some(mut ongoing_recv) = this.ongoing_recv.as_mut() {
-            // Poll existing task:
-            Pin::new(&mut ongoing_recv).poll(cx).map(|outcome| {
-                this.ongoing_recv = None;
-                Some(outcome.expect("recv task panicked"))
-            })
-        } else {
-            // Create new task:
-            let mut recv_task =
-                tokio::spawn(recv_message(this.connection.clone(), this.max_length)).fuse();
-            // Then poll:
-            let polled = Pin::new(&mut recv_task).poll(cx).map(|outcome| {
-                this.ongoing_recv = None;
-                Some(outcome.expect("recv task panicked"))
-            });
-
-            // Set new task as existing task:
-            this.ongoing_recv = Some(recv_task);
-
-            polled
-        }
-    }
+    let (send, recv) = connection.accept_bi().await?;
+    Ok(bincode_transport(send, recv, max_size))
 }
 
-impl<S, R> Sink<S> for BincodeOverQuic<S, R>
+const HELLO_SIZE: usize = 1;
+const DIRECT_CHANNEL_HELLO: [u8; HELLO_SIZE] = *b"d";
+const REVERSE_CHANNEL_HELLO: [u8; HELLO_SIZE] = *b"r";
+
+pub async fn open_direct_bincode_transport<S, R>(
+    connection: quinn::Connection,
+    max_size: usize,
+) -> Result<impl tarpc::Transport<S, R>, crate::Error>
 where
-    R: Unpin,
-    S: 'static + Send + Unpin + fmt::Debug + Serialize,
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
 {
-    type Error = io::Error;
+    let (mut send, recv) = connection.open_bi().await?;
 
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::trace!("poll ready");
-        if let Some(ongoing_send) = self.ongoing_send.as_mut() {
-            Pin::new(ongoing_send).poll(cx).map(|outcome| {
-                self.ongoing_send = None;
-                outcome.expect("send task panicked")
-            })
-        } else {
-            Poll::Ready(Ok(()))
+    send.write_all(&DIRECT_CHANNEL_HELLO)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    Ok(bincode_transport(send, recv, max_size))
+}
+
+pub async fn open_reverse_bincode_transport<S, R>(
+    connection: quinn::Connection,
+    max_size: usize,
+) -> Result<impl tarpc::Transport<S, R>, crate::Error>
+where
+    S: 'static + Send + Serialize,
+    R: 'static + Send + for<'a> Deserialize<'a>,
+{
+    let (mut send, recv) = connection.open_bi().await?;
+
+    send.write_all(&REVERSE_CHANNEL_HELLO)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    Ok(bincode_transport(send, recv, max_size))
+}
+
+pub async fn accept_bincode_transports<S1, R1, S2, R2>(
+    connection: quinn::Connection,
+    max_size: usize,
+) -> Result<(impl tarpc::Transport<S1, R1>, impl tarpc::Transport<S2, R2>), crate::Error>
+where
+    S1: 'static + Send + Serialize,
+    R1: 'static + Send + for<'a> Deserialize<'a>,
+    S2: 'static + Send + Serialize,
+    R2: 'static + Send + for<'a> Deserialize<'a>,
+{
+    let (send1, mut recv1) = connection.accept_bi().await?;
+    let (send2, mut recv2) = connection.accept_bi().await?;
+
+    async fn read_hello(recv: &mut quinn::RecvStream) -> Result<[u8; HELLO_SIZE], crate::Error> {
+        let mut buffer = [0; HELLO_SIZE];
+        recv.read_exact(&mut buffer)
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(buffer)
+    }
+
+    let (hello1, hello2) = future::join(read_hello(&mut recv1), read_hello(&mut recv2)).await;
+
+    match (hello1?, hello2?) {
+        (DIRECT_CHANNEL_HELLO, REVERSE_CHANNEL_HELLO) => Ok((
+            bincode_transport(send1, recv1, max_size),
+            bincode_transport(send2, recv2, max_size),
+        )),
+        (REVERSE_CHANNEL_HELLO, DIRECT_CHANNEL_HELLO) => Ok((
+            bincode_transport(send2, recv2, max_size),
+            bincode_transport(send1, recv1, max_size),
+        )),
+        (bad_bytes1, bad_bytes2) => {
+            let bad_hello1 = String::from_utf8_lossy(&bad_bytes1);
+            let bad_hello2 = String::from_utf8_lossy(&bad_bytes2);
+            Err(
+                format!("received anomalous hellos: hello1={bad_hello1} hello2={bad_hello2}")
+                    .into(),
+            )
         }
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
-        log::trace!("starting to send");
-
-        let this = self.get_mut();
-        let connection = this.connection.clone();
-
-        let send_task = async move {
-            let mut send_stream = connection.open_uni().await?;
-            let serialized = bincode::serialize(&item).expect("can serialize");
-            send_stream.write_all(&serialized).await?;
-            send_stream.finish()?;
-
-            Ok(())
-        };
-
-        if this.ongoing_send.is_some() {
-            panic!("would drop ongoing send task");
-        }
-
-        this.ongoing_send = Some(tokio::spawn(send_task).fuse());
-
-        Ok(())
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::trace!("poll flush");
-        self.poll_ready(cx)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        log::trace!("poll close");
-        self.poll_ready(cx)
     }
 }

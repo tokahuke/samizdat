@@ -266,14 +266,14 @@ impl SeriesRef {
                         match bincode::deserialize(&value) {
                             Ok(series) => return Ok(Some(series)),
                             Err(err) => {
-                                log::warn!("{}", err);
+                                tracing::warn!("{}", err);
                                 break;
                             }
                         }
                     }
                 }
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             }
@@ -298,7 +298,7 @@ impl SeriesRef {
 
     /// Set this series as just recently refresh.
     pub fn refresh(&self) -> Result<(), crate::Error> {
-        log::info!("Setting series {self} as fresh");
+        tracing::info!("Setting series {self} as fresh");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -310,7 +310,7 @@ impl SeriesRef {
 
     /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
     pub fn mark_delayed(&self) -> Result<(), crate::Error> {
-        log::info!("Setting series {self} as delayed");
+        tracing::info!("Setting series {self} as delayed");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -582,7 +582,7 @@ impl Edition {
                             .map(|_| ()),
                     );
                 } else {
-                    log::info!("Object {hash} already exists in the database. Skipping");
+                    tracing::info!("Object {hash} already exists in the database. Skipping");
                 }
             }
 

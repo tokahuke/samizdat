@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use axum::extract::Path;
+use axum::response::Redirect;
 use axum::routing::get;
 use axum::Router;
 use futures::FutureExt;
@@ -59,29 +60,57 @@ impl IdentityRef {
 pub fn api() -> Router {
     #[serde_as]
     #[derive(Deserialize)]
-    struct GetIdentityPath {
+    struct IdentityPath {
         #[serde_as(as = "DisplayFromStr")]
         identity: IdentityRef,
         name: String,
     }
 
-    Router::new().route(
-        ":identity/*name",
-        get(
-            |Path(GetIdentityPath { identity, name }): Path<GetIdentityPath>,
-             SamizdatTimeout(timeout): SamizdatTimeout| {
-                async move {
-                    Ok(resolve_identity(
-                        identity.handle(),
-                        name.as_str().into(),
-                        [],
-                        Instant::now() + timeout,
-                    )
-                    .await?)
-                }
-                .map(PageResponse)
-            },
+    Router::new()
+        .route(
+            "/:identity/*name",
+            get(
+                |Path(IdentityPath { identity, name }): Path<IdentityPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        Ok(resolve_identity(
+                            identity.handle(),
+                            name.as_str().into(),
+                            [],
+                            Instant::now() + timeout,
+                        )
+                        .await?)
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
         )
-        .layer(security_scope!(AccessRight::Public)),
-    )
+        .route(
+            "/:identity/",
+            get(
+                |Path(IdentityPath { identity, .. }): Path<IdentityPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        Ok(resolve_identity(
+                            identity.handle(),
+                            "".into(),
+                            [],
+                            Instant::now() + timeout,
+                        )
+                        .await?)
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            "/:hash",
+            get(
+                |Path(IdentityPath { identity, .. }): Path<IdentityPath>| async move {
+                    Redirect::permanent(&format!("{identity}/"))
+                },
+            ),
+        )
 }

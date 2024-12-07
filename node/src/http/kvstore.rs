@@ -2,7 +2,7 @@
 //! identity. This provides better context isolation for Samizdat web applications than
 //! `LocalStorage` currently does.
 
-use axum::extract::Path;
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::{Json, Router};
 use futures::FutureExt;
 use rocksdb::{IteratorMode, WriteBatch};
@@ -23,7 +23,11 @@ pub fn api() -> Router {
             axum::routing::get(get)
                 .layer(security_scope!(AccessRight::Public))
                 .put(put)
-                .layer(security_scope!(AccessRight::Public))
+                .layer(
+                    tower::ServiceBuilder::new()
+                        .layer(security_scope!(AccessRight::Public))
+                        .layer(DefaultBodyLimit::disable()),
+                )
                 .delete(delete)
                 .layer(security_scope!(AccessRight::Public)),
         )

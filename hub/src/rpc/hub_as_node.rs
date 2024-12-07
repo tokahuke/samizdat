@@ -4,7 +4,7 @@
 
 use futures::future::Either;
 use futures::prelude::*;
-use quinn::Endpoint;
+use quinn::{Connection, Endpoint};
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,9 +16,8 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time;
 
-use samizdat_common::address::{AddrToResolve, ChannelId, HubAddr};
-use samizdat_common::rpc::*;
-use samizdat_common::BincodeOverQuic;
+use samizdat_common::address::ChannelId;
+use samizdat_common::{quic, rpc::*, transport};
 
 use crate::CLI;
 
@@ -68,14 +67,14 @@ impl Node for HubAsNodeServer {
         ctx: context::Context,
         resolution: Arc<Resolution>,
     ) -> ResolutionResponse {
-        log::info!("got {:?}", resolution);
+        tracing::info!("got {:?}", resolution);
 
         // Se if you are not being replayed:
         match REPLAY_RESISTANCE.lock().await.check(&*resolution) {
             Ok(true) => { /* valid */ }
             Ok(false) => return ResolutionResponse::NotFound,
             Err(err) => {
-                log::error!("error while checking for replay: {}", err);
+                tracing::error!("error while checking for replay: {}", err);
                 return ResolutionResponse::NotFound;
             }
         }
@@ -102,7 +101,9 @@ impl Node for HubAsNodeServer {
                     .await;
 
                 if let Err(err) = outcome {
-                    log::error!("Failed to send candidate to channel {candidate_channel}: {err}");
+                    tracing::error!(
+                        "Failed to send candidate to channel {candidate_channel}: {err}"
+                    );
                 }
             }
         });
@@ -129,7 +130,7 @@ impl Node for HubAsNodeServer {
             Ok(true) => { /* valid */ }
             Ok(false) => return vec![],
             Err(err) => {
-                log::error!("error while checking for replay: {}", err);
+                tracing::error!("error while checking for replay: {}", err);
                 return vec![];
             }
         }
@@ -143,7 +144,7 @@ impl Node for HubAsNodeServer {
             Ok(true) => { /* valid */ }
             Ok(false) => return,
             Err(err) => {
-                log::error!("error while checking for replay: {}", err);
+                tracing::error!("error while checking for replay: {}", err);
                 return;
             }
         }
@@ -154,17 +155,9 @@ impl Node for HubAsNodeServer {
 
 /// Connects a new hub-as-node as client to a partner hub.
 async fn connect_direct(
-    direct_addr: SocketAddr,
-    endpoint: &Endpoint,
+    connection: Connection,
 ) -> Result<(HubClient, oneshot::Receiver<()>), crate::Error> {
-    let connection = samizdat_common::quic::connect(endpoint, direct_addr, true).await?;
-
-    log::info!(
-        "hub-as-node connected to hub (as client) at {}",
-        connection.remote_address()
-    );
-
-    let transport = BincodeOverQuic::new(connection.clone(), MAX_TRANSFER_SIZE);
+    let transport = transport::open_direct_bincode_transport(connection, MAX_TRANSFER_SIZE).await?;
 
     let (client_reset_trigger, client_reset_recv) = oneshot::channel();
     let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
@@ -181,22 +174,21 @@ async fn connect_direct(
 
 /// Connects a new hub-as-node as server to a partner hub.
 async fn connect_reverse(
-    reverse_addr: SocketAddr,
-    endpoint: &Endpoint,
+    partner: SocketAddr,
+    connection: Connection,
     client: HubClient,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<JoinHandle<()>, crate::Error> {
-    let connection = samizdat_common::quic::connect(endpoint, reverse_addr, true).await?;
-
-    log::info!(
+    tracing::info!(
         "hub-as-node connected to hub (as server) at {}",
         connection.remote_address()
     );
 
-    let transport = BincodeOverQuic::new(connection.clone(), MAX_TRANSFER_SIZE);
+    let transport =
+        transport::open_reverse_bincode_transport(connection, MAX_TRANSFER_SIZE).await?;
 
     let server_task = server::BaseChannel::with_defaults(transport)
-        .execute(HubAsNodeServer::new(reverse_addr, client, candidate_channels).serve())
+        .execute(HubAsNodeServer::new(partner, client, candidate_channels).serve())
         .for_each(|request_task| async move {
             tokio::spawn(request_task);
         });
@@ -207,17 +199,13 @@ async fn connect_reverse(
 /// Connects a new hub-as-node to a partner hub.
 async fn connect(
     endpoint: &Endpoint,
-    hub_addr: HubAddr,
+    hub_addr: SocketAddr,
 ) -> Result<impl Future<Output = Result<(), JoinError>>, crate::Error> {
     let candidate_channels = KeyedChannel::new();
-    let (client, client_reset_recv) = connect_direct(hub_addr.direct_addr(), endpoint).await?;
-    let server_reset_recv = connect_reverse(
-        hub_addr.reverse_addr(),
-        endpoint,
-        client,
-        candidate_channels.clone(),
-    )
-    .await?;
+    let connection = quic::connect(endpoint, hub_addr, true).await?;
+    let (client, client_reset_recv) = connect_direct(connection.clone()).await?;
+    let server_reset_recv =
+        connect_reverse(hub_addr, connection, client, candidate_channels.clone()).await?;
 
     let reset_trigger =
         future::select(server_reset_recv, client_reset_recv).map(|selected| match selected {
@@ -229,13 +217,13 @@ async fn connect(
 }
 
 /// Runs a hub-as-node server forever.
-pub async fn run(partner: &AddrToResolve, endpoint: &Endpoint) {
+pub async fn run(partner: &str, endpoint: &Endpoint) {
     // TODO: resolve _all_ possible addresses:
     // Set up addresses
-    let (_, partner) = match partner.resolve(CLI.resolution_mode).await {
-        Ok(mut resolved) => resolved.next().expect("iterator not empty"),
+    let (_, partner) = match CLI.resolution_mode.resolve(partner).await {
+        Ok(resolved) => resolved.into_iter().next().expect("iterator not empty"),
         Err(err) => {
-            log::error!("Failed to connect to partner {partner}: {err}");
+            tracing::error!("Failed to connect to partner {partner}: {err}");
             return;
         }
     };
@@ -250,13 +238,13 @@ pub async fn run(partner: &AddrToResolve, endpoint: &Endpoint) {
         match connect(endpoint, partner).await {
             Ok(handle) => match handle.await {
                 Ok(()) => {
-                    log::info!("Hub-as-node server finished for {partner}");
+                    tracing::info!("Hub-as-node server finished for {partner}");
                     backoff = start;
                 }
-                Err(err) => log::error!("Hub-as-node server panicked for {partner}: {err}"),
+                Err(err) => tracing::error!("Hub-as-node server panicked for {partner}: {err}"),
             },
             Err(err) => {
-                log::error!("Failed to connect as hub-as-node to {partner}: {err}")
+                tracing::error!("Failed to connect as hub-as-node to {partner}: {err}")
             }
         }
 

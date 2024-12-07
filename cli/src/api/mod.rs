@@ -55,7 +55,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} GET {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -87,7 +87,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    log::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -119,7 +119,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    log::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -151,7 +151,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response PATCH {}", route.as_ref()))?;
 
-    log::info!("{} PATCH {} {}", status, url, text);
+    tracing::info!("{} PATCH {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -181,7 +181,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} GET {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(

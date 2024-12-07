@@ -34,7 +34,7 @@ pub fn db<'a>() -> &'a rocksdb::DB {
 
 /// Initializes the RocksDB for use by the Samizdat node.
 pub fn init_db() -> Result<(), crate::Error> {
-    log::info!("Starting RocksDB");
+    tracing::info!("Starting RocksDB");
 
     let db_path = format!("{}/db", cli().data.to_str().expect("path is not a string"));
 
@@ -65,9 +65,9 @@ pub fn init_db() -> Result<(), crate::Error> {
     DB.set(db).ok();
 
     // Run possible migrations (needs DB set, but still requires exclusive access):
-    log::info!("RocksDB up. Running migrations...");
+    tracing::info!("RocksDB up. Running migrations...");
     migrations::migrate()?;
-    log::info!("... done running all migrations.");
+    tracing::info!("... done running all migrations.");
 
     Ok(())
 }
@@ -231,7 +231,7 @@ impl MergeOperation {
         match MergeOperation::try_full_merge(new_key, existing_val, operands) {
             Ok(val) => val,
             Err(err) => {
-                log::error!(
+                tracing::error!(
                     "full merge got bad operation for key {} with operands {:?}: {}",
                     base64_url::encode(new_key),
                     operands
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_merge() {
-        let _ = crate::logger::init_logger(true);
+        tracing_subscriber::fmt().init();
 
         crate::cli::init_cli().unwrap();
         init_db().unwrap();
@@ -288,7 +288,7 @@ mod tests {
         )
         .unwrap();
 
-        log::info!(
+        tracing::info!(
             "{:?}",
             bincode::deserialize::<MergeOperation>(
                 &db().get_cf(Table::Bookmarks.get(), b"a").unwrap().unwrap()

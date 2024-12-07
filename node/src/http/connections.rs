@@ -22,8 +22,7 @@ pub fn api() -> Router {
 struct GetConnectionResponse {
     name: String,
     status: ConnectionStatus,
-    direct_addr: SocketAddr,
-    reverse_addr: SocketAddr,
+    addr: SocketAddr,
 }
 
 fn connections() -> Router {
@@ -39,8 +38,7 @@ fn connections() -> Router {
                     .map(|connection| GetConnectionResponse {
                         name: connection.name().to_string(),
                         status: connection.status(),
-                        direct_addr: connection.address().direct_addr(),
-                        reverse_addr: connection.address().reverse_addr(),
+                        addr: connection.address(),
                     })
                     .collect::<Vec<_>>();
 

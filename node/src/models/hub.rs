@@ -2,20 +2,16 @@ use rocksdb::IteratorMode;
 use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
 
-use samizdat_common::address::{AddrResolutionMode, AddrToResolve};
-use serde_with::serde_as;
-use serde_with::DisplayFromStr;
+use samizdat_common::address::{AddrResolutionMode};
 
 use crate::db;
 use crate::db::Table;
 
 use super::Droppable;
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hub {
-    #[serde_as(as = "DisplayFromStr")]
-    pub address: AddrToResolve,
+    pub address: String,
     pub resolution_mode: AddrResolutionMode,
 }
 
@@ -53,7 +49,7 @@ impl Hub {
             .collect::<Result<Vec<_>, crate::Error>>()
     }
 
-    pub fn get(address: AddrToResolve) -> Result<Option<Hub>, crate::Error> {
+    pub fn get(address: &str) -> Result<Option<Hub>, crate::Error> {
         let maybe_value = db().get_cf(Table::Hubs.get(), address.to_string())?;
 
         Ok(maybe_value

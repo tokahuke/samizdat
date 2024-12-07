@@ -7,11 +7,13 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
-use tokio::time::Instant;
+use transport::channel_manager;
+use transport::connection_manager;
 pub use transport::PEER_CONNECTIONS;
 
 use futures::prelude::*;
 use futures::stream;
+use quinn::Connection;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::client::NewClient;
@@ -21,11 +23,11 @@ use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
+use tokio::time::Instant;
 
-use samizdat_common::address::{ChannelAddr, HubAddr};
+use samizdat_common::address::ChannelAddr;
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
-use samizdat_common::quic;
 use samizdat_common::rpc::*;
 use samizdat_common::Hint;
 use samizdat_common::HASH_LEN;
@@ -36,26 +38,29 @@ use crate::models;
 use crate::models::{Edition, SeriesRef};
 
 use self::node_server::NodeServer;
-use self::transport::{file_transfer, ChannelManager, ConnectionManager};
+use self::transport::file_transfer;
+
+pub const MAX_TRANSFER_SIZE: usize = 2_048;
 
 /// A single connection instance, which will be recreated by [`Reconnect`] on connection loss.
 pub struct HubConnectionInner {
     client: HubClient,
-    // connection_manager: Arc<ConnectionManager>,
-    channel_manager: Arc<ChannelManager>,
     candidate_channels: KeyedChannel<Candidate>,
 }
 
 impl HubConnectionInner {
     /// Creates the RPC connection from the Node to the Hub.
     async fn connect_direct(
-        direct_addr: SocketAddr,
-        connection_manager: Arc<ConnectionManager>,
+        connection: Connection,
     ) -> Result<(HubClient, oneshot::Receiver<()>), crate::Error> {
         let (client_reset_trigger, client_reset_recv) = oneshot::channel();
 
         // Create transport for client and create client:
-        let transport = connection_manager.transport(direct_addr).await?;
+        let transport = samizdat_common::transport::open_direct_bincode_transport(
+            connection,
+            MAX_TRANSFER_SIZE,
+        )
+        .await?;
         let uninstrumented_client = HubClient::new(tarpc::client::Config::default(), transport);
         let client = NewClient {
             client: uninstrumented_client.client,
@@ -70,20 +75,17 @@ impl HubConnectionInner {
 
     /// Creates the RPC connection from the Hub to the Node.
     async fn connect_reverse(
-        reverse_addr: SocketAddr,
-        connection_manager: Arc<ConnectionManager>,
+        connection: Connection,
         candidate_channels: KeyedChannel<Candidate>,
     ) -> Result<JoinHandle<()>, crate::Error> {
         // Create transport for server and spawn server:
-        let transport = connection_manager.transport(reverse_addr).await?;
+        let transport = samizdat_common::transport::open_reverse_bincode_transport(
+            connection,
+            MAX_TRANSFER_SIZE,
+        )
+        .await?;
         let server_task = server::BaseChannel::with_defaults(transport)
-            .execute(
-                NodeServer {
-                    channel_manager: Arc::new(ChannelManager::new(connection_manager.clone())),
-                    candidate_channels,
-                }
-                .serve(),
-            )
+            .execute(NodeServer { candidate_channels }.serve())
             .for_each(|request_task| async move {
                 tokio::spawn(request_task);
             });
@@ -95,34 +97,19 @@ impl HubConnectionInner {
     /// Creates the two connections between hub and node: RPC from node to hub and RPC from
     /// hub to node.
     async fn connect(
-        hub_addr: HubAddr,
+        hub_addr: SocketAddr,
     ) -> Result<(HubConnectionInner, impl Future<Output = ()>), crate::Error> {
-        // Connect and create connection manager:
-        let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
-
-        if let Ok(local_addr) = endpoint.local_addr() {
-            log::info!("Hub connection bound to {local_addr}");
-        }
-
-        let connection_manager = Arc::new(ConnectionManager::new(endpoint));
-        let channel_manager = Arc::new(ChannelManager::new(connection_manager.clone()));
+        let connection = connection_manager().connect(hub_addr).await?;
         let candidate_channels = KeyedChannel::new();
-        let (client, client_reset_recv) =
-            Self::connect_direct(hub_addr.direct_addr(), connection_manager.clone()).await?;
-        let server_reset_recv = Self::connect_reverse(
-            hub_addr.reverse_addr(),
-            connection_manager.clone(),
-            candidate_channels.clone(),
-        )
-        .await?;
+        let (client, client_reset_recv) = Self::connect_direct(connection.clone()).await?;
+        let server_reset_recv =
+            Self::connect_reverse(connection, candidate_channels.clone()).await?;
 
         let reset_trigger = future::select(server_reset_recv, client_reset_recv).map(|_| ());
 
         Ok((
             HubConnectionInner {
                 client,
-                // connection_manager,
-                channel_manager,
                 candidate_channels,
             },
             reset_trigger,
@@ -133,7 +120,7 @@ impl HubConnectionInner {
 /// A connection to a single node, already resilient to reconnects.
 pub struct HubConnection {
     name: String,
-    hub_addr: HubAddr,
+    hub_addr: SocketAddr,
     inner: Reconnect<HubConnectionInner>,
 }
 
@@ -146,12 +133,15 @@ impl HubConnection {
         self.inner.status()
     }
 
-    pub fn address(&self) -> HubAddr {
+    pub fn address(&self) -> SocketAddr {
         self.hub_addr
     }
 
     /// Creates a connection to the hub.
-    pub async fn connect(name: String, hub_addr: HubAddr) -> Result<HubConnection, crate::Error> {
+    pub async fn connect(
+        name: String,
+        hub_addr: SocketAddr,
+    ) -> Result<HubConnection, crate::Error> {
         Ok(HubConnection {
             name,
             hub_addr,
@@ -223,14 +213,13 @@ impl HubConnection {
             } => (candidate_channel, channel_id),
         };
 
-        log::info!(
+        tracing::info!(
             "Candidate channel for {}: {}",
             content_hash,
             candidate_channel
         );
 
         // Stream of peer candidates:
-        let channel_manager = inner.channel_manager.clone();
         let candidates = inner
             .candidate_channels
             .recv_stream(candidate_channel)
@@ -238,14 +227,12 @@ impl HubConnection {
                 // TODO: check if candidate is valid. However, seems to be unnecessary, since
                 // transport will make sure no naughty people are involved.
                 let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
-                log::info!("Got candidate {channel_addr} for channel {candidate_channel}");
-                let channel_manager = channel_manager.clone();
+                tracing::info!("Got candidate {channel_addr} for channel {candidate_channel}");
                 Box::pin(async move {
-                    channel_manager
-                        .expect(channel_addr)
+                    channel_manager::expect(channel_addr)
                         .await
                         .map_err(|err| {
-                            log::warn!("Hole punching with {channel_addr} failed: {err}")
+                            tracing::warn!("Hole punching with {channel_addr} failed: {err}")
                         })
                         .ok()
                 })
@@ -265,7 +252,7 @@ impl HubConnection {
             }
         };
 
-        log::info!(
+        tracing::info!(
             "Query done: {kind:?} {content_hash} {:?}",
             outcome.as_ref().map(|tee| tee.object_ref())
         );
@@ -295,7 +282,7 @@ impl HubConnection {
             let candidate_edition: Edition = candidate.series.decrypt_with(&cipher)?;
 
             if !candidate_edition.is_valid() {
-                log::warn!("received invalid candidate edition: {candidate_edition:?}",);
+                tracing::warn!("received invalid candidate edition: {candidate_edition:?}",);
                 continue;
             }
 
@@ -347,11 +334,12 @@ impl Hubs {
         let mut resolved_addresses = vec![];
 
         let outcome: Result<(), crate::Error> = try {
-            for (name, address) in hub_model.address.resolve(hub_model.resolution_mode).await? {
-                let is_already_inserted = hubs.iter().any(|conn| {
-                    conn.address().direct_addr() == address.direct_addr()
-                        && conn.address().reverse_addr() == address.reverse_addr()
-                });
+            for (name, address) in hub_model
+                .resolution_mode
+                .resolve(&hub_model.address)
+                .await?
+            {
+                let is_already_inserted = hubs.iter().any(|conn| conn.address() == address);
 
                 if !is_already_inserted {
                     resolved_addresses.push((name, address));
@@ -360,7 +348,7 @@ impl Hubs {
         };
 
         if let Err(err) = outcome {
-            log::warn!("Failed to resolve address for {}: {err}", hub_model.address);
+            tracing::warn!("Failed to resolve address for {}: {err}", hub_model.address);
         }
 
         let hub_stream = stream::iter(resolved_addresses)
@@ -368,7 +356,7 @@ impl Hubs {
                 match HubConnection::connect(name.clone(), resolved).await {
                     Ok(conn) => Some(conn),
                     Err(err) => {
-                        log::warn!("Failed to connect to hub {name} at {resolved}: {err}");
+                        tracing::warn!("Failed to connect to hub {name} at {resolved}: {err}");
                         None
                     }
                 }
@@ -377,14 +365,14 @@ impl Hubs {
             .filter_map(|maybe_conn| async move { maybe_conn })
             .map(Arc::new);
 
-        log::debug!("Inserting connection(s) for {}", hub_model.address);
+        tracing::debug!("Inserting connection(s) for {}", hub_model.address);
 
         *hubs = stream::iter(hubs.iter().cloned())
             .chain(hub_stream)
             .collect()
             .await;
 
-        log::info!("Connection(s) for {} created", hub_model.address);
+        tracing::info!("Connection(s) for {} created", hub_model.address);
     }
 
     pub async fn snapshot(&self) -> Vec<Arc<HubConnection>> {
@@ -399,14 +387,18 @@ impl Hubs {
 
         for hub_model in all_hub_models {
             let outcome: Result<(), crate::Error> = try {
-                for (name, address) in hub_model.address.resolve(hub_model.resolution_mode).await? {
+                for (name, address) in hub_model
+                    .resolution_mode
+                    .resolve(&hub_model.address)
+                    .await?
+                {
                     // TODO: disallow creating more than one connection to the same HubAddr.
                     resolved_addresses.push((name, address));
                 }
             };
 
             if let Err(err) = outcome {
-                log::warn!("Failed to resolve address for {}: {err}", hub_model.address);
+                tracing::warn!("Failed to resolve address for {}: {err}", hub_model.address);
             }
         }
 
@@ -415,7 +407,7 @@ impl Hubs {
                 match HubConnection::connect(name.clone(), resolved).await {
                     Ok(conn) => Some(conn),
                     Err(err) => {
-                        log::warn!("Failed to connect to hub {name} at {resolved}: {err}");
+                        tracing::warn!("Failed to connect to hub {name} at {resolved}: {err}");
                         None
                     }
                 }
@@ -439,7 +431,7 @@ impl Hubs {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
-                log::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
+                tracing::debug!("Querying {} for {kind:?} {content_hash}", hub.name);
                 (
                     hub.name.clone(),
                     hub.query(content_hash, kind, deadline).await,
@@ -451,7 +443,7 @@ impl Hubs {
             match result {
                 Ok(found) => return Some(found),
                 Err(err) => {
-                    log::error!("Error while querying {}: {}", hub_name, err)
+                    tracing::error!("Error while querying {}: {}", hub_name, err)
                 }
             }
         }
@@ -488,7 +480,7 @@ impl Hubs {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
-                log::debug!("Querying {} for latest edition of {series}", hub.name);
+                tracing::debug!("Querying {} for latest edition of {series}", hub.name);
                 (hub.name.clone(), hub.get_edition(series).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
@@ -500,10 +492,10 @@ impl Hubs {
             match result {
                 Ok(Some(found)) => return Some(found),
                 Ok(None) => {
-                    log::debug!("got no result from {}", hub_name)
+                    tracing::debug!("got no result from {}", hub_name)
                 }
                 Err(err) => {
-                    log::error!("Error while querying {hub_name}: {err}")
+                    tracing::error!("Error while querying {hub_name}: {err}")
                 }
             }
         }
@@ -515,7 +507,7 @@ impl Hubs {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
-                log::debug!("Announcing {announcement:?} to {}", hub.name);
+                tracing::debug!("Announcing {announcement:?} to {}", hub.name);
                 (hub.name.clone(), hub.announce_edition(announcement).await)
             })
             .buffer_unordered(cli().max_parallel_hubs);
@@ -524,7 +516,7 @@ impl Hubs {
             match result {
                 Ok(_) => {}
                 Err(err) => {
-                    log::error!("Error while querying {hub_name}: {err}")
+                    tracing::error!("Error while querying {hub_name}: {err}")
                 }
             }
         }

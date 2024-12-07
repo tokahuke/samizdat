@@ -60,15 +60,15 @@ pub async fn recv_object(
     hash: Hash,
     query_duration: Duration,
 ) -> Result<ReceivedObject, crate::Error> {
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash).await?;
-    log::info!("receiving object header");
+    tracing::info!("receiving object header");
     let header = ObjectMessage::recv(&mut receiver, &transfer_cipher).await?;
     let metadata = header.metadata.clone();
-    log::info!("receiving data");
+    tracing::info!("receiving data");
     let content_stream = header.recv_data(receiver, hash, query_duration)?;
 
-    log::info!("done receiving object");
+    tracing::info!("done receiving object");
 
     Ok(ReceivedObject {
         metadata,
@@ -86,14 +86,14 @@ pub async fn send_object(
 ) -> Result<(), crate::Error> {
     let header = ObjectMessage::for_object(object)?;
 
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::send_negotiate(&sender, *object.hash()).await?;
-    log::info!("sending object header");
+    tracing::info!("sending object header");
     header.send(&sender, &transfer_cipher).await?;
-    log::info!("sending data");
+    tracing::info!("sending data");
     header.send_data(&sender, object).await?;
 
-    log::info!("done sending object");
+    tracing::info!("done sending object");
 
     Ok(())
 }
@@ -124,9 +124,9 @@ pub async fn recv_item(
     locator_hash: Hash,
     query_duration: Duration,
 ) -> Result<ReceivedItem, crate::Error> {
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash).await?;
-    log::info!("receiving item header");
+    tracing::info!("receiving item header");
     let header = ItemMessage::recv(&mut receiver, &transfer_cipher).await?;
 
     // No tricks!
@@ -145,7 +145,7 @@ pub async fn recv_item(
     if object_ref.exists()? {
         // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
         // the object in the database.
-        log::info!("Object {} exists. Ending transmission", object_ref.hash());
+        tracing::info!("Object {} exists. Ending transmission", object_ref.hash());
         // Need to reaffirm the collection-object connection (e.g. the object is there,
         // but is part of another collection and the link is not yet established):
         header.item.insert()?;
@@ -161,14 +161,14 @@ pub async fn recv_item(
 
     header.item.insert()?;
 
-    log::info!("receiving data");
+    tracing::info!("receiving data");
     let metadata = header.object_header.metadata.clone();
     let content_stream =
         header
             .object_header
             .recv_data(receiver, *object_ref.hash(), query_duration)?;
 
-    log::info!("done receiving item");
+    tracing::info!("done receiving item");
 
     Ok(ReceivedItem::NewObject(ReceivedObject {
         metadata,
@@ -188,25 +188,25 @@ pub async fn send_item(
     let hash = item.locator().hash();
     let header = ItemMessage::for_item(item)?;
 
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::send_negotiate(&sender, hash).await?;
-    log::info!("sending item header");
+    tracing::info!("sending item header");
     header.send(&sender, &transfer_cipher).await?;
 
-    log::info!("Receiving proceed message");
+    tracing::info!("Receiving proceed message");
     let proceed = ProceedMessage::recv(&mut receiver, &transfer_cipher).await?;
 
     match proceed {
         ProceedMessage::Proceed => {
-            log::info!("sending data");
+            tracing::info!("sending data");
             header.object_header.send_data(&sender, &object).await?;
         }
         ProceedMessage::Cancel => {
-            log::info!("no need to send data");
+            tracing::info!("no need to send data");
         }
     }
 
-    log::info!("done sending object");
+    tracing::info!("done sending object");
 
     Ok(())
 }

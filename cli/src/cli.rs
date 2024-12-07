@@ -9,7 +9,7 @@ static CLI: OnceLock<Cli> = OnceLock::new();
 pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
 
-    log::debug!("Arguments from command line: {:#?}", cli);
+    tracing::debug!("Arguments from command line: {:#?}", cli);
 
     cli
 }

@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["common", "node", "hub", "cli", "proxy", "install/node/x86_64-pc-windows-gnu/samizdat-service"]
+members = ["common", "node", "hub", "cli", "proxy", "install/node/x86_64-pc-windows-gnu/samizdat-service", "test-quic"]
 resolver = "2"
 
 [profile.release]

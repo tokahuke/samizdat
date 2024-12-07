@@ -61,11 +61,11 @@ static CLI: OnceLock<Cli> = OnceLock::new();
 pub fn init_cli() -> Result<(), crate::Error> {
     let cli = Cli::from_args();
 
-    log::info!("Arguments from command line: {:#?}", cli);
+    tracing::info!("Arguments from command line: {:#?}", cli);
 
     std::fs::create_dir_all(&cli.data)?;
 
-    log::debug!("Initialized data folder");
+    tracing::debug!("Initialized data folder");
 
     CLI.set(cli).ok();
 

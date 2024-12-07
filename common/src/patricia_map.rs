@@ -283,14 +283,14 @@ impl PatriciaMap {
                 Some(child) => {
                     match child.segment.follow(&mut bits) {
                         FollowStatus::FollowNode(side) => {
-                            log::trace!("follow node");
+                            tracing::trace!("follow node");
                             // Prefixes match; carry on.
                             current = child.next_mut();
                             current.is_up_to_date = false; // hash will change.
                             next_side = side;
                         }
                         FollowStatus::Split(side, split_at) => {
-                            log::trace!("split");
+                            tracing::trace!("split");
                             // Split
                             let (prefix, suffix) = child.segment.split_at(split_at);
 
@@ -318,7 +318,7 @@ impl PatriciaMap {
                             break None;
                         }
                         FollowStatus::FoundLeaf => {
-                            log::trace!("existing leaf found");
+                            tracing::trace!("existing leaf found");
                             // Hash was already inserted. Update and remove old.
                             let old_value = child.next_mut().hash;
                             child.next_mut().hash = value;
@@ -328,7 +328,7 @@ impl PatriciaMap {
                     }
                 }
                 none_child => {
-                    log::trace!("fresh leaf found");
+                    tracing::trace!("fresh leaf found");
                     // Found unexplored branch.
                     let child = Child {
                         // Segment will be what's left from iterator.
@@ -372,7 +372,7 @@ impl PatriciaMap {
 
                 match child.segment.follow(&mut bits) {
                     FollowStatus::FollowNode(side) => {
-                        log::trace!("follow node");
+                        tracing::trace!("follow node");
                         // Prefixes match; carry on.
 
                         // Find the hash for the other side and push to path.
@@ -381,17 +381,17 @@ impl PatriciaMap {
                         next_side = side;
                     }
                     FollowStatus::Split(_, _) => {
-                        log::trace!("split");
+                        tracing::trace!("split");
                         break None;
                     }
                     FollowStatus::FoundLeaf => {
-                        log::trace!("existing leaf found");
+                        tracing::trace!("existing leaf found");
                         // Hash was already inserted.
                         break Some(child.next().hash);
                     }
                 }
             } else {
-                log::trace!("fresh leaf found");
+                tracing::trace!("fresh leaf found");
                 break None;
             }
         };
@@ -446,7 +446,7 @@ impl PatriciaProof {
                 .sum::<usize>();
 
         if bit_length != 224 {
-            log::warn!(
+            tracing::warn!(
                 "proof is the wrong bit length: expected {}, got {}",
                 244,
                 bit_length

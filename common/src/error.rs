@@ -51,8 +51,6 @@ pub enum Error {
     Timeout,
 }
 
-impl warp::reject::Reject for crate::Error {}
-
 impl From<RpcError> for Error {
     fn from(e: RpcError) -> Error {
         Error::Rpc(e)

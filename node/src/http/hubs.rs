@@ -8,11 +8,8 @@ use axum::Json;
 use axum::Router;
 use futures::FutureExt;
 use samizdat_common::address::AddrResolutionMode;
-use samizdat_common::address::AddrToResolve;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use serde_with::serde_as;
-use serde_with::DisplayFromStr;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
@@ -26,11 +23,9 @@ pub fn api() -> Router {
 }
 
 fn hub() -> Router {
-    #[serde_as]
     #[derive(Deserialize)]
     struct PostHubRequest {
-        #[serde_as(as = "DisplayFromStr")]
-        address: AddrToResolve,
+        address: String,
         resolution_mode: AddrResolutionMode,
     }
 
@@ -64,14 +59,14 @@ fn hub() -> Router {
         .route(
             // Lists a single hubs.
             "/:hub",
-            get(|Path(hub): Path<String>| async move { Hub::get(hub.parse()?) }.map(ApiResponse))
+            get(|Path(hub): Path<String>| async move { Hub::get(&hub) }.map(ApiResponse))
                 .layer(security_scope!(AccessRight::ManageHubs)),
         )
         .route(
             "/:hub",
             delete(|Path(hub): Path<String>| {
                 async move {
-                    let existed = if let Some(hub) = Hub::get(hub.parse()?)? {
+                    let existed = if let Some(hub) = Hub::get(&hub)? {
                         hub.drop_if_exists()?;
                         true
                     } else {

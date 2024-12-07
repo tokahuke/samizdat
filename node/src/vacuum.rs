@@ -91,7 +91,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
         }
     }
 
-    log::debug!("to drop: {:#?}", dropped);
+    tracing::debug!("to drop: {:#?}", dropped);
 
     // Prune items:
     for item in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
@@ -136,26 +136,26 @@ pub async fn run_vacuum_daemon() {
     loop {
         let start = Instant::now();
         let vacuum_task = Handle::current().spawn_blocking(|| {
-            log::debug!("vacuum task started");
+            tracing::debug!("vacuum task started");
 
             match vacuum() {
                 Ok(VacuumStatus::Unnecessary | VacuumStatus::Done) => {}
                 Ok(VacuumStatus::Insufficient) => {
-                    log::warn!("vacuum task was insufficient to bring storage size down")
+                    tracing::warn!("vacuum task was insufficient to bring storage size down")
                 }
-                Err(err) => log::error!("vacuum task error: {}", err),
+                Err(err) => tracing::error!("vacuum task error: {}", err),
             }
 
-            log::debug!("vacuum task ended");
+            tracing::debug!("vacuum task ended");
         });
 
         if let Err(err) = vacuum_task.await {
-            log::error!("vacuum task panicked: {}", err);
+            tracing::error!("vacuum task panicked: {}", err);
         }
 
         let end = Instant::now();
 
-        log::debug!("vacuum task took {:?}", end - start);
+        tracing::debug!("vacuum task took {:?}", end - start);
 
         let moving_avg_timing = push_timing(end - start);
         let interlude = moving_avg_timing.mul_f64(1. / VACUUM_TIMESHARE - 1.);
@@ -177,10 +177,10 @@ pub fn flush_all() {
             Ok((hash, _)) => {
                 let object = ObjectRef::new(Hash::new(hash));
                 if let Err(err) = object.drop_if_exists() {
-                    log::warn!("Failed to drop {object:?}: {err}");
+                    tracing::warn!("Failed to drop {object:?}: {err}");
                 }
             }
-            Err(err) => log::warn!("Failed to load an object from db for deletion: {err}"),
+            Err(err) => tracing::warn!("Failed to load an object from db for deletion: {err}"),
         }
     }
 }
@@ -231,7 +231,7 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
         match ref_count.eval_on_zero() {
             1.. => {}
             0 => batch.delete_cf(Table::ObjectChunks.get(), hash),
-            neg => log::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
+            neg => tracing::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
         }
     }
 
