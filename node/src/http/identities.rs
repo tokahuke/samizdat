@@ -73,13 +73,13 @@ pub fn api() -> Router {
                 |Path(IdentityPath { identity, name }): Path<IdentityPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
-                        Ok(resolve_identity(
+                        resolve_identity(
                             identity.handle(),
                             name.as_str().into(),
                             [],
                             Instant::now() + timeout,
                         )
-                        .await?)
+                        .await
                     }
                     .map(PageResponse)
                 },
@@ -92,13 +92,13 @@ pub fn api() -> Router {
                 |Path(IdentityPath { identity, .. }): Path<IdentityPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
-                        Ok(resolve_identity(
+                        resolve_identity(
                             identity.handle(),
                             "".into(),
                             [],
                             Instant::now() + timeout,
                         )
-                        .await?)
+                        .await
                     }
                     .map(PageResponse)
                 },

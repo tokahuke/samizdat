@@ -274,7 +274,7 @@ pub struct ContentStream {
     is_first: bool,
     /// Indicates whether an object header must be skipped for the next chunk.
     skip_header: bool,
-    ///
+    /// The size of the content.
     content_size: AtomicUsize,
 }
 

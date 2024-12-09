@@ -15,8 +15,7 @@ pub use samizdat_common::Error;
 pub use cli::cli;
 pub use db::db;
 
-use std::{panic, sync::OnceLock};
-use tokio::task;
+use std::sync::OnceLock;
 
 use access::init_access_token;
 use cli::init_cli;
@@ -38,15 +37,6 @@ async fn init_hubs() -> Result<(), crate::Error> {
 /// Retrieves a reference to the list of hubs. Needs to be called just after initialization.
 pub fn hubs<'a>() -> &'a Hubs {
     HUBS.get().expect("hubs not initialized")
-}
-
-/// Utility for propagating panics through tasks.
-fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
-    if let Err(err) = r {
-        if let Ok(panic) = err.try_into_panic() {
-            panic::resume_unwind(panic);
-        }
-    }
 }
 
 /// The entrypoint of the Samizdat node.
@@ -72,9 +62,7 @@ async fn main() -> Result<(), crate::Error> {
     tokio::spawn(crate::vacuum::run_vacuum_daemon());
 
     // Run public server:
-    let server = tokio::spawn(http::serve());
-
-    maybe_resume_panic(server.await);
+    http::serve().await?;
 
     // Exit:
     Ok(())

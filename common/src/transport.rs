@@ -21,7 +21,7 @@ impl<T: for<'a> Deserialize<'a>> Deserializer<T> for BincodeCodec {
         self: Pin<&mut Self>,
         src: &tarpc::tokio_util::bytes::BytesMut,
     ) -> Result<T, Self::Error> {
-        Ok(bincode::deserialize(&*src)?)
+        Ok(bincode::deserialize(src)?)
     }
 }
 

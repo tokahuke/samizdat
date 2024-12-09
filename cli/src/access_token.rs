@@ -7,7 +7,7 @@ static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 /// Retrieves the access token. Must be called after initialization.
 pub fn access_token<'a>() -> Result<&'a str, anyhow::Error> {
     Ok(ACCESS_TOKEN
-        .get_or_try_init(|| init_access_token())?
+        .get_or_try_init(init_access_token)?
         .as_str())
 }
 
@@ -26,7 +26,7 @@ static PORT: OnceLock<u16> = OnceLock::new();
 
 /// Retrieves the HTTP server port. Must be called after initialization.
 pub fn port() -> Result<u16, anyhow::Error> {
-    Ok(*PORT.get_or_try_init(|| init_port())?)
+    Ok(*PORT.get_or_try_init(init_port)?)
 }
 
 /// Initializes HTTP port value.

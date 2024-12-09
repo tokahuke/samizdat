@@ -74,7 +74,7 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 static CRYPTO_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
 
 fn install_crypto_provider() {
-    if !CRYPTO_PROVIDER_INSTALLED.get().is_some() {
+    if CRYPTO_PROVIDER_INSTALLED.get().is_none() {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .ok();

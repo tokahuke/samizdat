@@ -1,6 +1,5 @@
 //! Protocol for information transfer between peers.
 
-pub mod legacy;
 mod messages;
 
 use std::collections::VecDeque;
@@ -135,7 +134,7 @@ impl ValidatedCandidate {
         {
             // Receive chunk:
             let mut compressed_chunk = maybe_chunk
-                .map_err(|_| format!("Incoming chunk timed out").into())
+                .map_err(|_| "Incoming chunk timed out".to_string().into())
                 .flatten()?;
 
             // Move the complicated stuff off the executor

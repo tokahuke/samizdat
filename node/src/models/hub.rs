@@ -2,7 +2,7 @@ use rocksdb::IteratorMode;
 use rocksdb::WriteBatch;
 use serde_derive::{Deserialize, Serialize};
 
-use samizdat_common::address::{AddrResolutionMode};
+use samizdat_common::address::AddrResolutionMode;
 
 use crate::db;
 use crate::db::Table;
@@ -32,7 +32,7 @@ impl Hub {
 
         db().put_cf(
             Table::Hubs.get(),
-            self.address.to_string(),
+            &self.address,
             bincode::serialize(&self).expect("can serialize"),
         )?;
 
@@ -50,7 +50,7 @@ impl Hub {
     }
 
     pub fn get(address: &str) -> Result<Option<Hub>, crate::Error> {
-        let maybe_value = db().get_cf(Table::Hubs.get(), address.to_string())?;
+        let maybe_value = db().get_cf(Table::Hubs.get(), address)?;
 
         Ok(maybe_value
             .map(|value| bincode::deserialize(&value))

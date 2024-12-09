@@ -327,17 +327,17 @@ fn merge_rejections(
         authorization_rejection,
         AuthenticationRejection::MissingAuthorization
     ) {
-        return security_scope_rejection.into_response();
+        security_scope_rejection.into_response()
     } else if matches!(
         security_scope_rejection,
         SecurityScopeRejection::MissingReferer
     ) {
-        return authorization_rejection.into_response();
+        authorization_rejection.into_response()
     } else {
-        return Response::builder()
+        Response::builder()
             .status(400)
             .body("mulitple authorization methods supplied and all failed".into())
-            .expect("can build error response");
+            .expect("can build error response")
     }
 }
 
@@ -398,7 +398,7 @@ fn do_authenticate_security_scope<const N: usize>(
     request: &Request,
 ) -> Result<(), SecurityScopeRejection> {
     // Get entity from request:
-    let entity = entity_from_request(&request)?;
+    let entity = entity_from_request(request)?;
 
     // Get rights from db (if possible):
     let mut granted_rights: Vec<AccessRight> = entity
@@ -445,7 +445,7 @@ async fn authenticate_trusted_context(request: Request, next: Next) -> Response 
 
 /// Authenticates a call from a trusted context.
 fn do_authenticate_trusted_context(request: &Request) -> Result<(), SecurityScopeRejection> {
-    let Some(referer) = referer_from_request(&request)? else {
+    let Some(referer) = referer_from_request(request)? else {
         return Err(SecurityScopeRejection::MissingReferer);
     };
 

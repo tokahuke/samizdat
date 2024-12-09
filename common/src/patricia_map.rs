@@ -482,7 +482,7 @@ pub struct Iter<'a> {
     is_backtracking: bool,
 }
 
-impl<'a> Iter<'a> {
+impl Iter<'_> {
     /// This function is used to walk the iterator over tree. It tries to find a sibling
     /// for the current node and, if none is found, backtracks to the previous level.
     fn sibling_or_backtrack(&mut self) {
@@ -508,7 +508,7 @@ impl<'a> Iter<'a> {
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = (Hash, Hash);
 
     fn next(&mut self) -> Option<(Hash, Hash)> {

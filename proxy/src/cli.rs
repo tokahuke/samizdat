@@ -42,7 +42,7 @@ impl Cli {
             anyhow::bail!("missing domain parameter")
         };
 
-        Ok(&domain)
+        Ok(domain)
     }
 
     pub fn owner(&self) -> Result<&str, anyhow::Error> {
@@ -50,7 +50,7 @@ impl Cli {
             anyhow::bail!("missing owner parameter")
         };
 
-        Ok(&owner)
+        Ok(owner)
     }
 }
 

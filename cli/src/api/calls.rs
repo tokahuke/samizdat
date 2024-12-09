@@ -71,7 +71,7 @@ pub async fn post_object(
 ) -> Result<String, anyhow::Error> {
     let url = format!("{}/_objects", crate::server()?);
     let response = CLIENT
-        .post(&format!(
+        .post(format!(
             "{}/_objects?bookmark={}&is-draft={}",
             crate::server()?,
             bookmark,

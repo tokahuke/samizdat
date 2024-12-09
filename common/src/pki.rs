@@ -120,7 +120,7 @@ impl FromStr for Key {
         Ok(Key(ed25519_dalek::VerifyingKey::from_bytes(
             &bytes[..]
                 .try_into()
-                .map_err(|_| format!("Bad size for public key"))?,
+                .map_err(|_| "Bad size for public key".to_string())?,
         )
         .map_err(|err| {
             format!("Failed to deserialize public key {s}: {err}")
@@ -173,7 +173,7 @@ impl Key {
         Ok(Key(ed25519_dalek::VerifyingKey::from_bytes(
             bytes
                 .try_into()
-                .map_err(|_| format!("Bad size for public key"))?,
+                .map_err(|_| "Bad size for public key".to_string())?,
         )
         .map_err(|err| format!("bad public key: {}", err))?))
     }

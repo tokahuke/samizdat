@@ -59,10 +59,7 @@ fn object() -> Router {
                 |Path(ObjectPath { hash }): Path<ObjectPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
-                        Ok(
-                            resolve_object(ObjectRef::new(hash), vec![], Instant::now() + timeout)
-                                .await?,
-                        )
+                        resolve_object(ObjectRef::new(hash), vec![], Instant::now() + timeout).await
                     }
                     .map(PageResponse)
                 },

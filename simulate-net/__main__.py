@@ -106,9 +106,6 @@ class Hub:
     def direct_port(self) -> int:
         return PORT_BROKER.port_for(f"{self.hub_id}-direct")
 
-    def reverse_port(self) -> int:
-        return PORT_BROKER.port_for(f"{self.hub_id}-reverse")
-
     def http_port(self) -> int:
         return PORT_BROKER.port_for(f"{self.hub_id}-http")
 
@@ -118,7 +115,6 @@ class Hub:
     def report_config(self) -> dict:
         return {
             "address": self.address(),
-            "http-port": self.http_port(),
         }
 
     def command(self, hubs: list[Hub]) -> list[str]:

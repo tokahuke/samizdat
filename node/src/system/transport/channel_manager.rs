@@ -194,10 +194,10 @@ impl ChannelReceiver {
         }
     }
 
-    pub fn recv_many<'a>(
-        &'a mut self,
+    pub fn recv_many(
+        &mut self,
         max_len: usize,
-    ) -> impl 'a + Stream<Item = Result<Vec<u8>, crate::Error>> {
+    ) -> impl '_ + Stream<Item = Result<Vec<u8>, crate::Error>> {
         stream::poll_fn(move |ctx| self.receiver.poll_recv(ctx)).then(
             move |mut recv_stream| async move {
                 recv_stream

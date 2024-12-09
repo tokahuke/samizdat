@@ -15,7 +15,7 @@ pub fn init_cli() -> Cli {
 }
 
 pub fn cli<'a>() -> &'a Cli {
-    CLI.get_or_init(|| init_cli())
+    CLI.get_or_init(init_cli)
 }
 
 pub fn server() -> Result<String, anyhow::Error> {
