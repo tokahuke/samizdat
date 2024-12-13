@@ -1,11 +1,12 @@
+use std::sync::LazyLock;
+
 use askama::Template;
-use lazy_static::lazy_static;
 use scraper::{Html, Selector};
 
-lazy_static! {
-    static ref SELECT_HEAD: Selector = Selector::parse("head").expect("valid selector");
-    static ref SELECT_BODY: Selector = Selector::parse("body").expect("valid selector");
-}
+static SELECT_HEAD: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("head").expect("valid selector"));
+static SELECT_BODY: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("body").expect("valid selector"));
 
 const SAMIZDAT_BLOG_PATH: &str = "/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install/";
 
@@ -18,7 +19,7 @@ struct ProxyedPage {
     download_link: &'static str,
 }
 
-pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> bytes::Bytes {
+pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> hyper::body::Bytes {
     let source = &String::from_utf8_lossy(raw);
     let html = Html::parse_document(source);
     let head = html

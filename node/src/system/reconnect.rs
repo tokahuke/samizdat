@@ -59,19 +59,19 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
         let task_status = status.clone();
         let reconnect = tokio::spawn(async move {
             loop {
-                log::info!("connection reset triggered");
+                tracing::info!("connection reset triggered");
 
                 let mut backoff = backoff_factory();
                 let mut lock = task_current.write().await;
                 let (connection, reset) = 'inner: loop {
                     match connect().await {
                         Ok(success) => {
-                            log::info!("connect attempt succeeded.");
+                            tracing::info!("connect attempt succeeded.");
                             task_status.store(ConnectionStatus::Connected as u8, Ordering::Relaxed);
                             break 'inner success;
                         }
                         Err(err) => {
-                            log::warn!("connect attempt failed: {}", err);
+                            tracing::warn!("connect attempt failed: {}", err);
                             task_status.store(ConnectionStatus::Failing as u8, Ordering::Relaxed);
                             sleep(backoff()).await;
                         }

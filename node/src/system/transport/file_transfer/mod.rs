@@ -1,12 +1,11 @@
 //! Protocol for information transfer between peers.
 
-pub mod legacy;
 mod messages;
 
 use std::collections::VecDeque;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use brotli::{CompressorReader, Decompressor};
 use futures::prelude::*;
@@ -44,7 +43,7 @@ impl ValidatedCandidate {
         sender: ChannelSender,
         mut receiver: ChannelReceiver,
     ) -> Result<ValidatedCandidate, crate::Error> {
-        log::info!("negotiating nonce with {}", sender.remote_address());
+        tracing::info!("negotiating nonce with {}", sender.remote_address());
         let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, hash)
             .await
             .map_err(|err| {
@@ -83,7 +82,7 @@ impl ValidatedCandidate {
         sender: ChannelSender,
         mut receiver: ChannelReceiver,
     ) -> Result<ValidatedCandidate, crate::Error> {
-        log::info!("negotiating nonce with {}", sender.remote_address());
+        tracing::info!("negotiating nonce with {}", sender.remote_address());
         let transfer_cipher = NonceMessage::recv_negotiate(&mut receiver, locator_hash)
             .await
             .map_err(|err| {
@@ -135,7 +134,7 @@ impl ValidatedCandidate {
         {
             // Receive chunk:
             let mut compressed_chunk = maybe_chunk
-                .map_err(|_| format!("Incoming chunk timed out").into())
+                .map_err(|_| "Incoming chunk timed out".to_string().into())
                 .flatten()?;
 
             // Move the complicated stuff off the executor
@@ -261,7 +260,7 @@ impl ReceivedObject {
 pub async fn recv_object(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     hash: Hash,
-    query_start: SystemTime,
+    query_start: Instant,
     deadline_instant: Instant,
 ) -> Result<ReceivedObject, crate::Error> {
     let mut negotiated = Box::pin(
@@ -270,7 +269,7 @@ pub async fn recv_object(
                 .map(move |(sender, receiver)| async move {
                     ValidatedCandidate::init_object(hash, sender, receiver)
                         .await
-                        .map_err(|err| log::error!("{err}"))
+                        .map_err(|err| tracing::error!("{err}"))
                         .ok()
                 })
                 .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
@@ -292,9 +291,7 @@ pub async fn recv_object(
     };
 
     // Now, the query is considered done.
-    let query_duration = SystemTime::now()
-        .duration_since(query_start)
-        .expect("time error");
+    let query_duration = Instant::now().duration_since(query_start);
 
     // Prepare to receive content:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
@@ -322,13 +319,13 @@ pub async fn recv_object(
                         hashes.lock().await.mark_received(chunk, missing_hashes);
 
                         if let Err(err) = outcome {
-                            log::error!("{err}");
+                            tracing::error!("{err}");
                             break;
                         }
                     }
 
                     if let Err(err) = candidate.say_thanks().await {
-                        log::error!("{err}");
+                        tracing::error!("{err}");
                     }
                 }
             }),
@@ -342,7 +339,7 @@ pub async fn recv_object(
         stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
     );
 
-    log::info!("done receiving object");
+    tracing::info!("done receiving object");
 
     Ok(ReceivedObject {
         metadata,
@@ -360,9 +357,9 @@ pub async fn send_object(
 ) -> Result<(), crate::Error> {
     let header = ObjectMessage::for_object(object)?;
 
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher = NonceMessage::send_negotiate(&sender, *object.hash()).await?;
-    log::info!("sending object header");
+    tracing::info!("sending object header");
     header.send(&sender, &transfer_cipher).await?;
 
     loop {
@@ -428,7 +425,7 @@ impl ReceivedItem {
 pub async fn recv_item(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     locator_hash: Hash,
-    query_start: SystemTime,
+    query_start: Instant,
     deadline_instant: Instant,
 ) -> Result<ReceivedItem, crate::Error> {
     let mut negotiated = Box::pin(
@@ -437,7 +434,7 @@ pub async fn recv_item(
                 .map(move |(sender, receiver)| async move {
                     ValidatedCandidate::init_item(locator_hash, sender, receiver)
                         .await
-                        .map_err(|err| log::error!("{err}"))
+                        .map_err(|err| tracing::error!("{err}"))
                         .ok()
                 })
                 .buffer_unordered(MAX_CONCURRENT_CANDIDATES)
@@ -459,9 +456,7 @@ pub async fn recv_item(
     };
 
     // Now, the query is considered done.
-    let query_duration = SystemTime::now()
-        .duration_since(query_start)
-        .expect("time error");
+    let query_duration = Instant::now().duration_since(query_start);
 
     // Prepare to receive data:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
@@ -479,11 +474,11 @@ pub async fn recv_item(
     // Go away if you already have what you wanted:
     if object_ref.exists()? || object_ref.is_null() {
         if object_ref.is_null() {
-            log::info!("Got null object as response. Ending transmission");
+            tracing::info!("Got null object as response. Ending transmission");
         } else {
             // Do not attempt to create a `ReceivedObject, because it will attempt to reinsert
             // the object in the database.
-            log::info!("Object {} exists. Ending transmission", object_ref.hash());
+            tracing::info!("Object {} exists. Ending transmission", object_ref.hash());
         }
 
         // Ending transmission from all potential candidates that might arrive:
@@ -492,7 +487,7 @@ pub async fn recv_item(
                 .chain(negotiated)
                 .for_each_concurrent(None, move |candidate| async move {
                     if let Err(err) = candidate.say_thanks().await {
-                        log::error!("{err}");
+                        tracing::error!("{err}");
                     }
                 }),
         );
@@ -519,13 +514,13 @@ pub async fn recv_item(
                         hashes.lock().await.mark_received(chunk, missing_hashes);
 
                         if let Err(err) = outcome {
-                            log::error!("{err}");
+                            tracing::error!("{err}");
                             break;
                         }
                     }
 
                     if let Err(err) = candidate.say_thanks().await {
-                        log::error!("{err}");
+                        tracing::error!("{err}");
                     }
                 }
             }),
@@ -539,7 +534,7 @@ pub async fn recv_item(
         stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
     );
 
-    log::info!("done receiving object");
+    tracing::info!("done receiving object");
 
     Ok(ReceivedItem::NewObject(ReceivedObject {
         metadata,
@@ -557,10 +552,10 @@ pub async fn send_item(
 ) -> Result<(), crate::Error> {
     let header = ItemMessage::for_item(item)?;
 
-    log::info!("negotiating nonce");
+    tracing::info!("negotiating nonce");
     let transfer_cipher =
         NonceMessage::send_negotiate(&sender, header.item.locator().hash()).await?;
-    log::info!("sending object header");
+    tracing::info!("sending object header");
     header.send(&sender, &transfer_cipher).await?;
 
     loop {

@@ -31,7 +31,10 @@ use crate::util::MARKER;
 use crate::{Manifest, PrivateManifest};
 
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
-    println!("{}", Table::new(t).with(tabled::Style::markdown()))
+    println!(
+        "{}",
+        Table::new(t).with(tabled::settings::Style::markdown())
+    )
 }
 
 pub async fn upload(
@@ -194,21 +197,21 @@ pub async fn commit(
 
     let base = &manifest.build.base;
     if !skip_build {
-        log::info!("Starting build");
+        tracing::info!("Starting build");
         manifest.run_build(is_release)?;
-        log::info!("Build done");
+        tracing::info!("Build done");
     } else {
-        log::info!("Skipping build");
+        tracing::info!("Skipping build");
     }
 
     let mut all_files = vec![];
     walk(base, &mut all_files)?;
 
-    log::debug!("committing: {:#?}", all_files);
+    tracing::debug!("committing: {:#?}", all_files);
 
     let hashes = stream::iter(&all_files)
         .map(|path| async move {
-            log::info!("Creating object for {:?}", path);
+            tracing::info!("Creating object for {:?}", path);
             let content_type = mime_guess::from_path(path)
                 .first_or_octet_stream()
                 .to_string();
@@ -232,7 +235,7 @@ pub async fn commit(
         .flat_map(|(names, hash)| names.into_iter().map(move |name| (name, hash.clone())))
         .collect::<Vec<_>>();
 
-    log::debug!("hashes: {:#?}", hashes);
+    tracing::debug!("hashes: {:#?}", hashes);
 
     let series_name = if is_release {
         manifest.series.name
@@ -303,25 +306,25 @@ pub async fn watch(
     // Spawn file watcher.
     let (send, mut recv) = mpsc::unbounded_channel();
     let mut watcher = notify::recommended_watcher(move |event| {
-        log::info!("Starting to listen for events");
+        tracing::info!("Starting to listen for events");
         match event {
             Ok(event) => {
                 send.send(event).ok();
             }
             Err(err) => {
-                log::error!("Notify error: {err}");
+                tracing::error!("Notify error: {err}");
             }
         }
     })?;
 
-    log::info!("Installing watcher");
+    tracing::info!("Installing watcher");
 
     watcher.watch(Path::new("."), RecursiveMode::Recursive)?;
 
     // Spawn refresh WebSocket:
     let refresh_socket = crate::ws::RefreshSocket::init()?;
 
-    log::info!("Starting rebuild loop");
+    tracing::info!("Starting rebuild loop");
 
     // Run the commit for the first time.
     if let Err(err) = commit(ttl, false, false, true, kind, Some(refresh_socket.addr())).await {
@@ -332,7 +335,7 @@ pub async fn watch(
     if !no_browser {
         if let Err(err) = webbrowser::open(&format!(
             "http://localhost:{}/_series/{}",
-            crate::access_token::port(),
+            crate::access_token::port()?,
             private_manifest.public_key_debug
         )) {
             println!("WARNING: could not open browser: {err}")
@@ -343,7 +346,7 @@ pub async fn watch(
     println!();
     println!(
         "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
-        crate::access_token::port(),
+        crate::access_token::port()?,
         private_manifest.public_key_debug
     );
     if !no_browser {
@@ -360,7 +363,7 @@ pub async fn watch(
         let watched_files_changed = event.paths.iter().any(|path| !path.starts_with(&base));
 
         if watched_files_changed && now > last_exec + MIN_WAIT {
-            log::info!("Rebuild triggered");
+            tracing::info!("Rebuild triggered");
             if let Err(err) =
                 commit(ttl, false, false, true, kind, Some(refresh_socket.addr())).await
             {
@@ -373,7 +376,7 @@ pub async fn watch(
                 println!();
                 println!(
                     "{MARKER} Publishing series at \u{001b}[1mhttp://localhost:{}/_series/{}\u{001b}[0m",
-                    crate::access_token::port(),
+                    crate::access_token::port()?,
                     private_manifest.public_key_debug
                 );
                 println!();

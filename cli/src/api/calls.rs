@@ -42,8 +42,7 @@ pub async fn delete_hub(address: &str) -> Result<bool, anyhow::Error> {
 pub struct GetConnectionResponse {
     pub name: String,
     pub status: String,
-    pub direct_addr: String,
-    pub reverse_addr: String,
+    pub addr: String,
 }
 
 pub async fn get_all_connections() -> Result<Vec<GetConnectionResponse>, anyhow::Error> {
@@ -70,16 +69,16 @@ pub async fn post_object(
     bookmark: bool,
     is_draft: bool,
 ) -> Result<String, anyhow::Error> {
-    let url = format!("{}/_objects", crate::server());
+    let url = format!("{}/_objects", crate::server()?);
     let response = CLIENT
-        .post(&format!(
+        .post(format!(
             "{}/_objects?bookmark={}&is-draft={}",
-            crate::server(),
+            crate::server()?,
             bookmark,
             is_draft,
         ))
         .header("Content-Type", content_type)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .body(content)
         .send()
         .await
@@ -90,7 +89,7 @@ pub async fn post_object(
         .await
         .with_context(|| "error from samizdat-node response POST /_objects")?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<String, ApiError> = serde_json::from_str(&text)
         .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
@@ -102,16 +101,16 @@ pub async fn get_object<F>(hash: &str, timeout: u64, mut each_chunk: F) -> Resul
 where
     F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>,
 {
-    let url = format!("{}/_objects/{}", crate::server(), hash);
+    let url = format!("{}/_objects/{}", crate::server()?, hash);
     let response = CLIENT
         .get(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .header("X-Samizdat-Timeout", timeout)
         .send()
         .await
         .with_context(|| "error from samizdat-node request POST /_objects")?;
     let status = response.status();
-    log::info!("{} GET {}", status, url);
+    tracing::info!("{} GET {}", status, url);
 
     if !status.is_success() {
         anyhow::bail!(
@@ -152,7 +151,7 @@ pub struct PostSeriesOwnerRequest<'a> {
 #[derive(Deserialize)]
 pub struct PostSeriesOwnerResponse {
     pub name: String,
-    pub keypair: ed25519_dalek::Keypair,
+    pub keypair: ed25519_dalek::SigningKey,
     #[serde(with = "humantime_serde")]
     pub default_ttl: Duration,
 }
@@ -162,19 +161,19 @@ type GetSeriesOwnerResponse = PostSeriesOwnerResponse;
 pub async fn post_series_owner(
     request: PostSeriesOwnerRequest<'_>,
 ) -> Result<PostSeriesOwnerResponse, anyhow::Error> {
-    post("/_seriesowners", request).await
+    post("/_series-owners", request).await
 }
 
 pub async fn delete_series_owner(series_name: &str) -> Result<bool, anyhow::Error> {
-    delete(format!("/_seriesowners/{series_name}")).await
+    delete(format!("/_series-owners/{series_name}")).await
 }
 
 pub async fn get_series_owner(series_name: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
-    get(format!("/_seriesowners/{series_name}")).await
+    get(format!("/_series-owners/{series_name}")).await
 }
 
 pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyhow::Error> {
-    get("/_seriesowners").await
+    get("/_series-owners").await
 }
 
 // Series:
@@ -274,8 +273,7 @@ pub async fn post_subscription(
 }
 
 pub async fn get_subscription_refresh(public_key: &str) -> Result<(), anyhow::Error> {
-    get(format!("/_subscriptions/{public_key}/refresh")).await?;
-    Ok(())
+    get(format!("/_subscriptions/{public_key}/refresh")).await
 }
 
 pub async fn delete_subscription(public_key: &str) -> Result<bool, anyhow::Error> {
@@ -323,6 +321,7 @@ pub struct CollectionRef {
     pub hash: Hash,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct EditionContent {
     pub kind: EditionKind,
@@ -341,9 +340,10 @@ pub async fn post_edition(
     series_name: &str,
     request: PostEditionRequest<'_>,
 ) -> Result<PostEditionResponse, anyhow::Error> {
-    post(format!("/_seriesowners/{series_name}/editions",), request).await
+    post(format!("/_series-owners/{series_name}/editions",), request).await
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct SeriesRef {
     pub public_key: Key,
@@ -357,7 +357,7 @@ pub struct PutEthereumProviderResponse {}
 pub async fn put_ethereum_provider(
     endpoint: String,
 ) -> Result<PutEthereumProviderResponse, anyhow::Error> {
-    put("/_ethereum_provider", GetEthereumProvider { endpoint }).await
+    put("/_ethereum-provider", GetEthereumProvider { endpoint }).await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -366,7 +366,7 @@ pub struct GetEthereumProvider {
 }
 
 pub async fn get_ethereum_provider() -> Result<GetEthereumProvider, anyhow::Error> {
-    get("/_ethereum_provider").await
+    get("/_ethereum-provider").await
 }
 
 // Vacuum:

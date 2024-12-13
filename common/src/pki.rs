@@ -1,6 +1,6 @@
 //! Asymmetric cryptography primitives for Samizdat.
 
-use ed25519_dalek::{Keypair, PublicKey, Signature, Signer, Verifier};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerialize};
 use std::fmt::{self, Debug, Display};
@@ -24,7 +24,7 @@ where
     T: Serialize + for<'a> Deserialize<'a>,
 {
     /// Create a new signature for some information, given a keypair.
-    pub fn new(content: T, keypair: &Keypair) -> Signed<T> {
+    pub fn new(content: T, keypair: &SigningKey) -> Signed<T> {
         let signature = keypair.sign(&bincode::serialize(&content).expect("can serialize"));
         Signed { content, signature }
     }
@@ -35,9 +35,9 @@ where
     }
 
     /// Checks of the signature is valid under the supplied public key.
-    pub fn verify(&self, public_key: &PublicKey) -> bool {
+    pub fn verify(&self, public_key: &VerifyingKey) -> bool {
         public_key
-            .verify(
+            .verify_strict(
                 &bincode::serialize(&self.content).expect("can serialize"),
                 &self.signature,
             )
@@ -61,8 +61,12 @@ impl FromStr for PrivateKey {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<PrivateKey, crate::Error> {
         Ok(PrivateKey(
-            ed25519_dalek::SecretKey::from_bytes(&base64_url::decode(s)?)
-                .map_err(|err| format!("Failed to deserialize secret key {s}: {err}"))?,
+            ed25519_dalek::SecretKey::try_from(base64_url::decode(s)?).map_err(|dec| {
+                format!(
+                    "Failed to deserialize secret key {s}: wrong key length, got {}",
+                    dec.len()
+                )
+            })?,
         ))
     }
 }
@@ -91,23 +95,32 @@ impl From<ed25519_dalek::SecretKey> for PrivateKey {
     }
 }
 
-impl PrivateKey {
-    /// Retrieves the undelying key implementation.
-    pub fn into_inner(self) -> ed25519_dalek::SecretKey {
-        self.0
+impl From<PrivateKey> for ed25519_dalek::SecretKey {
+    fn from(key: PrivateKey) -> ed25519_dalek::SecretKey {
+        key.0
+    }
+}
+
+impl From<PrivateKey> for ed25519_dalek::SigningKey {
+    fn from(key: PrivateKey) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&key.0)
     }
 }
 
 /// A public key.
 #[derive(Clone, PartialEq, Eq, DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
-pub struct Key(ed25519_dalek::PublicKey);
+pub struct Key(ed25519_dalek::VerifyingKey);
 
 impl FromStr for Key {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Key, crate::Error> {
-        Ok(Key(ed25519_dalek::PublicKey::from_bytes(
-            &base64_url::decode(s)?,
+        let bytes = base64_url::decode(s)?;
+
+        Ok(Key(ed25519_dalek::VerifyingKey::from_bytes(
+            &bytes[..]
+                .try_into()
+                .map_err(|_| "Bad size for public key".to_string())?,
         )
         .map_err(|err| {
             format!("Failed to deserialize public key {s}: {err}")
@@ -127,26 +140,26 @@ impl Debug for Key {
     }
 }
 
-impl AsRef<ed25519_dalek::PublicKey> for Key {
-    fn as_ref(&self) -> &ed25519_dalek::PublicKey {
+impl AsRef<ed25519_dalek::VerifyingKey> for Key {
+    fn as_ref(&self) -> &ed25519_dalek::VerifyingKey {
         &self.0
     }
 }
 
-impl From<ed25519_dalek::PublicKey> for Key {
-    fn from(key: ed25519_dalek::PublicKey) -> Key {
+impl From<ed25519_dalek::VerifyingKey> for Key {
+    fn from(key: ed25519_dalek::VerifyingKey) -> Key {
         Key(key)
     }
 }
 
 impl Key {
     /// Creates a new public key from a raw public key.
-    pub fn new(key: ed25519_dalek::PublicKey) -> Key {
+    pub fn new(key: ed25519_dalek::VerifyingKey) -> Key {
         Key(key)
     }
 
     /// Retrieve the raw public key from the public key.
-    pub fn into_inner(self) -> ed25519_dalek::PublicKey {
+    pub fn into_inner(self) -> ed25519_dalek::VerifyingKey {
         self.0
     }
 
@@ -157,8 +170,12 @@ impl Key {
 
     /// Deserializes a public key from binary data.
     pub fn from_bytes(bytes: &[u8]) -> Result<Key, crate::Error> {
-        Ok(Key(ed25519_dalek::PublicKey::from_bytes(bytes)
-            .map_err(|err| format!("bad public key: {}", err))?))
+        Ok(Key(ed25519_dalek::VerifyingKey::from_bytes(
+            bytes
+                .try_into()
+                .map_err(|_| "Bad size for public key".to_string())?,
+        )
+        .map_err(|err| format!("bad public key: {}", err))?))
     }
 
     /// Retrieves the binary representation of this public key.

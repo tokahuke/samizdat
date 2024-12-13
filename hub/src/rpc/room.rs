@@ -37,7 +37,7 @@ impl Room {
 
     /// Removes a node from the room, as represented by its socket address.
     pub async fn remove(&self, addr: SocketAddr) {
-        log::info!("dropping client {}", addr);
+        tracing::info!("dropping client {}", addr);
         self.participants.write().await.remove(&addr);
     }
 
@@ -67,9 +67,9 @@ impl Room {
                 && peer_ip.is_ipv6() == current_ip.is_ipv6();
 
             if include {
-                log::debug!("Streaming {peer_ip} for client {current_ip}");
+                tracing::debug!("Streaming {peer_ip} for client {current_ip}");
             } else {
-                log::debug!("Filtering out {peer_ip} from client {current_ip}");
+                tracing::debug!("Filtering out {peer_ip} from client {current_ip}");
             }
 
             include
@@ -104,9 +104,9 @@ impl Room {
                     let filter_map = fut_filter_map.await;
 
                     if filter_map.is_some() {
-                        log::debug!("Mapping in {peer_id} for client {current}")
+                        tracing::debug!("Mapping in {peer_id} for client {current}")
                     } else {
-                        log::debug!("Mapping out {peer_id} from client {current}");
+                        tracing::debug!("Mapping out {peer_id} from client {current}");
                     }
 
                     filter_map

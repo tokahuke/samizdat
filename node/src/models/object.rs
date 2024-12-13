@@ -274,7 +274,7 @@ pub struct ContentStream {
     is_first: bool,
     /// Indicates whether an object header must be skipped for the next chunk.
     skip_header: bool,
-    ///
+    /// The size of the content.
     content_size: AtomicUsize,
 }
 
@@ -353,7 +353,7 @@ pub struct ObjectRef {
 
 impl Droppable for ObjectRef {
     fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        log::info!("Removing object {:?}", self);
+        tracing::info!("Removing object {:?}", self);
 
         let Some(metadata) = self.metadata()? else {
             // Object does not exist.
@@ -462,7 +462,7 @@ impl ObjectRef {
             let hash: Hash = match key.as_ref().try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             };
@@ -485,7 +485,7 @@ impl ObjectRef {
     ) {
         // Do not insert if object already exists. This will overwrite information!
         if ObjectRef::new(hash).exists().unwrap_or(false) {
-            log::warn!("Object {hash} already exists in the database; skipping creation");
+            tracing::warn!("Object {hash} already exists in the database; skipping creation");
             return;
         }
 
@@ -563,7 +563,7 @@ impl ObjectRef {
         };
         let statistics = ObjectStatistics::new(content_size, Duration::from_secs(0));
 
-        log::info!("New object {} with metadata: {:#?}", hash, metadata);
+        tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
 
         let mut batch = rocksdb::WriteBatch::default();
         ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, bookmark);
@@ -681,7 +681,7 @@ impl ObjectRef {
 
             // Warn of incompatible chunk size (big chunks are dealt with somewhere else):
             if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
-                log::warn!(
+                tracing::warn!(
                     "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
                     sized chunks might become illegal in the future.",
                     chunk.len() / 1_000
@@ -692,7 +692,7 @@ impl ObjectRef {
             db().put_cf(Table::ObjectChunks.get(), received_hash, &chunk)?;
 
             // Emit received chunk:
-            log::info!("Chunk {chunk_id} for object {hash} received");
+            tracing::info!("Chunk {chunk_id} for object {hash} received");
             sender.send(Ok((chunk_id, received_hash))).ok();
 
             // Next chunk!
@@ -731,7 +731,7 @@ impl ObjectRef {
 
         drop(chunk_lock);
 
-        log::info!("New object {} with metadata: {:#?}", hash, metadata);
+        tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
 
         Ok(())
     }

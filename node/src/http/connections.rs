@@ -2,52 +2,50 @@
 
 use std::net::SocketAddr;
 
+use axum::routing::get;
+use axum::Router;
+use futures::FutureExt;
 use serde_derive::Serialize;
-use warp::Filter;
 
 use crate::access::AccessRight;
-use crate::balanced_or_tree;
+use crate::security_scope;
 use crate::system::ConnectionStatus;
 
-use super::async_api_reply;
-use super::authenticate;
+use super::ApiResponse;
 
 /// The entrypoint of the hub API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        // Connection CRUD
-        get_connections(),
-    )
+pub fn api() -> Router {
+    Router::new().merge(connections())
 }
 
 #[derive(Debug, Serialize)]
 struct GetConnectionResponse {
     name: String,
     status: ConnectionStatus,
-    direct_addr: SocketAddr,
-    reverse_addr: SocketAddr,
+    addr: SocketAddr,
 }
 
-/// Lists all hubs.
-fn get_connections() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_connections")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageHubs]))
-        .map(|| async move {
-            let connections = crate::hubs()
-                .snapshot()
-                .await
-                .into_iter()
-                .map(|connection| GetConnectionResponse {
-                    name: connection.name().to_string(),
-                    status: connection.status(),
-                    direct_addr: connection.address().direct_addr(),
-                    reverse_addr: connection.address().reverse_addr(),
-                })
-                .collect::<Vec<_>>();
+fn connections() -> Router {
+    Router::new().route(
+        // Lists all hubs.
+        "/",
+        get(|| {
+            async move {
+                let connections = crate::hubs()
+                    .snapshot()
+                    .await
+                    .into_iter()
+                    .map(|connection| GetConnectionResponse {
+                        name: connection.name().to_string(),
+                        status: connection.status(),
+                        addr: connection.address(),
+                    })
+                    .collect::<Vec<_>>();
 
-            Ok(connections)
+                Ok(connections)
+            }
+            .map(ApiResponse)
         })
-        .and_then(async_api_reply)
+        .layer(security_scope!(AccessRight::ManageHubs)),
+    )
 }

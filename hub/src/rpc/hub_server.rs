@@ -70,7 +70,6 @@ impl HubServer {
     }
 }
 
-#[tarpc::server]
 impl Hub for HubServer {
     // Saving for future use.
     async fn set_property(
@@ -86,7 +85,7 @@ impl Hub for HubServer {
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
         let client_addr = self.0.addr;
         self.throttle(move |server| async move {
-            log::debug!("got {:?}", query);
+            tracing::debug!("got {:?}", query);
 
             // Create a channel address from peer address:
             let channel_id = rand::random::<u32>().into();
@@ -96,7 +95,7 @@ impl Hub for HubServer {
             match REPLAY_RESISTANCE.lock().await.check(&query) {
                 Ok(false) => return QueryResponse::Replayed,
                 Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
+                    tracing::error!("error while checking for replay: {}", err);
                     return QueryResponse::InternalError;
                 }
                 _ => {}
@@ -104,7 +103,7 @@ impl Hub for HubServer {
 
             // If query is empty, nothing to be done:
             if query.content_riddles.is_empty() {
-                log::debug!("query riddle empty");
+                tracing::debug!("query riddle empty");
                 return QueryResponse::EmptyQuery;
             }
 
@@ -147,7 +146,7 @@ impl Hub for HubServer {
                         .await;
 
                     if let Err(err) = outcome {
-                        log::warn!(
+                        tracing::warn!(
                             "Error sending candidate {socket_addr} to {}: {err}",
                             node.addr
                         );
@@ -155,7 +154,7 @@ impl Hub for HubServer {
                 }
             });
 
-            log::debug!("query done");
+            tracing::debug!("query done");
 
             QueryResponse::Resolved {
                 candidate_channel,
@@ -191,7 +190,7 @@ impl Hub for HubServer {
             match REPLAY_RESISTANCE.lock().await.check(&request) {
                 Ok(false) => return vec![],
                 Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
+                    tracing::error!("error while checking for replay: {}", err);
                     return vec![];
                 }
                 _ => {}
@@ -210,7 +209,7 @@ impl Hub for HubServer {
             match REPLAY_RESISTANCE.lock().await.check(&announcement) {
                 Ok(false) => return,
                 Err(err) => {
-                    log::error!("error while checking for replay: {}", err);
+                    tracing::error!("error while checking for replay: {}", err);
                     return;
                 }
                 _ => {}

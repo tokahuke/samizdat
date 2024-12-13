@@ -17,7 +17,6 @@ pub struct ManifestTemplate<'a> {
     pub name: &'a str,
     pub public_key: &'a Key,
     pub ttl: &'a str,
-    pub debug_name: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -38,8 +37,8 @@ impl Manifest {
 
     pub fn find_opt() -> Result<Option<Manifest>, anyhow::Error> {
         for filename in Manifest::FILENAME_HIERARCHY {
-            match fs::read(filename) {
-                Ok(contents) => return Ok(Some(toml::from_slice(&contents)?)),
+            match fs::read_to_string(filename) {
+                Ok(contents) => return Ok(Some(toml::from_str(&contents)?)),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
@@ -55,8 +54,6 @@ impl Manifest {
             anyhow::bail!("`Samizdat.toml` already exists.");
         }
 
-        let debug_name = format!("{}-debug", name);
-
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
             series_owner_name: name,
             keypair: None,
@@ -66,9 +63,8 @@ impl Manifest {
 
         let rendered = crate::manifest::ManifestTemplate {
             name,
-            public_key: &Key::from(response.keypair.public),
+            public_key: &Key::from(response.keypair.verifying_key()),
             ttl: &humantime::format_duration(response.default_ttl).to_string(),
-            debug_name: &debug_name,
         }
         .render()
         .expect("can render");
@@ -76,7 +72,7 @@ impl Manifest {
         fs::write("./Samizdat.toml", rendered)?;
         let manifest = toml::from_str(&fs::read_to_string("./Samizdat.toml")?)?;
 
-        Ok((manifest, PrivateKey::from(response.keypair.secret)))
+        Ok((manifest, PrivateKey::from(response.keypair.to_scalar_bytes())))
     }
 
     pub fn run_build(&self, is_release: bool) -> Result<(), anyhow::Error> {
@@ -98,7 +94,7 @@ pub struct Debug {
     pub name: String,
 }
 
-#[cfg(not(target_os = "darwin"))]
+// #[cfg(not(target_os = "macos"))]
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
 }
@@ -165,8 +161,8 @@ impl PrivateManifest {
     /// Find the private manifest, if one exists.
     pub fn find_opt() -> Result<Option<PrivateManifest>, anyhow::Error> {
         for filename in PrivateManifest::FILENAME_HIERARCHY {
-            match fs::read(filename) {
-                Ok(contents) => return Ok(Some(toml::from_slice(&contents)?)),
+            match fs::read_to_string(filename) {
+                Ok(contents) => return Ok(Some(toml::from_str(&contents)?)),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
             }
@@ -194,8 +190,8 @@ impl PrivateManifest {
 
         let rendered_private = crate::manifest::PrivateManifestTemplate {
             private_key,
-            private_key_debug: &PrivateKey::from(response.keypair.secret),
-            public_key_debug: &Key::from(response.keypair.public),
+            private_key_debug: &PrivateKey::from(response.keypair.to_scalar_bytes()),
+            public_key_debug: &Key::from(response.keypair.verifying_key()),
         }
         .render()
         .expect("can render");

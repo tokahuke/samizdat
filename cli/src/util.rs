@@ -44,12 +44,6 @@ pub fn print_paths(paths: &[String], delimiter: char) {
 
 pub trait Unit: Sized {
     const SYMBOL: &'static str;
-    fn value(value: f64) -> Metric<Self> {
-        Metric {
-            value,
-            _phantom: std::marker::PhantomData,
-        }
-    }
 }
 
 pub struct Metric<U: Unit> {

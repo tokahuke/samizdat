@@ -1,0 +1,11 @@
+[package]
+name = "test-quic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.42.0", features = ["rt-multi-thread", "macros", "net", "time", "io-util"] }
+samizdat-common = { path = "../common"}
+serde_derive = "1.0.215"
+futures = "0.3.31"
+serde = "1.0.216"

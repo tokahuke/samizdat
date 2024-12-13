@@ -2,7 +2,7 @@
 
 use structopt::StructOpt;
 
-use samizdat_common::address::{AddrResolutionMode, AddrToResolve, HubAddr};
+use samizdat_common::address::AddrResolutionMode;
 
 /// The Samizdat Hub.
 #[derive(StructOpt)]
@@ -12,7 +12,7 @@ pub struct Cli {
     pub verbose: bool,
     /// The socket addresses for nodes to connect as clients.
     #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
-    pub addresses: Vec<HubAddr>,
+    pub addresses: Vec<String>,
     /// Path to the locally stored program data.
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
     pub data: String,
@@ -42,7 +42,7 @@ pub struct Cli {
     pub max_candidates: usize,
     /// Other servers to which to listen to.
     #[structopt(env = "SAMIZDAT_PARTNERS", long)]
-    pub partners: Option<Vec<AddrToResolve>>,
+    pub partners: Option<Vec<String>>,
     /// The mode of resolution to be used with domain names. Must be one of `ensure-ipv4`,
     /// `ensure-ipv6`, `prefer-ipv6`, `prefer-ipv4` or `use-both`. Note that the `prefer-*` options
     /// will resolve to the other IP version if no address is available for the current version.

@@ -27,12 +27,12 @@ trait Migration: Debug {
             let migration_key = format!("{self:?}");
 
             // This should be atomic, but... oh! dear...
-            log::info!("Applying migration {self:?}...");
+            tracing::info!("Applying migration {self:?}...");
             self.up()?;
             db().put_cf(Table::Migrations.get(), migration_key.as_bytes(), [])?;
-            log::info!("... done.");
+            tracing::info!("... done.");
         } else {
-            log::info!("Migration {self:?} already up.");
+            tracing::info!("Migration {self:?} already up.");
         }
 
         // Tail-recurse:

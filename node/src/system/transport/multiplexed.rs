@@ -25,7 +25,7 @@ async fn create_channel(
     channel_id: ChannelId,
     stream: RecvStream,
 ) {
-    log::info!("creating new channel {}", channel_id);
+    tracing::info!("creating new channel {}", channel_id);
     let (sender, recv) = mpsc::unbounded_channel();
     sender.send(stream).ok();
     guard.insert(channel_id, sender);
@@ -45,13 +45,13 @@ async fn receiver_task(
 
                 // Receive the channel id for this stream.
                 if let Err(err) = stream.read_exact(&mut id_buf).await {
-                    log::warn!("Error reading channel id from stream: {}", err);
+                    tracing::warn!("Error reading channel id from stream: {}", err);
                     continue;
                 }
 
                 // Decode id:
                 let channel_id = u32::from_be_bytes(id_buf).into();
-                log::info!("stream arrived for channel {}", channel_id);
+                tracing::info!("stream arrived for channel {}", channel_id);
 
                 // Send to the appropriate channel.
                 let guard = senders.lock().await;
@@ -65,15 +65,15 @@ async fn receiver_task(
                 }
             }
             Err(ConnectionError::Reset) => {
-                log::info!("Connection reset");
+                tracing::info!("Connection reset");
                 break;
             }
             Err(ConnectionError::TimedOut) => {
-                log::info!("Connection timed out");
+                tracing::info!("Connection timed out");
                 break;
             }
             Err(err) => {
-                log::warn!("error receiving new stream: {}", err);
+                tracing::warn!("error receiving new stream: {}", err);
                 break;
             }
         }
@@ -104,25 +104,25 @@ impl Multiplexed {
 
     pub async fn send(&self, channel_id: ChannelId, payload: &[u8]) -> Result<(), crate::Error> {
         let mut stream = self.connection.open_uni().await?;
-        log::debug!("stream opened for {}", channel_id);
+        tracing::debug!("stream opened for {}", channel_id);
 
         stream
             .write_all(&u32::from(channel_id).to_be_bytes())
             .await
             .map_err(io::Error::from)?;
-        log::debug!("channel id sent for {}", channel_id);
+        tracing::debug!("channel id sent for {}", channel_id);
 
         stream.write_all(payload).await.map_err(io::Error::from)?;
-        log::debug!("payload streamed for {}", channel_id);
+        tracing::debug!("payload streamed for {}", channel_id);
 
-        stream.finish().await.map_err(io::Error::from)?;
-        log::debug!("payload sent for {}", channel_id);
+        stream.finish().map_err(io::Error::from)?;
+        tracing::debug!("payload sent for {}", channel_id);
 
         Ok(())
     }
 
     pub async fn initiate(&self, channel_id: ChannelId) -> mpsc::UnboundedReceiver<RecvStream> {
-        log::info!("initiating channel id {}", channel_id);
+        tracing::info!("initiating channel id {}", channel_id);
         let (sender, recv) = mpsc::unbounded_channel();
         let mut guard = self.senders.lock().await;
         guard.insert(channel_id, sender);
@@ -133,7 +133,7 @@ impl Multiplexed {
         &self,
         channel_id: ChannelId,
     ) -> Option<mpsc::UnboundedReceiver<RecvStream>> {
-        log::info!("expecting channel id {}", channel_id);
+        tracing::info!("expecting channel id {}", channel_id);
         self.matcher.expect(channel_id).await
     }
 

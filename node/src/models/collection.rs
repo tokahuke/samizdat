@@ -87,13 +87,13 @@ impl<'a> From<&'a str> for ItemPath<'a> {
     }
 }
 
-impl<'a> Display for ItemPath<'a> {
+impl Display for ItemPath<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<'a> ItemPath<'a> {
+impl ItemPath<'_> {
     /// Retrieves the string representation of this path, in its canonical form.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -192,7 +192,7 @@ impl Droppable for CollectionItem {
         let path = self.name.as_path();
         let locator = self.collection.locator_for(path);
 
-        log::info!("Removing item {}: {:#?}", locator, self);
+        tracing::info!("Removing item {}: {:#?}", locator, self);
 
         batch.delete_cf(Table::CollectionItemLocators.get(), locator.path());
         batch.delete_cf(Table::CollectionItems.get(), locator.hash());
@@ -211,12 +211,12 @@ impl CollectionItem {
         let key = Hash::from_bytes(self.name.0.as_bytes());
 
         if !is_included {
-            log::error!("Inclusion proof failed for {:?}", self);
+            tracing::error!("Inclusion proof failed for {:?}", self);
             return false;
         }
 
         if &key != self.inclusion_proof.claimed_key() {
-            log::error!("Key is different from claimed key: {:?}", self);
+            tracing::error!("Key is different from claimed key: {:?}", self);
             return false;
         }
 
@@ -254,7 +254,7 @@ impl CollectionItem {
             let hash: Hash = match key.as_ref().try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             };
@@ -285,7 +285,7 @@ impl CollectionItem {
             locator.hash(),
         );
 
-        log::info!("Inserting item {}: {:#?}", locator, self);
+        tracing::info!("Inserting item {}: {:#?}", locator, self);
     }
 
     /// Inserts this collection item in the database.
@@ -424,13 +424,13 @@ pub struct Locator<'a> {
     name: ItemPath<'a>,
 }
 
-impl<'a> Display for Locator<'a> {
+impl Display for Locator<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.collection.hash, self.name.0)
     }
 }
 
-impl<'a> Locator<'a> {
+impl Locator<'_> {
     /// Returns the corresponding hash for this locator.
     pub fn hash(&self) -> Hash {
         self.collection

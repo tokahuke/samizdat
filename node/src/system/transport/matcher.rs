@@ -49,7 +49,7 @@ impl<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> Matcher<K, T> 
             tokio::spawn(async move {
                 sleep(Duration::from_millis(10_000)).await;
                 if cloned.lock().await.expecting.remove(&addr).is_some() {
-                    log::warn!("Key {addr}, which was expected, never arrived");
+                    tracing::warn!("Key {addr}, which was expected, never arrived");
                 }
             });
 
@@ -72,7 +72,7 @@ impl<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> Matcher<K, T> 
             tokio::spawn(async move {
                 sleep(Duration::from_millis(10_000)).await;
                 if cloned.lock().await.arrived.remove(&addr).is_some() {
-                    log::warn!("Key {addr}, which arrived, was never expected");
+                    tracing::warn!("Key {addr}, which arrived, was never expected");
                 }
             });
         }
