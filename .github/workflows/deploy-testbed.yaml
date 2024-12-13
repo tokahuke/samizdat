@@ -16,7 +16,7 @@ jobs:
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly-2023-11-02
+        toolchain: nightly
         default: true
         profile: minimal
 
