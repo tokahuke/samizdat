@@ -145,6 +145,10 @@ impl Hint {
     pub fn len(&self) -> usize {
         self.length as usize
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
 }
 
 // #[cfg(test)]

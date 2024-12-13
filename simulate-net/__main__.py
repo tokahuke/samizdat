@@ -3,13 +3,23 @@ from __future__ import annotations
 import json
 import subprocess
 import traceback
-import ryan # pip install ryan-lang
+import ryan  # pip install ryan-lang
 
 from dataclasses import dataclass
 from time import sleep
 
+from json import JSONEncoder
 
-IS_RELEASE = True
+
+def wrapped_default(self, obj):
+    return getattr(obj.__class__, "__json__", wrapped_default.default)(obj)
+
+
+wrapped_default.default = JSONEncoder().default
+JSONEncoder.default = wrapped_default  # type:ignore
+
+
+IS_RELEASE = False
 
 
 def folder():
@@ -17,13 +27,14 @@ def folder():
         return "release"
     else:
         return "debug"
-    
+
+
 def opt_flag():
     if IS_RELEASE:
         return ["--release"]
     else:
         return []
-    
+
 
 def wait_all(processes: list[subprocess.Popen]) -> None:
     for process in processes:
@@ -56,6 +67,9 @@ PORT_BROKER = PortBroker()
 class Node:
     node_id: str
 
+    def __json__(self) -> str:
+        return self.node_id
+
     def port(self) -> int:
         return PORT_BROKER.port_for(self.node_id)
 
@@ -78,7 +92,7 @@ class Node:
             "hub",
             "new",
             hub.address(),
-            "EnsureIpv4",
+            "EnsureIpv6",
         ]
 
 
@@ -86,22 +100,21 @@ class Node:
 class Hub:
     hub_id: str
 
+    def __json__(self) -> str:
+        return self.hub_id
+
     def direct_port(self) -> int:
         return PORT_BROKER.port_for(f"{self.hub_id}-direct")
-
-    def reverse_port(self) -> int:
-        return PORT_BROKER.port_for(f"{self.hub_id}-reverse")
 
     def http_port(self) -> int:
         return PORT_BROKER.port_for(f"{self.hub_id}-http")
 
     def address(self) -> str:
-        return f"[::1]:{self.direct_port()}/{self.reverse_port()}"
+        return f"[::1]:{self.direct_port()}"
 
     def report_config(self) -> dict:
         return {
             "address": self.address(),
-            "http-port": self.http_port(),
         }
 
     def command(self, hubs: list[Hub]) -> list[str]:
@@ -122,9 +135,10 @@ class Graph:
     connections: list[tuple[str, str]]
 
     def run(self) -> None:
-        assert len(set(self.nodes + self.hubs)) == len(self.nodes + self.hubs), \
-            "Node and hub names have to be unique"
-        
+        assert len(set(self.nodes + self.hubs)) == len(
+            self.nodes + self.hubs
+        ), "Node and hub names have to be unique"
+
         nodes = {node_id: Node(node_id) for node_id in self.nodes}
         hubs = {hub_id: Hub(hub_id) for hub_id in self.hubs}
         connections = {}
@@ -136,34 +150,35 @@ class Graph:
                 dest_hub = hubs[dest]
             except KeyError:
                 raise ValueError(f"No such hub {dest!r}")
-            
+
             connections.setdefault(origin, []).append(dest_hub)
 
-        node_commands = [
-            node.command() for node in nodes.values()
-        ]
+        node_commands = [node.command() for node in nodes.values()]
         hub_commands = [
             hub.command(connections.get(hub_id, [])) for hub_id, hub in hubs.items()
         ]
 
         report_config = {
-            **{
-                node_id: node.report_config() for node_id, node in nodes.items()
-            },
-            **{
-                hub_id: hub.report_config() for hub_id, hub in hubs.items()
-            },
+            **{node_id: node.report_config() for node_id, node in nodes.items()},
+            **{hub_id: hub.report_config() for hub_id, hub in hubs.items()},
+            "connections": connections,
         }
 
         print("Configuration:", json.dumps(report_config, indent=4, ensure_ascii=False))
         input("Press any key to continue...")
 
         # Compile stuff:
-        wait_all([
-            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat-node"]),
-            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat-hub"]),
-            subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat"]),
-        ])
+        wait_all(
+            [
+                subprocess.Popen(
+                    ["cargo", "build", *opt_flag(), "--bin", "samizdat-node"]
+                ),
+                subprocess.Popen(
+                    ["cargo", "build", *opt_flag(), "--bin", "samizdat-hub"]
+                ),
+                subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat"]),
+            ]
+        )
 
         # Launch processes:
         subprocesses = [
@@ -172,11 +187,13 @@ class Graph:
         sleep(1.0)
 
         # Set connections up
-        wait_all([
-            subprocess.Popen(nodes[origin].connect_to_hub(hubs[dest]))
-            for origin, dest in self.connections
-            if origin in nodes
-        ])
+        wait_all(
+            [
+                subprocess.Popen(nodes[origin].connect_to_hub(hubs[dest]))
+                for origin, dest in self.connections
+                if origin in nodes
+            ]
+        )
 
         try:
             wait_all(subprocesses)
@@ -186,17 +203,17 @@ class Graph:
             traceback.print_exc()
         finally:
             print("Sending SIGTERM to all child processes...")
-            
+
             for process in subprocesses:
                 process.terminate()
                 process.wait()
-            
+
             print("... all processes terminated")
 
 
 if __name__ == "__main__":
     with open("network.ryan") as network_desc:
-        config = ryan.from_str(network_desc.read()) # type: ignore
+        config = ryan.from_str(network_desc.read())  # type: ignore
         graph = Graph(**config["graph"])
 
     graph.run()

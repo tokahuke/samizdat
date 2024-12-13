@@ -1,15 +1,9 @@
-use serde_derive::Serialize;
 use tabled::Tabled;
 
 use super::show_table;
 use crate::api::{self, get_auths};
 
 pub async fn grant(scope: String, granted_rights: Vec<String>) -> Result<(), anyhow::Error> {
-    #[derive(Serialize)]
-    struct Request {
-        granted_rights: Vec<String>,
-    }
-
     let granted = api::patch_auth(&scope, api::PatchAuthRequest { granted_rights }).await?;
 
     if !granted {

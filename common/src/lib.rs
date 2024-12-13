@@ -5,24 +5,22 @@ pub mod blockchain;
 pub mod cipher;
 pub mod heap_entry;
 pub mod keyed_channel;
-pub mod logger;
 pub mod pow;
 pub mod quic;
 pub mod rpc;
+pub mod transport;
 
 mod error;
 mod hash;
 mod patricia_map;
 mod pki;
 mod riddles;
-mod transport;
 
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{Hint, MessageRiddle, Riddle};
-pub use transport::BincodeOverQuic;
 
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;

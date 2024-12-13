@@ -2,18 +2,19 @@
 //! private key.
 
 use chrono::Utc;
-use ed25519_dalek::Keypair;
+use ed25519_dalek::SigningKey;
 use futures::prelude::*;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use samizdat_common::rpc::QueryKind;
-use samizdat_common::Hint;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use tokio::time::Instant;
 
-use samizdat_common::HASH_LEN;
 use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
+use samizdat_common::Hint;
+use samizdat_common::HASH_LEN;
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
 use crate::db::Table;
@@ -28,7 +29,7 @@ pub struct SeriesOwner {
     /// An _internal_ name to identify this keypair.
     name: String,
     /// The keypair that controls the series.
-    keypair: Keypair,
+    keypair: SigningKey,
     /// The default time-to-leave. This is the recommended minimum period peers should
     /// wait to query the network for new connections.
     #[serde(with = "humantime_serde")]
@@ -74,7 +75,7 @@ impl SeriesOwner {
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
             name: name.to_owned(),
-            keypair: Keypair::generate(&mut rand::rngs::OsRng {}),
+            keypair: SigningKey::generate(&mut rand::rngs::OsRng {}),
             default_ttl,
             is_draft,
         };
@@ -91,17 +92,13 @@ impl SeriesOwner {
     /// Creates a [`SeriesOwner`] from existing data and inserts it into the database.
     pub fn import(
         name: &str,
-        public_key: Key,
         private_key: PrivateKey,
         default_ttl: Duration,
         is_draft: bool,
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
             name: name.to_owned(),
-            keypair: Keypair {
-                public: public_key.into_inner(),
-                secret: private_key.into_inner(),
-            },
+            keypair: private_key.into(),
             default_ttl,
             is_draft,
         };
@@ -139,7 +136,7 @@ impl SeriesOwner {
     /// Retrieves the series reference for this series owner.
     pub fn series(&self) -> SeriesRef {
         SeriesRef {
-            public_key: Key::new(self.keypair.public),
+            public_key: Key::new(self.keypair.verifying_key()),
         }
     }
 
@@ -162,7 +159,7 @@ impl SeriesOwner {
                 },
                 &self.keypair,
             ),
-            public_key: Key::new(self.keypair.public),
+            public_key: Key::new(self.keypair.verifying_key()),
             is_draft: self.is_draft,
         }
     }
@@ -269,14 +266,14 @@ impl SeriesRef {
                         match bincode::deserialize(&value) {
                             Ok(series) => return Ok(Some(series)),
                             Err(err) => {
-                                log::warn!("{}", err);
+                                tracing::warn!("{}", err);
                                 break;
                             }
                         }
                     }
                 }
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             }
@@ -291,7 +288,7 @@ impl SeriesRef {
         for item in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
             let (_, owner) = item?;
             let owner: SeriesOwner = bincode::deserialize(&owner)?;
-            if self.public_key.as_ref() == &owner.keypair.public {
+            if self.public_key.as_ref() == &owner.keypair.verifying_key() {
                 return Ok(true);
             }
         }
@@ -301,7 +298,7 @@ impl SeriesRef {
 
     /// Set this series as just recently refresh.
     pub fn refresh(&self) -> Result<(), crate::Error> {
-        log::info!("Setting series {self} as fresh");
+        tracing::info!("Setting series {self} as fresh");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -313,7 +310,7 @@ impl SeriesRef {
 
     /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
     pub fn mark_delayed(&self) -> Result<(), crate::Error> {
-        log::info!("Setting series {self} as delayed");
+        tracing::info!("Setting series {self} as delayed");
         db().put_cf(
             Table::SeriesFreshnesses.get(),
             self.key(),
@@ -548,7 +545,7 @@ impl Edition {
             .query_with_retry(
                 inventory_content_hash,
                 QueryKind::Item,
-                SystemTime::now() + Duration::from_secs(60),
+                Instant::now() + Duration::from_secs(60),
                 exp_backoff(),
             )
             .await
@@ -579,13 +576,13 @@ impl Edition {
                             .query_with_retry(
                                 content_hash,
                                 QueryKind::Item,
-                                SystemTime::now() + Duration::from_secs(60),
+                                Instant::now() + Duration::from_secs(60),
                                 exp_backoff(),
                             )
                             .map(|_| ()),
                     );
                 } else {
-                    log::info!("Object {hash} already exists in the database. Skipping");
+                    tracing::info!("Object {hash} already exists in the database. Skipping");
                 }
             }
 

@@ -1,9 +1,11 @@
 //! Access rights infrastructure for the node.
 
 use serde_derive::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::sync::OnceLock;
 
 use samizdat_common::Hash;
 
@@ -12,11 +14,11 @@ use crate::cli;
 /// The access token is a file in the local filesystem that grants access to protected
 /// routes in the Samizdat HTTP API. This avoids unauthorized access from scripts running
 /// in webpages.
-static mut ACCESS_TOKEN: Option<String> = None;
+static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// Retrieves the access token. Must be called after initialization.
 pub fn access_token<'a>() -> &'a str {
-    unsafe { ACCESS_TOKEN.as_ref().expect("access token not initialized") }
+    ACCESS_TOKEN.get().expect("access token not initialized")
 }
 
 /// Generates a new access token value.
@@ -46,10 +48,8 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     };
 
     // Set static:
-    log::info!("Node access token is {access_token:?}");
-    unsafe {
-        ACCESS_TOKEN = Some(access_token);
-    }
+    tracing::info!("Node access token is {access_token:?}");
+    ACCESS_TOKEN.set(access_token).ok();
 
     // ... and also piggyback writing port here. I know this is hacky, but...
     let port_path = format!(
@@ -67,8 +67,11 @@ pub fn init_access_token() -> Result<(), crate::Error> {
 }
 
 /// Access rights that can be granted to web applications.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum AccessRight {
+    /// Can access public content. This is granted by default to everyone.
+    Public,
     /// Can create and delete objects.
     ManageObjects,
     /// Can get statistics on object usage.
@@ -85,6 +88,16 @@ pub enum AccessRight {
     ManageIdentities,
     /// Can create and delete connection to Samizdat Hubs.
     ManageHubs,
+}
+
+impl PartialOrd for AccessRight {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match (self, other) {
+            (this, that) if *this as u8 == *that as u8 => Ordering::Equal,
+            (Self::Public, _) => Ordering::Less,
+            _ => return None,
+        })
+    }
 }
 
 /// A name of an entity inside the Samizdat network. An entity can be an object, a

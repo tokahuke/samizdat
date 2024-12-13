@@ -1,23 +1,23 @@
 //! Editions API.
 
-use warp::Filter;
+use axum::routing::get;
+use axum::Router;
+use futures::FutureExt;
 
-use crate::access::AccessRight;
-use crate::balanced_or_tree;
 use crate::models::Edition;
+use crate::{access::AccessRight, security_scope};
 
-use super::{api_reply, authenticate};
+use super::ApiResponse;
 
 /// The entrypoint of the series API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(get_editions(),)
+pub fn api() -> Router {
+    Router::new().merge(editions())
 }
 
-/// Lists all series owners.
-fn get_editions() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_editions")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .map(Edition::get_all)
-        .map(api_reply)
+fn editions() -> Router {
+    Router::new().route(
+        "/",
+        get(|| async move { Edition::get_all() }.map(ApiResponse))
+            .layer(security_scope!(AccessRight::ManageSeries)),
+    )
 }

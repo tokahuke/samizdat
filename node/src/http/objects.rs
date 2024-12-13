@@ -1,192 +1,206 @@
 //! Objects API.
 
-use std::time::SystemTime;
-
-use serde_derive::Deserialize;
-use warp::Filter;
-
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, Query};
+use axum::routing::{delete, get, post};
+use axum::Router;
+use futures::FutureExt;
 use samizdat_common::Hash;
+use serde_derive::Deserialize;
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
+use tokio::time::Instant;
 
 use crate::access::AccessRight;
-use crate::balanced_or_tree;
-use crate::http::async_api_reply;
+use crate::http::ContentType;
 use crate::models::{BookmarkType, Droppable, ObjectHeader, ObjectRef};
+use crate::security_scope;
 
 use super::resolvers::resolve_object;
-use super::{api_reply, authenticate, get_timeout, tuple};
+use super::{ApiResponse, PageResponse, SamizdatTimeout};
 
 /// The entrypoint of the object API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        // Object CRUD
-        get_object(),
-        post_object(),
-        delete_object(),
-        // Bookmark CRUD:
-        get_bookmark(),
-        post_bookmark(),
-        delete_bookmark(),
-        // Statistics:
-        get_stats(),
-        get_byte_usefulness(),
-        // Utils:
-        post_reissue(),
-        get_reference_count(),
-    )
+pub fn api() -> Router {
+    Router::new()
+        .merge(object())
+        .merge(object_bookmark())
+        .merge(object_stats())
 }
 
-/// Gets the contents of an object.
-fn get_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash)
-        .and(warp::get())
-        .and(get_timeout())
-        .and_then(|hash: Hash, timeout| async move {
-            Ok(resolve_object(ObjectRef::new(hash), vec![], SystemTime::now() + timeout).await?)
-                as Result<_, warp::Rejection>
-        })
-        .map(tuple)
-}
+/// Manages the `_objects` route.
+fn object() -> Router {
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct ObjectPath {
+        #[serde_as(as = "DisplayFromStr")]
+        hash: Hash,
+    }
 
-/// Uploads a new object to the database.
-fn post_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     #[serde(rename = "kebab-case")]
-    struct Query {
+    struct PostObjectQuery {
         #[serde(default)]
         bookmark: bool,
         #[serde(default)]
         is_draft: bool,
     }
 
-    warp::path!("_objects")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageObjects]))
-        .and(warp::header("content-type"))
-        .and(warp::query())
-        .and(warp::body::bytes())
-        .map(
-            |content_type: String, query: Query, bytes: bytes::Bytes| async move {
-                let header = ObjectHeader::new(content_type, query.is_draft)?;
-                let object = tokio::task::spawn_blocking(move || {
-                    ObjectRef::build(header, query.bookmark, bytes.into_iter().map(Result::Ok))
-                })
-                .await
-                .expect("Object build task failed")?;
-                Ok(object.hash().to_string())
-            },
-        )
-        .and_then(async_api_reply)
-}
-
-/// Explicitly deletes an object from the local database. This does not have the
-/// effect of deleting it from the whole network. It only clears a local buffer.
-fn delete_object() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash)
-        .and(authenticate([AccessRight::ManageObjects]))
-        .and(warp::delete())
-        .map(|hash| ObjectRef::new(hash).drop_if_exists())
-        .map(api_reply)
-}
-
-/// Bookmarks an object. This will prevent the object from being automatically removed
-/// by the vacuum daemon.
-fn post_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(authenticate([AccessRight::ManageBookmarks]))
-        .and(warp::post())
-        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).mark())
-        .map(api_reply)
-}
-
-/// Returns whether an object is bookmarked or not.
-///
-/// # Warning
-///
-/// By now, this returns `200 OK` even if the object does not exist.
-fn get_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageBookmarks]))
-        .map(|hash| {
-            ObjectRef::new(hash)
-                .bookmark(BookmarkType::User)
-                .is_marked()
-        })
-        .map(api_reply)
-}
-
-/// Returns the internal reference count on the object.
-///
-/// # Warning
-///
-/// By now, this returns `200 OK` even if the object does not exist.
-fn get_reference_count(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "reference-count")
-        .and(warp::get())
-        .and(authenticate([AccessRight::GetObjectStats]))
-        .map(|hash| {
-            ObjectRef::new(hash)
-                .bookmark(BookmarkType::Reference)
-                .get_count()
-        })
-        .map(api_reply)
-}
-
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-fn delete_bookmark() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_objects" / Hash / "bookmark")
-        .and(warp::delete())
-        .and(authenticate([AccessRight::ManageBookmarks]))
-        .map(|hash| ObjectRef::new(hash).bookmark(BookmarkType::User).unmark())
-        .map(api_reply)
-}
-
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-fn post_reissue() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     #[serde(rename = "kebab-case")]
-    struct Query {
+    struct PostReissueQuery {
         #[serde(default)]
         bookmark: bool,
     }
 
-    warp::path!("_objects" / Hash / "reissue")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageObjects]))
-        .and(warp::query())
-        .map(|hash, query: Query| async move {
-            tokio::task::spawn_blocking(move || {
-                ObjectRef::new(hash)
-                    .reissue(query.bookmark)
-                    .map(|reissued| reissued.map(|reissued| reissued.hash().to_string()))
+    Router::new()
+        .route(
+            "/:hash",
+            get(
+                |Path(ObjectPath { hash }): Path<ObjectPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        resolve_object(ObjectRef::new(hash), vec![], Instant::now() + timeout).await
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            "/",
+            post(
+                |ContentType(content_type): ContentType,
+                 Query(query): Query<PostObjectQuery>,
+                 bytes: Bytes| {
+                    async move {
+                        let header = ObjectHeader::new(content_type, query.is_draft)?;
+                        let object = tokio::task::spawn_blocking(move || {
+                            ObjectRef::build(
+                                header,
+                                query.bookmark,
+                                bytes.into_iter().map(Result::Ok),
+                            )
+                        })
+                        .await
+                        .expect("Object build task failed")?;
+                        Ok(object.hash().to_string())
+                    }
+                    .map(ApiResponse)
+                },
+            )
+            .layer(
+                tower::ServiceBuilder::new()
+                    .layer(security_scope!(AccessRight::ManageObjects))
+                    .layer(DefaultBodyLimit::disable()),
+            ),
+        )
+        .route(
+            "/:hash",
+            delete(|Path(ObjectPath { hash }): Path<ObjectPath>| {
+                async move { ObjectRef::new(hash).drop_if_exists() }.map(ApiResponse)
             })
-            .await
-            .expect("Object reissue task panicked")
-        })
-        .and_then(async_api_reply)
+            .layer(security_scope!(AccessRight::ManageObjects)),
+        )
+        .route(
+            "/:hash/reissue",
+            post(
+                |Path(ObjectPath { hash }): Path<ObjectPath>,
+                 Query(query): Query<PostReissueQuery>| {
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            ObjectRef::new(hash)
+                                .reissue(query.bookmark)
+                                .map(|reissued| {
+                                    reissued.map(|reissued| reissued.hash().to_string())
+                                })
+                        })
+                        .await
+                        .expect("Object reissue task panicked")
+                    }
+                    .map(ApiResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::ManageObjects)),
+        )
 }
 
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-fn get_stats() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "stats")
-        .and(warp::get())
-        .and(authenticate([AccessRight::GetObjectStats]))
-        .map(|hash| ObjectRef::new(hash).statistics())
-        .map(api_reply)
+fn object_bookmark() -> Router {
+    Router::new()
+        .route(
+            // Bookmarks an object. This will prevent the object from being automatically removed
+            // by the vacuum daemon.
+            "/:hash/bookmark",
+            post(|Path(hash): Path<Hash>| {
+                async move { ObjectRef::new(hash).bookmark(BookmarkType::User).mark() }
+                    .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageBookmarks)),
+        )
+        .route(
+            // Returns whether an object is bookmarked or not.
+            //
+            // # Warning
+            //
+            // By now, this returns `200 OK` even if the object does not exist.
+            "/:hash/bookmark",
+            get(|Path(hash): Path<Hash>| {
+                async move {
+                    ObjectRef::new(hash)
+                        .bookmark(BookmarkType::User)
+                        .is_marked()
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageBookmarks)),
+        )
+        .route(
+            // Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
+            "/:hash/bookmark",
+            delete(|Path(hash): Path<Hash>| {
+                async move { ObjectRef::new(hash).bookmark(BookmarkType::User).unmark() }
+                    .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageBookmarks)),
+        )
 }
 
-/// Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-fn get_byte_usefulness(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_objects" / Hash / "stats" / "byte-usefulness")
-        .and(warp::get())
-        .and(authenticate([AccessRight::GetObjectStats]))
-        .map(|hash| {
-            ObjectRef::new(hash).statistics().map(|stats| {
-                stats.map(|stats| stats.byte_usefulness(&crate::models::UsePrior::default()))
+fn object_stats() -> Router {
+    Router::new()
+        .route(
+            // Returns the internal reference count on the object.
+            //
+            // # Warning
+            //
+            // By now, this returns `200 OK` even if the object does not exist.
+            "/:hash/reference-count",
+            get(|Path(hash): Path<Hash>| {
+                async move {
+                    ObjectRef::new(hash)
+                        .bookmark(BookmarkType::Reference)
+                        .get_count()
+                }
+                .map(ApiResponse)
             })
-        })
-        .map(api_reply)
+            .layer(security_scope!(AccessRight::GetObjectStats)),
+        )
+        .route(
+            "/:hash/stats",
+            get(|Path(hash): Path<Hash>| {
+                async move { ObjectRef::new(hash).statistics() }.map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::GetObjectStats)),
+        )
+        .route(
+            "/:hash/stats/byte-usefulness",
+            get(|Path(hash): Path<Hash>| {
+                async move {
+                    ObjectRef::new(hash).statistics().map(|stats| {
+                        stats
+                            .map(|stats| stats.byte_usefulness(&crate::models::UsePrior::default()))
+                    })
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::GetObjectStats)),
+        )
 }

@@ -1,10 +1,9 @@
 //! Bridges from the Samizdat world to the HTTP world.
 
+use axum::body::Body;
+use axum::response::{IntoResponse, Response};
 use futures::TryStreamExt;
-use http::Response;
-use hyper::Body;
-use std::convert::TryInto;
-use std::time::SystemTime;
+use tokio::time::Instant;
 
 use samizdat_common::rpc::QueryKind;
 
@@ -23,16 +22,18 @@ pub struct Resolved {
     ext_headers: Vec<(&'static str, String)>,
 }
 
-impl TryInto<Response<Body>> for Resolved {
-    type Error = http::Error;
-    fn try_into(self) -> Result<Response<Body>, http::Error> {
+impl IntoResponse for Resolved {
+    fn into_response(self) -> Response {
         let mut builder = http::Response::builder().header("Content-Type", self.content_type);
 
         for (header, value) in self.ext_headers {
             builder = builder.header(header, value);
         }
 
-        builder.status(http::StatusCode::OK).body(self.body)
+        builder
+            .status(http::StatusCode::OK)
+            .body(self.body)
+            .expect("can build resolved object response")
     }
 }
 
@@ -42,13 +43,13 @@ pub struct NotResolved {
     message: String,
 }
 
-impl TryInto<Response<Body>> for NotResolved {
-    type Error = http::Error;
-    fn try_into(self) -> Result<Response<Body>, http::Error> {
+impl IntoResponse for NotResolved {
+    fn into_response(self) -> Response {
         http::Response::builder()
             .header("Content-Type", "text/plain")
             .status(http::StatusCode::NOT_FOUND)
-            .body(Body::from(self.message))
+            .body(self.message.into())
+            .expect("can build not resolved object response")
     }
 }
 
@@ -79,7 +80,7 @@ async fn resolve_new_object(
                 ),
             ])
             .collect(),
-        body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
+        body: Body::from_stream(content_stream.map_err(|err| err.to_string())),
     })
 }
 
@@ -107,7 +108,7 @@ fn resolve_existing_object(
                 ("X-Samizdat-Query-Duration", "0".to_owned()),
             ])
             .collect(),
-        body: Body::wrap_stream(content_stream.map_err(|err| err.to_string())),
+        body: Body::from_stream(content_stream.map_err(|err| err.to_string())),
     })
 }
 
@@ -115,46 +116,46 @@ fn resolve_existing_object(
 pub async fn resolve_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
-    deadline: SystemTime,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving {object:?}");
+    deadline: Instant,
+) -> Result<Response, crate::Error> {
+    tracing::info!("Resolving {object:?}");
 
     if object.is_null() {
         return Ok(NotResolved {
             message: format!("Object {} not found", object.hash()),
         }
-        .try_into());
+        .into_response());
     }
 
     if object.exists()? {
-        log::info!("Found local hash {}", object.hash());
-        return Ok(resolve_existing_object(object, ext_headers)?.try_into());
+        tracing::info!("Found local hash {}", object.hash());
+        return Ok(resolve_existing_object(object, ext_headers)?.into_response());
     }
 
-    log::info!("Hash {} not found locally. Querying hubs", object.hash());
+    tracing::info!("Hash {} not found locally. Querying hubs", object.hash());
     match hubs()
         .query(*object.hash(), QueryKind::Object, deadline)
         .await
     {
         // This should not be possible!!
         Some(ReceivedItem::ExistingObject(object)) => {
-            log::warn!(
+            tracing::warn!(
                 "After querying hubs, found local hash {}. This should be impossible!",
                 object.hash()
             );
-            Ok(resolve_existing_object(object, ext_headers)?.try_into())
+            Ok(resolve_existing_object(object, ext_headers)?.into_response())
         }
         Some(ReceivedItem::NewObject(received_object)) => {
             Ok(resolve_new_object(received_object, ext_headers)
                 .await?
-                .try_into())
+                .into_response())
         }
         None => {
             let not_resolved = NotResolved {
                 message: format!("Object {} not found", object.hash()),
             };
 
-            Ok(not_resolved.try_into())
+            Ok(not_resolved.into_response())
         }
     }
 }
@@ -164,23 +165,23 @@ pub async fn resolve_object(
 pub async fn resolve_item(
     locator: Locator<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
-    deadline: SystemTime,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
+    deadline: Instant,
+) -> Result<Response, crate::Error> {
     // Add extra headers for item:
     let ext_headers = ext_headers.into_iter().chain([(
         "X-Samizdat-Collection",
         locator.collection().hash().to_string(),
     )]);
 
-    log::info!("Resolving item {locator}");
+    tracing::info!("Resolving item {locator}");
     if let Some(item) = locator.get()? {
         // If the object is known locally, we can simply deffer to querying the object.
-        log::info!("Found item {locator} locally. Resolving object.");
+        tracing::info!("Found item {locator} locally. Resolving object.");
         let object = item.object().expect("found invalid object for item");
         return resolve_object(object, ext_headers, deadline).await;
     }
 
-    log::info!("Item {locator} not found locally. Querying hubs");
+    tracing::info!("Item {locator} not found locally. Querying hubs");
     match hubs()
         .query(locator.hash(), QueryKind::Item, deadline)
         .await
@@ -188,29 +189,29 @@ pub async fn resolve_item(
         Some(ReceivedItem::ExistingObject(object)) if object.is_null() => Ok(NotResolved {
             message: format!("Item {locator} not found"),
         }
-        .try_into()),
+        .into_response()),
         Some(ReceivedItem::ExistingObject(object)) => {
-            log::warn!(
+            tracing::warn!(
                 "After querying hubs, found local hash {} for item {locator}",
                 object.hash()
             );
-            Ok(resolve_existing_object(object, ext_headers)?.try_into())
+            Ok(resolve_existing_object(object, ext_headers)?.into_response())
         }
         Some(ReceivedItem::NewObject(received_object)) => {
-            log::warn!(
+            tracing::warn!(
                 "After querying hubs, found new hash {} for item {locator}",
                 received_object.object_ref().hash()
             );
             Ok(resolve_new_object(received_object, ext_headers)
                 .await?
-                .try_into())
+                .into_response())
         }
         None => {
             let not_resolved = NotResolved {
                 message: format!("Item {locator} not found"),
             };
 
-            Ok(not_resolved.try_into())
+            Ok(not_resolved.into_response())
         }
     }
 }
@@ -221,37 +222,37 @@ pub async fn resolve_series(
     series: SeriesRef,
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
-    deadline: SystemTime,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving series item {series}/{name}");
+    deadline: Instant,
+) -> Result<Response<Body>, crate::Error> {
+    tracing::info!("Resolving series item {series}/{name}");
 
-    log::info!("Ensuring series {series} is fresh");
+    tracing::info!("Ensuring series {series} is fresh");
     if !series.is_fresh()? {
-        log::info!("Series is not fresh. Asking the network...");
+        tracing::info!("Series is not fresh. Asking the network...");
         if let Some(latest) = hubs().get_latest(&series).await {
-            log::info!("Found an edition (new or existing): {latest:?}. Inserting");
+            tracing::info!("Found an edition (new or existing): {latest:?}. Inserting");
             series.advance(&latest)?;
             series.refresh()?;
         } else {
-            log::info!("No edition returned from the network for series {series}. Does it exist?");
+            tracing::info!("No edition returned from the network for series {series}. Does it exist?");
             series.mark_delayed()?;
         }
     }
 
-    log::info!("Trying to find path in freshest edition");
+    tracing::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
     for edition in series.get_editions() {
         let edition = edition?;
         empty = false;
-        log::info!("Trying collection {:?}", edition.collection());
+        tracing::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());
 
         let maybe_item = if let Some(item) = locator.get()? {
-            log::info!("Found item {locator} locally. Resolving object.");
+            tracing::info!("Found item {locator} locally. Resolving object.");
             Some(item)
         } else {
-            log::info!("Item not found locally. Querying hubs.");
+            tracing::info!("Item not found locally. Querying hubs.");
             hubs()
                 .query(locator.hash(), QueryKind::Item, deadline)
                 .await;
@@ -281,14 +282,14 @@ pub async fn resolve_series(
     }
 
     if empty {
-        log::info!("No local editions found for series {series}");
+        tracing::info!("No local editions found for series {series}");
     }
 
     let not_resolved = NotResolved {
         message: format!("Item {series}/{name} not found"),
     };
 
-    Ok(not_resolved.try_into())
+    Ok(not_resolved.into_response())
 }
 
 /// Tries to find an item in a collection, accessed by an identity handle, asking the
@@ -297,15 +298,15 @@ pub async fn resolve_identity(
     identity: &str,
     name: ItemPath<'_>,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
-    deadline: SystemTime,
-) -> Result<Result<Response<Body>, http::Error>, crate::Error> {
-    log::info!("Resolving identity {identity}/{name}");
+    deadline: Instant,
+) -> Result<Response<Body>, crate::Error> {
+    tracing::info!("Resolving identity {identity}/{name}");
     let Some(identity) = identity_provider().get_cached(identity).await? else {
         let not_resolved = NotResolved {
             message: format!("Identity {identity} not found"),
         };
 
-        return Ok(not_resolved.try_into());
+        return Ok(not_resolved.into_response());
     };
 
     resolve_series(identity.series()?, name, ext_headers, deadline).await

@@ -19,8 +19,8 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Interval, MissedTickBehavior};
 
-use samizdat_common::rpc::*;
-use samizdat_common::BincodeOverQuic;
+use samizdat_common::{rpc::*, transport};
+// use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
 
 use crate::models::blacklisted_ip::BlacklistedIp;
@@ -122,7 +122,7 @@ fn candidates_for_resolution(
     mut resolution: Resolution,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> impl Send + Stream<Item = Candidate> {
-    log::debug!("Client {client_addr} requested {resolution:?}");
+    tracing::debug!("Client {client_addr} requested {resolution:?}");
 
     // Go one step down with the resolution:
     let validation_riddle = resolution
@@ -144,13 +144,13 @@ fn candidates_for_resolution(
         CLI.max_resolutions_per_query,
         CLI.max_candidates,
         move |peer_id, peer| {
-            log::debug!("Pairing client {client_addr} with peer {peer_id}");
+            tracing::debug!("Pairing client {client_addr} with peer {peer_id}");
             let resolution = resolution.clone();
             let validation_riddle = validation_riddle.clone();
             let candidate_channels = candidate_channels.clone();
 
             async move {
-                log::debug!("starting resolve for {peer_id}");
+                tracing::debug!("starting resolve for {peer_id}");
                 let experiment = peer.query_statistics.start_experiment();
                 let outcome = peer
                     .throttle(|peer| async { peer.client.resolve(ctx, resolution.clone()).await })
@@ -159,12 +159,12 @@ fn candidates_for_resolution(
                 let response = match outcome {
                     Ok(response) => response,
                     Err(err) => {
-                        log::warn!("error asking {peer_id} to resolve: {err}");
+                        tracing::warn!("error asking {peer_id} to resolve: {err}");
                         return None;
                     }
                 };
 
-                log::debug!("resolve done for {peer_id}");
+                tracing::debug!("resolve done for {peer_id}");
 
                 let validate_riddles = move |riddles: &[Riddle]| {
                     // `>=`: there can be more added nonces down the line because of further redirects.
@@ -237,7 +237,7 @@ async fn edition_for_request(
             |peer_id, peer| {
                 let latest = latest.clone();
                 async move {
-                    log::debug!("starting resolve latest edition for {peer_id}");
+                    tracing::debug!("starting resolve latest edition for {peer_id}");
                     let experiment = peer.edition_statistics.start_experiment();
                     let outcome = peer
                         .throttle(|peer| async { peer.client.get_edition(ctx, latest).await })
@@ -254,7 +254,7 @@ async fn edition_for_request(
                             }
                         }
                         Err(err) => {
-                            log::warn!("error asking {peer_id} for latest: {err}");
+                            tracing::warn!("error asking {peer_id} for latest: {err}");
                             None
                         }
                     }
@@ -267,7 +267,7 @@ async fn edition_for_request(
         .flatten()
         .collect::<Vec<_>>();
 
-    log::debug!("Client {client_addr} receives {responses:?}");
+    tracing::debug!("Client {client_addr} receives {responses:?}");
 
     responses
 }
@@ -295,7 +295,7 @@ async fn announce_edition(
                 match outcome {
                     Ok(_) => Some(()),
                     Err(err) => {
-                        log::warn!("error announcing to peer {peer_id}: {err}");
+                        tracing::warn!("error announcing to peer {peer_id}: {err}");
                         None
                     }
                 }
@@ -317,7 +317,7 @@ pub async fn run_direct(
         .into_iter()
         .map(|addr| {
             let endpoint = samizdat_common::quic::new_default(addr.into());
-            log::info!("Direct server started at {}", endpoint.local_addr()?);
+            tracing::info!("Direct server started at {}", endpoint.local_addr()?);
 
             Ok(endpoint)
         })
@@ -346,105 +346,79 @@ pub async fn run_direct(
             connecting
                 .await
                 .map_err(|err| {
-                    log::warn!("failed to establish QUIC connection with {remote_addr}: {err}")
+                    tracing::warn!("failed to establish QUIC connection with {remote_addr}: {err}")
                 })
                 .ok()
         })
-        .map(|connection| {
-            // Get peer address:
+        .for_each(|connection| {
             let client_addr = utils::socket_to_canonical(connection.remote_address());
-            log::debug!("Incoming connection from {client_addr}");
+            let candidate_channels = candidate_channels.clone();
 
-            // Set up server:
-            let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
-            let server = HubServer::new(client_addr, candidate_channels.clone());
-            let server_task = server::BaseChannel::with_defaults(transport).execute(server.serve());
+            tracing::info!("Incoming connection from {client_addr}");
+            tokio::spawn(async move {
+                if let Err(err) =
+                    setup_connection(connection, client_addr, candidate_channels).await
+                {
+                    tracing::error!("failed to setup connection to {client_addr}: {err}")
+                }
+            });
 
-            log::info!("Connection from node (as server) {client_addr} accepted");
-
-            Some(server_task)
+            async {}
         })
-        .filter_map(|maybe_server| async move { maybe_server })
-        // Max number of channels.
-        .buffer_unordered(CLI.max_connections)
-        .for_each(|_| async {})
         .await;
 
     Ok(())
 }
 
-/// Runs the "reverse" server. This is the system where the Hub acts as a client and the
-/// Node acts as a server. This is used for, e.g., the hub to ask clients whether they can
-/// answer a given query or not.
-pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Error> {
-    let all_incoming = addrs
-        .into_iter()
-        .map(|addr| {
-            let endpoint = samizdat_common::quic::new_default(addr.into());
-            log::info!("Reverse server started at {}", endpoint.local_addr()?);
+async fn setup_connection(
+    connection: quinn::Connection,
+    client_addr: SocketAddr,
+    candidate_channels: KeyedChannel<Candidate>,
+) -> Result<(), crate::Error> {
+    let (direct_transport, reverse_transport) =
+        transport::accept_bincode_transports(connection, MAX_LENGTH).await?;
 
-            Ok(endpoint)
-        })
-        .collect::<Result<Vec<_>, io::Error>>()?;
+    tokio::spawn(async move {
+        // Set up server:
+        let server = HubServer::new(client_addr, candidate_channels);
+        let server_task = server::BaseChannel::with_defaults(direct_transport)
+            .execute(server.serve())
+            .for_each(|request_task| async move {
+                tokio::spawn(request_task);
+            });
 
-    stream::iter(all_incoming)
-        .flat_map(|endpoint| {
-            futures::stream::unfold(endpoint, |endpoint| async move {
-                endpoint
-                    .accept()
-                    .await
-                    .map(|connecting| (connecting, endpoint))
-            })
-        })
-        .filter_map(|connecting| async move {
-            let remote_addr = utils::socket_to_canonical(connecting.remote_address());
+        tracing::info!("Connection from node (as server) {client_addr} accepted");
 
-            // Validate if address is not blacklisted:
-            if BlacklistedIp::get(remote_addr.ip())
-                .expect("db error")
-                .is_some()
-            {
-                return None;
+        server_task.await
+    });
+
+    // Client task:
+    tokio::spawn(async move {
+        // Set up client (remember to drop it when connection is severed):
+        let uninstrumented_client =
+            NodeClient::new(tarpc::client::Config::default(), reverse_transport);
+        let client = tarpc::client::NewClient {
+            client: uninstrumented_client.client,
+            dispatch: uninstrumented_client
+                .dispatch
+                .then(move |outcome| async move {
+                    ROOM.remove(client_addr).await;
+                    outcome
+                }),
+        }
+        .spawn();
+
+        match client.config(context::current()).await {
+            Ok(config) => {
+                tracing::info!("Connection from node (as client) {client_addr} accepted");
+                ROOM.insert(client_addr, Node::new(client_addr, client, config))
+                    .await;
             }
-
-            connecting
-                .await
-                .map_err(|err| log::warn!("failed to establish QUIC connection: {err}"))
-                .ok()
-        })
-        .for_each_concurrent(Some(CLI.max_connections), |connection| async move {
-            // Get peer address:
-            let client_addr = utils::socket_to_canonical(connection.remote_address());
-            log::debug!("Incoming connection from {client_addr}");
-
-            let transport = BincodeOverQuic::new(connection, MAX_LENGTH);
-
-            // Set up client (remember to drop it when connection is severed):
-            let uninstrumented_client =
-                NodeClient::new(tarpc::client::Config::default(), transport);
-            let client = tarpc::client::NewClient {
-                client: uninstrumented_client.client,
-                dispatch: uninstrumented_client
-                    .dispatch
-                    .then(move |outcome| async move {
-                        ROOM.remove(client_addr).await;
-                        outcome
-                    }),
+            Err(err) => {
+                tracing::warn!("Failed to get configuration from node at {client_addr}: {err}")
             }
-            .spawn();
-
-            match client.config(context::current()).await {
-                Ok(config) => {
-                    log::info!("Connection from node (as client) {client_addr} accepted");
-                    ROOM.insert(client_addr, Node::new(client_addr, client, config))
-                        .await;
-                }
-                Err(err) => {
-                    log::warn!("Failed to get configuration from node at {client_addr}: {err}")
-                }
-            }
-        })
-        .await;
+        }
+    });
 
     Ok(())
 }
@@ -454,7 +428,7 @@ pub async fn run_reverse(addrs: Vec<impl Into<SocketAddr>>) -> Result<(), io::Er
 pub async fn run_partners() {
     let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
 
-    log::info!(
+    tracing::info!(
         "Hub-as-node server started at {}",
         endpoint.local_addr().expect("local address exists")
     );

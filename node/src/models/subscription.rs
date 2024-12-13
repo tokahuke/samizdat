@@ -112,11 +112,11 @@ impl SubscriptionRef {
                     .refresh()
                     .await
                     .map_err(|err| {
-                        log::error!("While refreshing {series} with {latest:?}, node got: {err}");
+                        tracing::error!("While refreshing {series} with {latest:?}, node got: {err}");
                     })
                     .ok();
             } else {
-                log::warn!(
+                tracing::warn!(
                     "Subscription for {series} was not able to find any edition for this series"
                 );
             }
@@ -155,14 +155,14 @@ impl SubscriptionRef {
                         match bincode::deserialize(&value) {
                             Ok(subscription) => return Ok(Some(subscription)),
                             Err(err) => {
-                                log::warn!("{}", err);
+                                tracing::warn!("{}", err);
                                 break;
                             }
                         }
                     }
                 }
                 Err(err) => {
-                    log::warn!("{}", err);
+                    tracing::warn!("{}", err);
                     continue;
                 }
             }

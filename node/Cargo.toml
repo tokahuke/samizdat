@@ -5,47 +5,49 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["humantime-serde"]
+
+
 [dependencies]
-async_once = "0.2.6"
-base64-url = "1.4.13"
-bytes = "1.3.0"
-failure = "0.1.8"
-failure_derive = "0.1.8"
+base64-url = "3.0.0"
 futures = "0.3.25"
-getrandom = "0.2.8"
-http = "0.2.8"
-lazy_static = "1.4.0"
-log = "0.4.17"
-log4rs = "1.2.0"
-rocksdb = { version = "0.19.0", default-features = false, features = ["snappy"] }
+http = "1.1.0"
+rocksdb = { version = "0.22.0", default-features = false, features = [
+    "snappy",
+] }
 serde = "1.0.152"
 serde_derive = "1.0.152"
-sha3 = "0.10.6"
 structopt = "0.3.26"
-tarpc = { version = "0.31.0", features = ["tokio1", "serde-transport", "tcp"] }
-tokio = { version = "1.23.0", features = ["rt-multi-thread", "macros", "net", "time"] }
-warp = { version = "0.3.3", default-features = false }
+tarpc = { version = "0.35.0", features = ["tokio1", "serde-transport", "tcp"] }
+tokio = { version = "1.42.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+] }
 samizdat-common = { path = "../common" }
-quinn = "0.9.3"
+quinn = "0.11.6"
 bincode = "1.3.3"
-notify = "5.0.0"
-hyper = { version = "0.14.23", features = ["stream"] }
-aes-gcm-siv = "0.11.1"
-async-trait = "0.1.60"
-ed25519-dalek = { version = "1.0.1", features = ["serde"] }
+ed25519-dalek = { version = "2.1.1", features = ["serde", "rand_core"] }
 chrono = { version = "0.4.23", features = ["serde"] }
 serde_json = "1.0.91"
-humantime-serde = "1.1.1"
-brotli = "3.3.4"
-decorum = "0.3.1"
-semver = "1.0.16"
-rand = "=0.7.3"
+brotli = "7.0.0"
+rand = "0.8.5"
 url = "2.3.1"
-askama = { version = "0.11.1", features = ["serde-json"] }
-strum = "0.24.1"
-strum_macros = "0.24.3"
-serde_with = "2.1.0"
+askama = { version = "0.12.1", features = ["serde-json"] }
+strum = "0.26.3"
+strum_macros = "0.26.4"
+serde_with = "3.11.0"
 num = "0.4.1"
 num-derive = "0.4.0"
 num-traits = "0.2.16"
 ethers = "2.0.10"
+ordered-float = "4.5.0"
+axum = { version = "0.7.9", features = ["macros", "tokio", "json"] }
+axum-extra = { version = "0.9.6", features = ["query"] }
+tower = "0.5.1"
+humantime-serde = "1.1.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"

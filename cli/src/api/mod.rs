@@ -24,7 +24,7 @@ lazy_static! {
 }
 
 pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
-    let response = CLIENT.get(format!("{}/", crate::server())).send().await;
+    let response = CLIENT.get(format!("{}/", crate::server()?)).send().await;
 
     if let Err(error) = response {
         if error.is_connect() {
@@ -42,10 +42,10 @@ where
     R: AsRef<str>,
     Q: for<'a> Deserialize<'a>,
 {
-    let url = format!("{}{}", crate::server(), route.as_ref());
+    let url = format!("{}{}", crate::server()?, route.as_ref());
     let response = CLIENT
         .get(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .send()
         .await
         .with_context(|| format!("error from samizdat-node request GET {}", route.as_ref()))?;
@@ -55,7 +55,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} GET {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -73,10 +73,10 @@ where
     P: Serialize + std::fmt::Debug,
     Q: for<'a> Deserialize<'a>,
 {
-    let url = format!("{}{}", crate::server(), route.as_ref());
+    let url = format!("{}{}", crate::server()?, route.as_ref());
     let response = CLIENT
         .post(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .json(&payload)
         .send()
         .await
@@ -87,7 +87,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    log::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -105,10 +105,10 @@ where
     P: Serialize + std::fmt::Debug,
     Q: for<'a> Deserialize<'a>,
 {
-    let url = format!("{}{}", crate::server(), route.as_ref());
+    let url = format!("{}{}", crate::server()?, route.as_ref());
     let response = CLIENT
         .put(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .json(&payload)
         .send()
         .await
@@ -119,7 +119,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    log::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -137,10 +137,10 @@ where
     P: Serialize,
     Q: for<'a> Deserialize<'a>,
 {
-    let url = format!("{}{}", crate::server(), route.as_ref());
+    let url = format!("{}{}", crate::server()?, route.as_ref());
     let response = CLIENT
         .patch(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .json(&payload)
         .send()
         .await
@@ -151,7 +151,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response PATCH {}", route.as_ref()))?;
 
-    log::info!("{} PATCH {} {}", status, url, text);
+    tracing::info!("{} PATCH {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -168,10 +168,10 @@ where
     R: AsRef<str>,
     Q: for<'a> Deserialize<'a>,
 {
-    let url = format!("{}{}", crate::server(), route.as_ref());
+    let url = format!("{}{}", crate::server()?, route.as_ref());
     let response = CLIENT
         .delete(&url)
-        .header("Authorization", format!("Bearer {}", access_token()))
+        .header("Authorization", format!("Bearer {}", access_token()?))
         .send()
         .await
         .with_context(|| format!("error from samizdat-node request DELETE {}", route.as_ref()))?;
@@ -181,7 +181,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    log::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} GET {} {}", status, url, text);
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(

@@ -18,8 +18,9 @@ cd $pwd &&
 echo "Rendeing homebrew formula"
 
 export SHA256SUM=$(sha256sum $OUTPUT/samizdat.tar.gz | cut -f 1 -d " ")
+export REVISION_COUNT=$(git rev-list --count stable)
 
-envsubst '$SAMIZDAT_PUBLIC_KEY,$VERSION,$SHA256SUM' \
+envsubst '$SAMIZDAT_PUBLIC_KEY,$VERSION,$SHA256SUM,$REVISION_COUNT' \
     < Samizdat.rb \
     > ../../../../homebrew-samizdat/Samizdat.rb &&
 

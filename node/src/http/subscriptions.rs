@@ -1,107 +1,91 @@
 //! Subscriptions API.
 
+use axum::extract::Path;
+use axum::routing::{delete, get, post};
+use axum::{Json, Router};
+use futures::FutureExt;
 use serde_derive::Deserialize;
-use warp::Filter;
 
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
-use crate::balanced_or_tree;
+use crate::http::ApiResponse;
 use crate::models::{Droppable, Subscription, SubscriptionKind, SubscriptionRef};
-
-use super::{api_reply, authenticate};
+use crate::security_scope;
 
 /// The entrypoint of the subscriptions API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        get_subscription(),
-        get_subscriptions(),
-        refresh_subscription(),
-        post_subscription(),
-        delete_subscription(),
-    )
-}
-
-/// Creates a new subscription, i.e., a command to listen and react to new edition announcements.
-fn post_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+pub fn api() -> Router {
     #[derive(Deserialize)]
-    struct Request {
+    struct PostSubscriptionRequest {
         public_key: String,
         #[serde(default)]
         kind: SubscriptionKind,
     }
 
-    warp::path!("_subscriptions")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageSubscriptions]))
-        .and(warp::body::json())
-        .map(|request: Request| {
-            let subscription = SubscriptionRef::build(Subscription::new(
-                request.public_key.parse()?,
-                request.kind,
-            ));
-            Ok(subscription?.public_key.to_string())
-        })
-        .map(api_reply)
-}
+    Router::new()
+        .route(
+            // Creates a new subscription, i.e., a command to listen and react to new edition
+            // announcements.
+            "/",
+            post(|Json(request): Json<PostSubscriptionRequest>| {
+                async move {
+                    let subscription = SubscriptionRef::build(Subscription::new(
+                        request.public_key.parse()?,
+                        request.kind,
+                    ));
+                    Ok(subscription?.public_key.to_string())
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageSubscriptions)),
+        )
+        .route(
+            // Triggers a manual refresh on a subscription.
+            "/:key/refresh",
+            get(|Path(public_key): Path<Key>| {
+                async move {
+                    let subscription_ref = SubscriptionRef::new(public_key);
 
-/// Triggers a manual refresh on a subscription.
-fn refresh_subscription(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_subscriptions" / Key / "refresh")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSubscriptions]))
-        .map(|public_key: Key| {
-            let subscription_ref = SubscriptionRef::new(public_key);
-
-            if subscription_ref.exists()? {
-                subscription_ref.trigger_manual_refresh();
-                Ok(())
-            } else {
-                Err(format!("Node is not subscribed to {subscription_ref}").into())
-            }
-        })
-        .map(api_reply)
-}
-
-/// Removes a subscription.
-fn delete_subscription(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_subscriptions" / Key)
-        .and(warp::delete())
-        .and(authenticate([AccessRight::ManageSubscriptions]))
-        .map(|public_key: Key| {
-            let subscription = SubscriptionRef::new(public_key);
-            let existed = subscription.get()?.is_some();
-            subscription.drop_if_exists()?;
-            Ok(existed)
-        })
-        .map(api_reply)
-}
-
-/// Gets information associates with a series owner
-fn get_subscription() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_subscriptions" / Key)
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSubscriptions]))
-        .map(|public_key: Key| {
-            let maybe_subscription = SubscriptionRef::new(public_key).get()?;
-            Ok(maybe_subscription)
-        })
-        .map(api_reply)
-}
-
-/// Gets information associates with a series owner
-fn get_subscriptions() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_subscriptions")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSubscriptions]))
-        .map(|| {
-            let subscriptions = SubscriptionRef::get_all()?;
-            Ok(subscriptions)
-        })
-        .map(api_reply)
+                    if subscription_ref.exists()? {
+                        subscription_ref.trigger_manual_refresh();
+                        Ok(())
+                    } else {
+                        Err(format!("Node is not subscribed to {subscription_ref}").into())
+                    }
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageSubscriptions)),
+        )
+        .route(
+            // Removes a subscription.
+            "/:key",
+            delete(|Path(public_key): Path<Key>| {
+                async move {
+                    let subscription = SubscriptionRef::new(public_key);
+                    let existed = subscription.get()?.is_some();
+                    subscription.drop_if_exists()?;
+                    Ok(existed)
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageSubscriptions)),
+        )
+        .route(
+            // Gets information associates with a series owner
+            "/:key",
+            get(|Path(public_key): Path<Key>| {
+                async move {
+                    let maybe_subscription = SubscriptionRef::new(public_key).get()?;
+                    Ok(maybe_subscription)
+                }
+                .map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageSubscriptions)),
+        )
+        .route(
+            "/",
+            get(|| async move { SubscriptionRef::get_all() }.map(ApiResponse))
+                .layer(security_scope!(AccessRight::ManageSubscriptions)),
+        )
 }

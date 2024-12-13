@@ -6,7 +6,6 @@ mod http;
 mod models;
 mod replay_resistance;
 mod rpc;
-mod slow_compiler_workaround;
 mod utils;
 
 pub use db::db;
@@ -16,7 +15,7 @@ use std::panic;
 use structopt::StructOpt;
 use tokio::task;
 
-use samizdat_common::{keyed_channel::KeyedChannel, logger};
+use samizdat_common::keyed_channel::KeyedChannel;
 
 lazy_static::lazy_static! {
     /// The command line arguments.
@@ -39,31 +38,38 @@ async fn main() -> Result<(), crate::Error> {
     let _ = &*CLI;
 
     // Init logger:
-    let _ = logger::init_logger(CLI.verbose);
+    tracing_subscriber::fmt().init();
 
     db::init_db()?;
 
+    // Resolve hubs:
+    let mut hubs = vec![];
+
+    for addr in &CLI.addresses {
+        hubs.extend(
+            CLI.resolution_mode
+                .resolve(addr)
+                .await?
+                .into_iter()
+                .map(|tuple| tuple.1),
+        );
+    }
+
     // Spawn services:
     let candidate_channels = KeyedChannel::new();
-    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(
-        CLI.addresses
-            .iter()
-            .map(|addr| addr.direct_addr())
-            .collect(),
-        candidate_channels.clone(),
-    ));
-    let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(
-        CLI.addresses
-            .iter()
-            .map(|addr| addr.reverse_addr())
-            .collect(),
-    ));
+    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(hubs, candidate_channels.clone()));
+    // let reverse_rpc_server = tokio::spawn(crate::rpc::run_reverse(
+    //     CLI.addresses
+    //         .iter()
+    //         .map(|addr| addr.reverse_addr())
+    //         .collect(),
+    // ));
     let partners = tokio::spawn(crate::rpc::run_partners());
     let http_server = tokio::spawn(http::serve());
 
     // Await for services to end:
     maybe_resume_panic(direct_rpc_server.await);
-    maybe_resume_panic(reverse_rpc_server.await);
+    // maybe_resume_panic(reverse_rpc_server.await);
     maybe_resume_panic(http_server.await);
     maybe_resume_panic(partners.await);
 

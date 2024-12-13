@@ -1,220 +1,83 @@
 //! Series API.
 
-use chrono::{SubsecRound, Utc};
+use axum::extract::Path;
+use axum::response::Redirect;
+use axum::routing::get;
+use axum::Router;
+use futures::FutureExt;
 use serde_derive::Deserialize;
-use std::time::{Duration, SystemTime};
-use warp::path::Tail;
-use warp::Filter;
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
+use tokio::time::Instant;
 
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
-use crate::models::{
-    CollectionRef, Droppable, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner,
-    SeriesRef,
-};
-use crate::{balanced_or_tree, hubs};
+use crate::http::{ApiResponse, PageResponse, SamizdatTimeout};
+use crate::models::SeriesRef;
+use crate::security_scope;
 
 use super::resolvers::resolve_series;
-use super::{api_reply, authenticate, get_timeout, tuple};
 
 /// The entrypoint of the series API.
-pub fn api() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    balanced_or_tree!(
-        get_edition_item(),
-        get_series_owner(),
-        get_series_owners(),
-        post_series_owner(),
-        delete_series_owner(),
-        post_edition(),
-        get_all_series(),
-    )
-}
-
-/// Creates a new series owner, i.e., a public-private keypair that allows one to push new
-/// collections to a series.
-fn post_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+pub fn api() -> Router {
+    #[serde_as]
     #[derive(Deserialize)]
-    struct Keypair {
-        public_key: String,
-        private_key: String,
+    struct SeriesPath {
+        #[serde_as(as = "DisplayFromStr")]
+        series_key: Key,
+        #[serde(default)]
+        name: String,
     }
 
-    #[derive(Deserialize)]
-    struct Request {
-        series_owner_name: String,
-        #[serde(default)]
-        keypair: Option<Keypair>,
-        #[serde(default)]
-        is_draft: bool,
-    }
-
-    warp::path!("_seriesowners")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .and(warp::body::json())
-        .map(|request: Request| {
-            if let Some(Keypair {
-                public_key,
-                private_key,
-            }) = request.keypair
-            {
-                SeriesOwner::import(
-                    &request.series_owner_name,
-                    public_key.parse()?,
-                    private_key.parse()?,
-                    Duration::from_secs(3_600),
-                    request.is_draft,
-                )
-            } else {
-                SeriesOwner::create(
-                    &request.series_owner_name,
-                    Duration::from_secs(3_600),
-                    request.is_draft,
-                )
-            }
-        })
-        .map(api_reply)
-}
-
-/// Removes a series owner
-fn delete_series_owner(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_seriesowners" / String)
-        .and(warp::delete())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .map(|series_owner_name: String| {
-            let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            let existed = maybe_owner
-                .map(|owner| owner.drop_if_exists())
-                .transpose()?
-                .is_some();
-            Ok(existed)
-        })
-        .map(api_reply)
-}
-
-/// Gets information associates with a series owner
-fn get_series_owner() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_seriesowners" / String)
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .map(|series_owner_name: String| {
-            let maybe_owner = SeriesOwner::get(&series_owner_name)?;
-            Ok(maybe_owner)
-        })
-        .map(api_reply)
-}
-
-/// Lists all series owners.
-fn get_series_owners() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_seriesowners")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .map(SeriesOwner::get_all)
-        .map(api_reply)
-}
-
-/// Pushes a new collection to the series owner, creating a new edition.
-fn post_edition() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    #[derive(Deserialize)]
-    struct Request {
-        kind: EditionKind,
-        #[serde(default)]
-        #[serde(with = "humantime_serde")]
-        ttl: Option<std::time::Duration>,
-        #[serde(default)]
-        no_announce: bool,
-        #[serde(default)]
-        is_draft: bool,
-        hashes: Vec<(String, String)>,
-    }
-
-    warp::path!("_seriesowners" / String / "editions")
-        .and(warp::post())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .and(warp::body::json())
-        .map(|series_owner_name: String, request: Request| {
-            if let Some(series_owner) = SeriesOwner::get(&series_owner_name)? {
-                // Set edition timestamp:
-                let timestamp = Utc::now().trunc_subsecs(0);
-
-                // Decode hashes:
-                let hashes = request
-                    .hashes
-                    .into_iter()
-                    .map(|(name, hash)| {
-                        Ok((ItemPathBuf::from(name), ObjectRef::new(hash.parse()?)))
-                    })
-                    .collect::<Result<Vec<_>, crate::Error>>()?;
-
-                // Create edition inventory:
-                let inventory_path = match request.kind {
-                    EditionKind::Base => ItemPathBuf::from("_inventory"),
-                    EditionKind::Layer => ItemPathBuf::from(format!("_changelogs/{timestamp}")),
-                };
-                let hashes_with_inventory =
-                    Inventory::insert_into_list(request.is_draft, inventory_path, hashes)?;
-
-                // Create collection:
-                // TODO: can be intensive. Wrap in a `spawn_blocking`.
-                let collection = CollectionRef::build(request.is_draft, hashes_with_inventory)?;
-
-                // Create edition:
-                let edition =
-                    series_owner.advance(collection, timestamp, request.ttl, request.kind)?;
-
-                if !request.no_announce {
-                    let announcement = edition.announcement();
-                    tokio::spawn({
-                        let edition = edition.clone();
-                        async move {
-                            log::info!("Announcing edition {edition:?}");
-                            hubs().announce_edition(&announcement).await
-                        }
-                    });
-                }
-
-                Ok(edition)
-            } else {
-                Err(crate::Error::Message(format!(
-                    "Series owner {} not found",
-                    series_owner_name
-                )))
-            }
-        })
-        .map(api_reply)
-}
-
-/// Gets the content of a collection item using the series public key. This will give the
-/// best-effort latest version for this item.
-fn get_edition_item() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
-    warp::path!("_series" / Key / ..)
-        .and(warp::path::tail())
-        .and(warp::get())
-        .and(get_timeout())
-        .and_then(|series_key: Key, name: Tail, timeout| async move {
-            let series = SeriesRef::new(series_key);
-            Ok(resolve_series(
-                series,
-                name.as_str().into(),
-                [],
-                SystemTime::now() + timeout,
+    Router::new()
+        .route(
+            // Gets the content of a collection item using the series public key. This will give the
+            // best-effort latest version for this item.
+            "/:series_key/*name",
+            get(
+                |Path(SeriesPath { series_key, name }): Path<SeriesPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        let series = SeriesRef::new(series_key);
+                        resolve_series(series, name.as_str().into(), [], Instant::now() + timeout)
+                            .await
+                    }
+                    .map(PageResponse)
+                },
             )
-            .await?) as Result<_, warp::Rejection>
-        })
-        .map(tuple)
-}
-
-/// Lists all known public keys the node has seen, be they locally owned or not.
-fn get_all_series() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("_series")
-        .and(warp::get())
-        .and(authenticate([AccessRight::ManageSeries]))
-        .map(SeriesRef::get_all)
-        .map(api_reply)
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            // Gets the content of a collection item using the series public key. This will give the
+            // best-effort latest version for this item.
+            "/:series_key/",
+            get(
+                |Path(SeriesPath { series_key, .. }): Path<SeriesPath>,
+                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                    async move {
+                        let series = SeriesRef::new(series_key);
+                        resolve_series(series, "".into(), [], Instant::now() + timeout).await
+                    }
+                    .map(PageResponse)
+                },
+            )
+            .layer(security_scope!(AccessRight::Public)),
+        )
+        .route(
+            // Gets the content of a collection item using the series public key. This will give the
+            // best-effort latest version for this item.
+            "/:series_key",
+            get(
+                |Path(SeriesPath { series_key, .. }): Path<SeriesPath>| async move {
+                    Redirect::permanent(&format!("{series_key}/"))
+                },
+            ),
+        )
+        .route(
+            // Lists all known public keys the node has seen, be they locally owned or not.
+            "/",
+            get(|| async move { SeriesRef::get_all() }.map(ApiResponse))
+                .layer(security_scope!(AccessRight::ManageSeries)),
+        )
 }

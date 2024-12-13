@@ -255,7 +255,7 @@ impl ObjectMessage {
             Box::pin(content_stream),
         );
 
-        log::info!("done building object");
+        tracing::info!("done building object");
 
         Ok(tee)
     }
@@ -273,7 +273,7 @@ impl ObjectMessage {
         // TODO play with concurrent streams later.
         chunks
             .try_for_each_concurrent(Some(1), |chunk| {
-                log::debug!("stream for data opened");
+                tracing::debug!("stream for data opened");
                 let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
                     .bytes()
                     .collect::<Result<Vec<_>, _>>()
@@ -284,7 +284,7 @@ impl ObjectMessage {
             })
             .await?;
 
-        log::info!(
+        tracing::info!(
             "finished sending {} to {}",
             object.hash(),
             sender.remote_address()

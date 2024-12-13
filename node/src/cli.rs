@@ -1,6 +1,6 @@
 //! Command line interface for the Samizdat node.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::OnceLock};
 use structopt::StructOpt;
 
 /// The Samizdat Client.
@@ -55,26 +55,24 @@ pub struct Cli {
 }
 
 /// The handle to the CLI parameters.
-static mut CLI: Option<Cli> = None;
+static CLI: OnceLock<Cli> = OnceLock::new();
 
 /// Initializes the [`CLI`] with the values from the command line.
 pub fn init_cli() -> Result<(), crate::Error> {
     let cli = Cli::from_args();
 
-    log::info!("Arguments from command line: {:#?}", cli);
+    tracing::info!("Arguments from command line: {:#?}", cli);
 
     std::fs::create_dir_all(&cli.data)?;
 
-    log::debug!("Initialized data folder");
+    tracing::debug!("Initialized data folder");
 
-    unsafe {
-        CLI = Some(cli);
-    }
+    CLI.set(cli).ok();
 
     Ok(())
 }
 
 /// Returns a handle to the CLI arguments. Only use this after initialization.
 pub fn cli<'a>() -> &'a Cli {
-    unsafe { CLI.as_ref().expect("cli not initialized") }
+    CLI.get().expect("cli not initialized")
 }

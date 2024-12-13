@@ -1,28 +1,25 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use structopt::StructOpt;
 
 use crate::{api::EditionKind, commands};
 
-static mut CLI: Option<Cli> = None;
+static CLI: OnceLock<Cli> = OnceLock::new();
 
-pub fn init_cli() -> Result<(), anyhow::Error> {
+pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
 
-    log::debug!("Arguments from command line: {:#?}", cli);
+    tracing::debug!("Arguments from command line: {:#?}", cli);
 
-    unsafe {
-        CLI = Some(cli);
-    }
-
-    Ok(())
+    cli
 }
 
 pub fn cli<'a>() -> &'a Cli {
-    unsafe { CLI.as_ref().expect("cli not initialized") }
+    CLI.get_or_init(init_cli)
 }
 
-pub fn server() -> String {
-    format!("http://localhost:{}", crate::access_token::port())
+pub fn server() -> Result<String, anyhow::Error> {
+    Ok(format!("http://localhost:{}", crate::access_token::port()?))
 }
 
 #[derive(Clone, Debug, StructOpt)]
