@@ -70,7 +70,7 @@ jobs:
           ./proxy/samizdat-proxy.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service &&
         OWNER=${{ secrets.PROXY_OWNER }} DOMAIN=${{ secrets.PROXY_DOMAIN }} \
-          envsubst ./proxy/proxy.toml.template > ./proxy/proxy.toml &&
+          envsubst < ./proxy/proxy.toml.template > ./proxy/proxy.toml &&
         rsync -avz --mkpath \
           ./proxy/proxy.toml \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/samizdat/proxy.toml
