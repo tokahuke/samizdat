@@ -8,6 +8,8 @@ on:
 
 jobs:
   build:
+    # This is for `workflow_dispatch`. Can only run this job on stable.
+    if: github.ref == 'refs/heads/stable'
     name: Build
     runs-on: ubuntu-latest
     steps:
@@ -45,36 +47,42 @@ jobs:
     - name: Test upload with rsync
       run: |
           echo 'test payload' > test.txt
-          rsync -avz ./test.txt ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:test.txt
+          rsync -avz --mkpath ./test.txt ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:test.txt
       
     - name: Upload with rsync
       run: |
-        rsync -avz \
+        rsync -avz --mkpath \
           ./target/release/samizdat-hub \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
-        rsync -avz \
+        rsync -avz --mkpath \
           ./install/hub/x86_64-unknown-linux-gnu/samizdat-hub.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
         rsync -avz \
           ./target/release/samizdat-node \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
-        rsync -avz \
+        rsync -avz --mkpath \
           ./install/node/x86_64-unknown-linux-gnu/samizdat-node.service \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
-        rsync -avz \
+        rsync -avz --mkpath \
           ./target/release/samizdat-proxy \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
-        rsync -avz \
+        rsync -avz --mkpath \
           ./proxy/samizdat-proxy.service \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service
-        rsync -avz \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service &&
+        OWNER=${{ secrets.PROXY_OWNER }} DOMAIN=${{ secrets.PROXY_DOMAIN }} \
+          envsubst ./proxy/proxy.toml.template > ./proxy/proxy.toml &&
+        rsync -avz --mkpath \
+          ./proxy/proxy.toml \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/samizdat/proxy.toml
+        rsync -avz --mkpath \
           ./target/release/samizdat \
           ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat
     
     - name: Restart services
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
-          "systemctl disable --now samizdat-proxy &&
+          "mkdir -p /etc/samizdat/ &&
+           systemctl disable --now samizdat-proxy &&
            systemctl disable --now samizdat-node &&
            systemctl disable --now samizdat-hub &&
            systemctl enable --now samizdat-hub &&
