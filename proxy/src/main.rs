@@ -14,6 +14,10 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Run server:
     if cli().https {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("failed to install crypto provider `aws_lc_rs`");
+
         loop {
             // Run certbot:
             let status = std::process::Command::new("certbot")
