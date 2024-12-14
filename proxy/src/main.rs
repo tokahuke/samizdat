@@ -10,6 +10,8 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     cli::init_cli()?;
 
+    http::validate_node_is_up().await?;
+
     // Run server:
     if cli().https {
         rustls::crypto::aws_lc_rs::default_provider()

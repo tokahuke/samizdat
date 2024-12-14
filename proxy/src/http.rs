@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use axum::body::Body;
 use axum::extract::OriginalUri;
 use axum::response::Response;
@@ -5,6 +7,7 @@ use axum::routing::get;
 use axum::Router;
 use mime::Mime;
 
+use crate::cli::cli;
 use crate::html::proxy_page;
 
 const PROXY_HEADERS: &[&str] = &[
@@ -37,14 +40,14 @@ pub async fn proxy(original_uri: OriginalUri) -> Response<Body> {
     }
 }
 
-pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, anyhow::Error> {
-    thread_local! {
-        static CLIENT: reqwest::Client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap();
-    }
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("failed to build HTTP client")
+});
 
+pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, anyhow::Error> {
     // Get entity and content hash from page path.
     let path = uri.path();
     let mut split = path.split('/');
@@ -58,8 +61,8 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
     };
 
     // Query node for the web page:
-    let translated = format!("http://localhost:4510{}", path);
-    let response = CLIENT.with(|client| client.get(translated).send()).await?;
+    let translated = format!("{}{}", cli().node, path);
+    let response = CLIENT.get(translated).send().await?;
 
     let response = match response.status().as_u16() {
         status @ 300..=399 => http::Response::builder()
@@ -101,4 +104,25 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
     };
 
     Ok(response)
+}
+
+/// Tests if the node is live at the URL supplied to the CLI.
+pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
+    let response = CLIENT.get(format!("{}/", cli().node)).send().await;
+
+    if let Err(error) = response {
+        if error.is_connect() {
+            anyhow::bail!(
+                "Failed to connect to node at {}. Check if samizdat-node is up and running",
+                cli().node
+            );
+        } else {
+            anyhow::bail!(
+                "Unexpected error testing connection to node at {}: {error}",
+                cli().node
+            );
+        }
+    }
+
+    Ok(())
 }

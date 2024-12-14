@@ -34,11 +34,18 @@ fn collection() -> Router {
 
     #[serde_as]
     #[derive(Deserialize)]
-    struct GetItemPath {
+    struct ItemPath {
         #[serde_as(as = "DisplayFromStr")]
         hash: Hash,
         #[serde(default)]
         name: String,
+    }
+
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct CollectionPath {
+        #[serde_as(as = "DisplayFromStr")]
+        hash: Hash,
     }
 
     Router::new()
@@ -73,9 +80,9 @@ fn collection() -> Router {
         )
         .route(
             // Gets the contents of a collection item.
-            "/:hash/*path",
+            "/:hash/*name",
             get(
-                |Path(GetItemPath { hash, name }): Path<GetItemPath>,
+                |Path(ItemPath { hash, name }): Path<ItemPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
                         let collection = CollectionRef::new(hash);
@@ -93,7 +100,7 @@ fn collection() -> Router {
             // Gets the contents of a collection item.
             "/:hash/",
             get(
-                |Path(GetItemPath { hash, .. }): Path<GetItemPath>,
+                |Path(CollectionPath { hash }): Path<CollectionPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
                         let collection = CollectionRef::new(hash);
@@ -110,7 +117,7 @@ fn collection() -> Router {
         .route(
             "/:hash",
             get(
-                |Path(GetItemPath { hash, .. }): Path<GetItemPath>| async move {
+                |Path(CollectionPath { hash }): Path<CollectionPath>| async move {
                     Redirect::permanent(&format!("{hash}/"))
                 },
             ),

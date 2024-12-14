@@ -2,12 +2,20 @@ use serde_derive::Deserialize;
 use std::{fs, sync::OnceLock};
 use structopt::StructOpt;
 
+fn default_node() -> String {
+    "http://localhost:4510".to_owned()
+}
+
 #[derive(Debug, StructOpt, Deserialize)]
 pub struct Cli {
     /// Reads the command line arguments from a supplied path as toml.
     #[structopt(long)]
     #[serde(default, skip_deserializing)]
     config: Option<String>,
+    /// The node to which to connect to. Defaults to localhost:4510.
+    #[structopt(long, default_value = "http://localhost:4510")]
+    #[serde(default = "default_node")]
+    pub node: String,
     /// The port on which to serve the proxy. This only has effect when serving HTTP only.
     #[structopt(long)]
     #[serde(default)]

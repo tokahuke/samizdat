@@ -28,9 +28,15 @@ pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
 
     if let Err(error) = response {
         if error.is_connect() {
-            return Err(anyhow::anyhow!(
-                "Failed to connect to your local node. Check if samizdat-node is up and running"
-            ));
+            anyhow::bail!(
+                "Failed to connect to node at {}. Check if samizdat-node is up and running",
+                crate::server()?
+            );
+        } else {
+            anyhow::bail!(
+                "Unexpected error testing connection to node at {}: {error}",
+                crate::server()?
+            );
         }
     }
 

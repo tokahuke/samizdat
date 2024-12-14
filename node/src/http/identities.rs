@@ -89,16 +89,9 @@ pub fn api() -> Router {
         .route(
             "/:identity/",
             get(
-                |Path(IdentityPath { identity, .. }): Path<IdentityPath>,
-                 SamizdatTimeout(timeout): SamizdatTimeout| {
+                |Path(identity): Path<String>, SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
-                        resolve_identity(
-                            identity.handle(),
-                            "".into(),
-                            [],
-                            Instant::now() + timeout,
-                        )
-                        .await
+                        resolve_identity(&identity, "".into(), [], Instant::now() + timeout).await
                     }
                     .map(PageResponse)
                 },
@@ -106,11 +99,9 @@ pub fn api() -> Router {
             .layer(security_scope!(AccessRight::Public)),
         )
         .route(
-            "/:hash",
-            get(
-                |Path(IdentityPath { identity, .. }): Path<IdentityPath>| async move {
-                    Redirect::permanent(&format!("{identity}/"))
-                },
-            ),
+            "/:identity",
+            get(|Path(identity): Path<String>| async move {
+                Redirect::permanent(&format!("{identity}/"))
+            }),
         )
 }
