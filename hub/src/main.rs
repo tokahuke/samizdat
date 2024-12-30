@@ -8,7 +8,6 @@ mod replay_resistance;
 mod rpc;
 mod utils;
 
-pub use db::db;
 pub use samizdat_common::Error;
 
 use std::panic;
@@ -20,7 +19,6 @@ use samizdat_common::keyed_channel::KeyedChannel;
 lazy_static::lazy_static! {
     /// The command line arguments.
     pub static ref CLI: cli::Cli = cli::Cli::from_args();
-    // pub static ref DB: rocksdb::DB = rocksdb::DB::open_default(&CLI.db_path).unwrap();
 }
 
 /// Utility for propagating panics through tasks.

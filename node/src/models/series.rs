@@ -4,7 +4,7 @@
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use futures::prelude::*;
-use rocksdb::{Direction, IteratorMode, WriteBatch};
+use jammdb::Tx;
 use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -17,9 +17,9 @@ use samizdat_common::Hint;
 use samizdat_common::HASH_LEN;
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
-use crate::db::Table;
+use crate::db::{writable_tx, Table};
 use crate::system::ReceivedItem;
-use crate::{cli, db, hubs};
+use crate::{cli, hubs};
 
 use super::{BookmarkType, CollectionRef, Droppable, Inventory, ItemPath, ObjectRef};
 
@@ -41,28 +41,28 @@ pub struct SeriesOwner {
 }
 
 impl Droppable for SeriesOwner {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
         // Bad idea to drop series and not really worth it space wise.
-        // self.series().drop_if_exists_with(batch)?;
-        batch.delete_cf(Table::SeriesOwners.get(), self.name.as_bytes());
+        // self.series().drop_if_exists_with(batch)?; // bad!
 
+        Table::SeriesOwners.delete(tx, self.name.as_str());
         Ok(())
     }
 }
 
 impl SeriesOwner {
     /// Inserts the series owner using the supplied [`WriteBatch`].
-    fn insert(&self, batch: &mut WriteBatch) {
+    fn insert<'tx>(&self, tx: &Tx<'tx>) {
         let series = self.series();
 
-        batch.put_cf(
-            Table::SeriesOwners.get(),
-            self.name.as_bytes(),
+        Table::SeriesOwners.put(
+            &tx,
+            self.name.to_string(),
             bincode::serialize(&self).expect("can serialize"),
         );
-        batch.put_cf(
-            Table::Series.get(),
-            series.key(),
+        Table::Series.put(
+            &tx,
+            series.key().to_owned(),
             bincode::serialize(&series).expect("can serialize"),
         );
     }
@@ -80,13 +80,10 @@ impl SeriesOwner {
             is_draft,
         };
 
-        let mut batch = WriteBatch::default();
-
-        owner.insert(&mut batch);
-
-        db().write(batch)?;
-
-        Ok(owner)
+        writable_tx(|tx| {
+            owner.insert(&tx);
+            Ok(owner)
+        })
     }
 
     /// Creates a [`SeriesOwner`] from existing data and inserts it into the database.
@@ -103,34 +100,26 @@ impl SeriesOwner {
             is_draft,
         };
 
-        let mut batch = WriteBatch::default();
-
-        owner.insert(&mut batch);
-
-        db().write(batch)?;
-
-        Ok(owner)
+        writable_tx(|tx| {
+            owner.insert(&tx);
+            Ok(owner)
+        })
     }
 
     /// Retrieves a series owner from the database using the internal series name.
     pub fn get(name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
-        let maybe_serialized = db().get_cf(Table::SeriesOwners.get(), name.as_bytes())?;
-        if let Some(serialized) = maybe_serialized {
-            let owner = bincode::deserialize(&serialized)?;
-            Ok(Some(owner))
-        } else {
-            Ok(None)
-        }
+        Ok(Table::SeriesOwners
+            .atomic_get(name.as_bytes(), |serialized| {
+                bincode::deserialize(&serialized)
+            })
+            .transpose()?)
     }
 
     /// Gets all series owners in this node.
     pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
-        db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start)
-            .map(|item| {
-                let (_, value) = item?;
-                Ok(bincode::deserialize(&value)?)
-            })
-            .collect::<Result<Vec<_>, crate::Error>>()
+        Table::SeriesOwners
+            .range(..)
+            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
     }
 
     /// Retrieves the series reference for this series owner.
@@ -172,35 +161,29 @@ impl SeriesOwner {
         ttl: Option<Duration>,
         kind: EditionKind,
     ) -> Result<Edition, crate::Error> {
-        let mut batch = WriteBatch::default();
-
-        // But first, unbookmark all your old assets...
-        if let Some(edition) = self.series().get_last_edition()? {
-            for object in edition.collection().list_objects() {
-                object?
-                    .bookmark(BookmarkType::Reference)
-                    .unmark_with(&mut batch);
+        writable_tx(|tx| {
+            // But first, unbookmark all your old assets...
+            if let Some(edition) = self.series().get_last_edition() {
+                for object in edition.collection().list_objects() {
+                    object?.bookmark(BookmarkType::Reference).unmark_with(tx);
+                }
             }
-        }
 
-        // ... and bookmark all your new ones
-        for object in collection.list_objects() {
-            object?
-                .bookmark(BookmarkType::Reference)
-                .mark_with(&mut batch);
-        }
+            // ... and bookmark all your new ones
+            for object in collection.list_objects() {
+                object?.bookmark(BookmarkType::Reference).mark_with(tx);
+            }
 
-        let edition = self.sign(collection, timestamp, ttl, kind);
+            let edition = self.sign(collection, timestamp, ttl, kind);
 
-        batch.put_cf(
-            Table::Editions.get(),
-            edition.key(),
-            bincode::serialize(&edition).expect("can serialize"),
-        );
+            Table::Editions.put(
+                tx,
+                edition.key(),
+                bincode::serialize(&edition).expect("can serialize"),
+            );
 
-        db().write(batch)?;
-
-        Ok(edition)
+            Ok(edition)
+        })
     }
 }
 
@@ -256,54 +239,47 @@ impl SeriesRef {
     /// Runs through the database looking for a series that matches the supplied riddle.
     /// Returns `Ok(None)` if none is found.
     pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SeriesRef>, crate::Error> {
-        let it = db().prefix_iterator_cf(Table::Series.get(), hint.prefix());
-
-        for item in it {
-            let (key, value) = item?;
-            match Key::from_bytes(&key) {
+        let outcome = Table::Series
+            .prefix(hint.prefix())
+            .atomic_for_each(|key, value| match Key::from_bytes(&key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        match bincode::deserialize(&value) {
-                            Ok(series) => return Ok(Some(series)),
-                            Err(err) => {
-                                tracing::warn!("{}", err);
-                                break;
-                            }
-                        }
+                        Some(bincode::deserialize(&value).expect("can deserialize"))
+                    } else {
+                        None
                     }
                 }
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    continue;
+                    return None;
                 }
-            }
-        }
+            });
 
-        Ok(None)
+        Ok(outcome)
     }
 
     /// Whether there is a local "series owner" for this series.
     pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
-        for item in db().iterator_cf(Table::SeriesOwners.get(), IteratorMode::Start) {
-            let (_, owner) = item?;
-            let owner: SeriesOwner = bincode::deserialize(&owner)?;
+        let outcome = Table::SeriesOwners.range(..).atomic_for_each(|_, owner| {
+            let owner: SeriesOwner = bincode::deserialize(&owner).expect("can deserialize");
             if self.public_key.as_ref() == &owner.keypair.verifying_key() {
-                return Ok(true);
+                Some(true)
+            } else {
+                None
             }
-        }
+        });
 
-        Ok(false)
+        Ok(outcome.unwrap_or(false))
     }
 
     /// Set this series as just recently refresh.
     pub fn refresh(&self) -> Result<(), crate::Error> {
         tracing::info!("Setting series {self} as fresh");
-        db().put_cf(
-            Table::SeriesFreshnesses.get(),
+        Table::SeriesFreshnesses.atomic_put(
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
-        )?;
+        );
 
         Ok(())
     }
@@ -311,27 +287,28 @@ impl SeriesRef {
     /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
     pub fn mark_delayed(&self) -> Result<(), crate::Error> {
         tracing::info!("Setting series {self} as delayed");
-        db().put_cf(
-            Table::SeriesFreshnesses.get(),
+        Table::SeriesFreshnesses.atomic_put(
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
-        )?;
+        );
 
         Ok(())
     }
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh(&self) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_last_edition()? {
-            if let Some(freshness) = db().get_cf(Table::SeriesFreshnesses.get(), self.key())? {
-                let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(&freshness)?;
-                let ttl =
-                    chrono::Duration::from_std(latest.signed.ttl).expect("can convert duration");
+        let is_fresh = if let Some(latest) = self.get_last_edition() {
+            Table::SeriesFreshnesses
+                .atomic_get(self.key(), |freshness| {
+                    let freshness: chrono::DateTime<chrono::Utc> =
+                        bincode::deserialize(&freshness)?;
+                    let ttl = chrono::Duration::from_std(latest.signed.ttl)
+                        .expect("can convert duration");
 
-                chrono::Utc::now() < freshness + ttl
-            } else {
-                false
-            }
+                    Result::<_, crate::Error>::Ok(chrono::Utc::now() < freshness + ttl)
+                })
+                .transpose()?
+                .unwrap_or(false)
         } else {
             false
         };
@@ -342,32 +319,17 @@ impl SeriesRef {
     /// Returns the latest editions for a series in the local database, no matter the
     /// freshness or local ownership. This iterator is guaranteed to yield items in
     /// reverse chronological order.
-    pub fn get_editions(
-        &'_ self,
-    ) -> impl Send + Sync + Iterator<Item = Result<Edition, crate::Error>> {
-        // This is the maximum key we can have for a series:
-        let prefix = self.key().to_owned();
-        let start = [&*prefix, &i64::MAX.to_be_bytes()].concat();
+    pub fn get_editions(&'_ self) -> impl Send + Sync + Iterator<Item = Edition> {
+        let all_editions: Vec<Edition> = Table::Editions
+            .prefix(self.key())
+            .atomic_collect(|_, value| bincode::deserialize(&value).expect("can deserialize"));
 
-        db().iterator_cf(
-            Table::Editions.get(),
-            IteratorMode::From(&start, Direction::Reverse),
-        )
-        .take_while(move |item| {
-            item.as_ref()
-                .map(|(key, _)| key.starts_with(&prefix))
-                .unwrap_or(true)
-        })
-        .map(|item| {
-            let (_, value) = item?;
-            let edition: Edition = bincode::deserialize(&value)?;
-            Ok(edition)
-        })
+        all_editions.into_iter().rev()
     }
 
     /// Gets the last edition for this series in the database.
-    pub fn get_last_edition(&self) -> Result<Option<Edition>, crate::Error> {
-        self.get_editions().next().transpose()
+    pub fn get_last_edition(&self) -> Option<Edition> {
+        self.get_editions().next()
     }
 
     /// Advances the series with the supplied edition, if the edition is valid.
@@ -380,35 +342,30 @@ impl SeriesRef {
             return Err(crate::Error::DifferentPublicKeys);
         }
 
-        let mut batch = rocksdb::WriteBatch::default();
+        writable_tx(|tx| {
+            // Insert series if you don't have it yet.
+            Table::Series.put(
+                &tx,
+                self.key().to_vec(),
+                bincode::serialize(&self).expect("can serialize"),
+            );
+            Table::Editions.put(
+                &tx,
+                edition.key(),
+                bincode::serialize(&edition).expect("can serialize"),
+            );
 
-        // Insert series if you don't have it yet.
-        batch.put_cf(
-            Table::Series.get(),
-            self.key(),
-            bincode::serialize(&self).expect("can serialize"),
-        );
-        batch.put_cf(
-            Table::Editions.get(),
-            edition.key(),
-            bincode::serialize(&edition).expect("can serialize"),
-        );
+            // TODO: do some cleanup on the old values.
 
-        db().write(batch)?;
-
-        // TODO: do some cleanup on the old values.
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Gets all the series references in the database.
     pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
-        db().iterator_cf(Table::Series.get(), IteratorMode::Start)
-            .map(|item| {
-                let (_, value) = item?;
-                Ok(bincode::deserialize(&value)?)
-            })
-            .collect::<Result<Vec<_>, crate::Error>>()
+        Table::Series
+            .range(..)
+            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
     }
 }
 
@@ -597,12 +554,9 @@ impl Edition {
 
     /// Gets all the editions currently in the database.
     pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
-        db().iterator_cf(Table::Editions.get(), IteratorMode::Start)
-            .map(|item| {
-                let (_, value) = item?;
-                Ok(bincode::deserialize(&value)?)
-            })
-            .collect::<Result<Vec<_>, crate::Error>>()
+        Table::Editions
+            .range(..)
+            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
     }
 }
 

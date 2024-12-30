@@ -19,7 +19,7 @@ use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Interval, MissedTickBehavior};
 
-use samizdat_common::{rpc::*, transport};
+use samizdat_common::{quinn, rpc::*, transport};
 // use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
 

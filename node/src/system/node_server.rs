@@ -201,7 +201,7 @@ impl Node for NodeServer {
 
         let maybe_response =
             if let Some(series) = SeriesRef::find(&latest.key_riddle, &latest.hint).transpose() {
-                match series.and_then(|s| s.get_last_edition()) {
+                match series.map(|s| s.get_last_edition()) {
                     Ok(None) => None,
                     // Do not publish draft editions in non-draft series!
                     Ok(Some(latest)) if latest.is_draft() => None,

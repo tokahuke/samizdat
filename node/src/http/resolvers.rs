@@ -234,7 +234,9 @@ pub async fn resolve_series(
             series.advance(&latest)?;
             series.refresh()?;
         } else {
-            tracing::info!("No edition returned from the network for series {series}. Does it exist?");
+            tracing::info!(
+                "No edition returned from the network for series {series}. Does it exist?"
+            );
             series.mark_delayed()?;
         }
     }
@@ -243,7 +245,6 @@ pub async fn resolve_series(
     let mut empty = true;
 
     for edition in series.get_editions() {
-        let edition = edition?;
         empty = false;
         tracing::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());

@@ -1,5 +1,4 @@
 use futures::prelude::*;
-use quinn::{Connection, ConnectionError, RecvStream};
 use samizdat_common::address::ChannelId;
 use std::collections::BTreeMap;
 use std::io;
@@ -7,6 +6,8 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, MutexGuard};
+
+use samizdat_common::quinn::{Connection, ConnectionError, RecvStream};
 
 use super::matcher::Matcher;
 

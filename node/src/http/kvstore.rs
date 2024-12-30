@@ -5,11 +5,10 @@
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::{Json, Router};
 use futures::FutureExt;
-use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::Deserialize;
 
 use crate::access::{AccessRight, Entity};
-use crate::db::{db, Table};
+use crate::db::Table;
 use crate::security_scope;
 
 use super::auth::SecurityScope;
@@ -40,7 +39,22 @@ pub fn api() -> Router {
 /// The full prefix of the keys to be stored in RocksDB. This provides the desired context
 /// isolation.
 fn key(entity: &Entity, tail: &str) -> Vec<u8> {
-    bincode::serialize(&(entity, tail)).expect("can serialize")
+    let mut key = vec![];
+
+    bincode::serialize_into(&mut key, entity).expect("can serialize");
+    key.push(b'\0');
+    bincode::serialize_into(&mut key, tail).expect("can serialize");
+
+    key
+}
+
+fn prefix(entity: &Entity) -> Vec<u8> {
+    let mut prefix = vec![];
+
+    bincode::serialize_into(&mut prefix, entity).expect("can serialize");
+    prefix.push(b'\0');
+
+    prefix
 }
 
 async fn get(
@@ -48,10 +62,9 @@ async fn get(
     SecurityScope(entity): SecurityScope,
 ) -> ApiResponse<Option<String>> {
     async move {
-        let maybe_value_encoded = db().get_cf(Table::KVStore.get(), key(&entity, &tail))?;
-        let maybe_value =
-            maybe_value_encoded.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-
+        let maybe_value = Table::KVStore.atomic_get(key(&entity, &tail), |bytes| {
+            String::from_utf8_lossy(&bytes).into_owned()
+        });
         Ok(maybe_value)
     }
     .map(ApiResponse)
@@ -71,11 +84,7 @@ async fn put(
     Json(request): Json<PutRequest>,
 ) -> ApiResponse<()> {
     async move {
-        db().put_cf(
-            Table::KVStore.get(),
-            key(&entity, &tail),
-            request.value.as_bytes(),
-        )?;
+        Table::KVStore.atomic_put(key(&entity, &tail), request.value.as_str());
         Ok(())
     }
     .map(ApiResponse)
@@ -85,7 +94,7 @@ async fn put(
 /// Clears a key in the store.
 async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
-        db().delete_cf(Table::KVStore.get(), key(&entity, &tail))?;
+        Table::KVStore.atomic_delete(key(&entity, &tail));
         Ok(())
     }
     .map(ApiResponse)
@@ -95,18 +104,7 @@ async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) 
 /// Clears the whole store.
 async fn clear(SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
-        let mut batch = WriteBatch::default();
-
-        for item in db().iterator_cf(Table::KVStore.get(), IteratorMode::Start) {
-            let (key, _) = item?;
-            let (key_entity, _): (Entity, String) = bincode::deserialize(&key)?;
-            if entity == key_entity {
-                batch.delete_cf(Table::KVStore.get(), &key);
-            }
-        }
-
-        db().write(batch)?;
-
+        Table::KVStore.prefix(prefix(&entity)).atomic_delete();
         Ok(())
     }
     .map(ApiResponse)

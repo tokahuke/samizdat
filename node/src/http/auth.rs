@@ -9,12 +9,11 @@ use axum::{Json, Router};
 use axum_extra::extract::Query as AxumExtraQuery;
 use futures::FutureExt;
 use http::request::Parts;
-use rocksdb::IteratorMode;
 use serde_derive::{Deserialize, Serialize};
 use url::{Host, Origin, Url};
 
 use crate::access::{access_token, AccessRight, Entity};
-use crate::db::{db, Table};
+use crate::db::Table;
 
 use super::ApiResponse;
 
@@ -38,9 +37,8 @@ fn get_auth() -> Router {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
-                let current: Vec<AccessRight> = db()
-                    .get_cf(Table::AccessRights.get(), serialized)?
-                    .map(|rights| bincode::deserialize(&rights))
+                let current: Vec<AccessRight> = Table::AccessRights
+                    .atomic_get(serialized, |rights| bincode::deserialize(&rights))
                     .transpose()?
                     .unwrap_or_default();
 
@@ -60,9 +58,8 @@ fn get_auth_current() -> Router {
         get(|SecurityScope(entity): SecurityScope| {
             async move {
                 let serialized = bincode::serialize(&entity).expect("can serialize");
-                let current: Vec<AccessRight> = db()
-                    .get_cf(Table::AccessRights.get(), serialized)?
-                    .map(|rights| bincode::deserialize(&rights))
+                let current: Vec<AccessRight> = Table::AccessRights
+                    .atomic_get(serialized, |rights| bincode::deserialize(&rights))
                     .transpose()?
                     .unwrap_or_default();
 
@@ -86,18 +83,16 @@ fn get_auths() -> Router {
         "/",
         get(|| {
             async move {
-                let all_auths = db()
-                    .iterator_cf(Table::AccessRights.get(), IteratorMode::Start)
-                    .map(|item| {
-                        let (key, value) = item?;
+                let all_auths = Table::AccessRights
+                    .range(..)
+                    .atomic_collect::<Result<Vec<_>, crate::Error>, _, _>(|key, value| {
                         let entity: Entity = bincode::deserialize(&key)?;
                         let granted_rights: Vec<AccessRight> = bincode::deserialize(&value)?;
                         Ok(Response {
                             entity,
                             granted_rights,
                         })
-                    })
-                    .collect::<Result<Vec<_>, crate::Error>>()?;
+                    })?;
 
                 Ok(all_auths)
             }
@@ -121,9 +116,8 @@ fn patch_auth() -> Router {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
-                let mut current: Vec<AccessRight> = db()
-                    .get_cf(Table::AccessRights.get(), &serialized)?
-                    .map(|rights| bincode::deserialize(&rights))
+                let mut current: Vec<AccessRight> = Table::AccessRights
+                    .atomic_get(&serialized, |rights| bincode::deserialize(&rights))
                     .transpose()?
                     .unwrap_or_default();
 
@@ -131,11 +125,10 @@ fn patch_auth() -> Router {
                 current.sort_unstable_by_key(|right| *right as u8);
                 current.dedup();
 
-                db().put_cf(
-                    Table::AccessRights.get(),
-                    &serialized,
+                Table::AccessRights.atomic_put::<Vec<u8>, Vec<u8>>(
+                    serialized,
                     bincode::serialize(&current).expect("can serialize"),
-                )?;
+                );
 
                 Ok(true)
             }
@@ -152,10 +145,9 @@ fn delete_auth() -> Router {
         delete(|Path(tail): Path<String>| {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
-                db().delete_cf(
-                    Table::AccessRights.get(),
-                    bincode::serialize(&entity).expect("can serialize"),
-                )?;
+
+                Table::AccessRights
+                    .atomic_delete(bincode::serialize(&entity).expect("can serialize"));
 
                 Ok(true) as Result<_, crate::Error>
             }
@@ -403,14 +395,10 @@ fn do_authenticate_security_scope<const N: usize>(
     // Get rights from db (if possible):
     let mut granted_rights: Vec<AccessRight> = entity
         .and_then(|entity| {
-            let serialized = db()
-                .get_cf(
-                    Table::AccessRights.get(),
-                    bincode::serialize(&entity).expect("can serialize"),
-                )
-                .unwrap()?;
-
-            Some(bincode::deserialize(&serialized).unwrap())
+            Table::AccessRights.atomic_get(
+                bincode::serialize(&entity).expect("can serialize"),
+                |serialized| bincode::deserialize(serialized).unwrap(),
+            )
         })
         .unwrap_or_default();
 

@@ -11,3 +11,4 @@ dist/
 network.ryan
 **/*.tfvars
 **/.terraform
+.intentionally-empty-file.o

@@ -3,8 +3,6 @@
 
 use std::fmt::Debug;
 
-use crate::db;
-
 use super::Table;
 
 /// The `&mut DB` guarantees exclusive access to the db, since this type is not clonable.
@@ -17,20 +15,19 @@ trait Migration: Debug {
     fn next(&self) -> Option<Box<dyn Migration>>;
     fn up(&self) -> Result<(), crate::Error>;
 
-    fn is_up(&self) -> Result<bool, crate::Error> {
+    fn is_up(&self) -> bool {
         let migration_key = format!("{self:?}");
-        let value = db().get_cf(Table::Migrations.get(), migration_key.as_bytes())?;
-        Ok(value.is_some())
+        Table::Migrations.atomic_has(migration_key)
     }
 
     fn migrate(&self) -> Result<(), crate::Error> {
-        if !self.is_up()? {
+        if !self.is_up() {
             let migration_key = format!("{self:?}");
 
             // This should be atomic, but... oh! dear...
             tracing::info!("Applying migration {self:?}...");
             self.up()?;
-            db().put_cf(Table::Migrations.get(), migration_key.as_bytes(), [])?;
+            Table::Migrations.atomic_put(migration_key, []);
             tracing::info!("... done.");
         } else {
             tracing::info!("Migration {self:?} already up.");

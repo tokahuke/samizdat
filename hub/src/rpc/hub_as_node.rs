@@ -4,7 +4,6 @@
 
 use futures::future::Either;
 use futures::prelude::*;
-use quinn::{Connection, Endpoint};
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -17,6 +16,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio::time;
 
 use samizdat_common::address::ChannelId;
+use samizdat_common::quinn::{Connection, Endpoint};
 use samizdat_common::{quic, rpc::*, transport};
 
 use crate::CLI;
@@ -70,13 +70,8 @@ impl Node for HubAsNodeServer {
         tracing::info!("got {:?}", resolution);
 
         // Se if you are not being replayed:
-        match REPLAY_RESISTANCE.lock().await.check(&*resolution) {
-            Ok(true) => { /* valid */ }
-            Ok(false) => return ResolutionResponse::NotFound,
-            Err(err) => {
-                tracing::error!("error while checking for replay: {}", err);
-                return ResolutionResponse::NotFound;
-            }
+        if !REPLAY_RESISTANCE.lock().await.check(&*resolution) {
+            return ResolutionResponse::NotFound;
         }
 
         if resolution.content_riddles.is_empty() {
@@ -126,13 +121,8 @@ impl Node for HubAsNodeServer {
         request: Arc<EditionRequest>,
     ) -> Vec<EditionResponse> {
         // Se if you are not being replayed:
-        match REPLAY_RESISTANCE.lock().await.check(&*request) {
-            Ok(true) => { /* valid */ }
-            Ok(false) => return vec![],
-            Err(err) => {
-                tracing::error!("error while checking for replay: {}", err);
-                return vec![];
-            }
+        if !REPLAY_RESISTANCE.lock().await.check(&*request) {
+            return vec![];
         }
 
         edition_for_request(ctx, self.partner, request).await
@@ -140,13 +130,8 @@ impl Node for HubAsNodeServer {
 
     async fn announce_edition(self, ctx: context::Context, announcement: Arc<EditionAnnouncement>) {
         // Se if you are not being replayed:
-        match REPLAY_RESISTANCE.lock().await.check(&*announcement) {
-            Ok(true) => { /* valid */ }
-            Ok(false) => return,
-            Err(err) => {
-                tracing::error!("error while checking for replay: {}", err);
-                return;
-            }
+        if !REPLAY_RESISTANCE.lock().await.check(&*announcement) {
+            return;
         }
 
         announce_edition(ctx, self.partner, announcement).await

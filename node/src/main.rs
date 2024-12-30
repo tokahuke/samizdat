@@ -13,7 +13,6 @@ mod vacuum;
 pub use samizdat_common::Error;
 
 pub use cli::cli;
-pub use db::db;
 
 use std::sync::OnceLock;
 

@@ -23,6 +23,6 @@ pub fn api() -> Router {
         )
         .route(
             "/",
-            get(|| async move { BlacklistedIp::get_all() }.map(ApiResponse)),
+            get(|| async move { Ok(BlacklistedIp::get_all()) }.map(ApiResponse)),
         )
 }

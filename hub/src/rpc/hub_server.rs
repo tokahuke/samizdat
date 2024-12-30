@@ -92,13 +92,8 @@ impl Hub for HubServer {
             let channel_addr = ChannelAddr::new(server.0.addr, channel_id);
 
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&query) {
-                Ok(false) => return QueryResponse::Replayed,
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return QueryResponse::InternalError;
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&query) {
+                return QueryResponse::Replayed;
             }
 
             // If query is empty, nothing to be done:
@@ -187,13 +182,8 @@ impl Hub for HubServer {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&request) {
-                Ok(false) => return vec![],
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return vec![];
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&request) {
+                return vec![];
             }
 
             // Now broadcast the request:
@@ -206,13 +196,8 @@ impl Hub for HubServer {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&announcement) {
-                Ok(false) => return,
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return;
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&announcement) {
+                return;
             }
 
             // Now, broadcast the announcement:

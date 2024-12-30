@@ -1,5 +1,8 @@
 #![feature(ip)]
 
+pub extern crate quinn;
+pub extern crate rustls;
+
 pub mod address;
 pub mod blockchain;
 pub mod cipher;

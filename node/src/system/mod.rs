@@ -13,7 +13,6 @@ pub use transport::PEER_CONNECTIONS;
 
 use futures::prelude::*;
 use futures::stream;
-use quinn::Connection;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::client::NewClient;
@@ -28,6 +27,7 @@ use tokio::time::Instant;
 use samizdat_common::address::ChannelAddr;
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
+use samizdat_common::quinn::Connection;
 use samizdat_common::rpc::*;
 use samizdat_common::Hint;
 use samizdat_common::HASH_LEN;

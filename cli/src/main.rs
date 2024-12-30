@@ -22,7 +22,7 @@ async fn main() {
         if cli::cli().verbose {
             tracing_subscriber::fmt().init();
         }
-        
+
         access_token::init_port()?;
 
         api::validate_node_is_up().await?;

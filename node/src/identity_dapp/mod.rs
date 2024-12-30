@@ -9,10 +9,7 @@ use tokio::sync::RwLock;
 
 use samizdat_common::blockchain;
 
-use crate::{
-    db::{db, Table},
-    models::SeriesRef,
-};
+use crate::{db::Table, models::SeriesRef};
 
 pub static IDENTITY_CACHE: LazyLock<RwLock<BTreeMap<String, Arc<Identity>>>> =
     LazyLock::new(RwLock::default);
@@ -20,16 +17,18 @@ pub static IDENTITY_CACHE: LazyLock<RwLock<BTreeMap<String, Arc<Identity>>>> =
 static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 
 pub fn init_identity_provider() -> Result<(), crate::Error> {
-    let provider =
-        if let Some(endpoint) = db().get_cf(Table::Global.get(), "ethereum_provider_endpoint")? {
+    let provider = if let Some(provider) = Table::Global
+        .atomic_get("ethereum_provider_endpoint", |endpoint| {
             IdentityProvider::new(String::from_utf8_lossy(&endpoint).as_ref())
-        } else {
-            tracing::warn!(
-                "Ethereum provider endpoint not set. Using default: {}",
-                blockchain::DEFAULT_PROVIDER_ENDPOINT
-            );
-            IdentityProvider::new(blockchain::DEFAULT_PROVIDER_ENDPOINT)
-        };
+        }) {
+        provider
+    } else {
+        tracing::warn!(
+            "Ethereum provider endpoint not set. Using default: {}",
+            blockchain::DEFAULT_PROVIDER_ENDPOINT
+        );
+        IdentityProvider::new(blockchain::DEFAULT_PROVIDER_ENDPOINT)
+    };
 
     IDENTITY_PROVIDER.set(provider).ok();
 
@@ -102,12 +101,7 @@ impl IdentityProvider {
             rpc_client.clone(),
         );
 
-        db().put_cf(
-            Table::Global.get(),
-            "ethereum_provider_endpoint",
-            new_endpoint,
-        )
-        .expect("db error");
+        Table::Global.atomic_put("ethereum_provider_endpoint", new_endpoint);
 
         *self.storage_contract.write().await = storage_contract;
     }
