@@ -65,9 +65,12 @@ def _ensure_image(name: str, spec: dict[str, Any], build: bool) -> None:
 
 def ensure_images(
     project: str,
-    images: dict[str, dict[str, Any]],
+    images: dict[str, dict[str, Any]] | None,
     build: bool = False,
 ) -> None:
+    if images is None:
+        return
+
     with ThreadPoolExecutor() as exec:
         for _ in exec.map(
             lambda item: _ensure_image(f"{project}_{item[0]}", item[1], build),
@@ -120,9 +123,12 @@ def _run_builder(name: str, spec: dict[str, Any], build: bool) -> None:
 
 def run_builders(
     project: str,
-    builders: dict[str, dict[str, Any]],
+    builders: dict[str, dict[str, Any]] | None,
     build: bool = False,
 ) -> None:
+    if builders is None:
+        return
+
     with ThreadPoolExecutor() as exec:
         for _ in exec.map(
             lambda item: _run_builder(

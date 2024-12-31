@@ -1,0 +1,3 @@
+[submodule "install/get-samizdat"]
+	path = install/get-samizdat
+	url = git@github.com:tokahuke/get-samizdat.git
