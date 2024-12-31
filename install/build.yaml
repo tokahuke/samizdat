@@ -1,5 +1,4 @@
 project: samizdat-builder
-output: dist
 root: src
 
 env:
@@ -46,6 +45,10 @@ exports:
       samizdat-hub:
         from: rust
         import: /build/target/x86_64-unknown-linux-gnu/release/samizdat-hub
+    proxy:
+      samizdat-proxy:
+        from: rust
+        import: /build/target/x86_64-unknown-linux-gnu/release/samizdat-proxy
   aarch64-apple-darwin:
     node:
       samizdat-node:
