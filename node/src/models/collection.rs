@@ -1,7 +1,7 @@
 //! Collections are a set of objects indexed by human-readable names. Collections are
 //! powered by Patricia trees and inclusion proofs.
 
-use jammdb::Tx;
+use samizdat_common::db::{writable_tx, Droppable, Table as _, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::borrow::Cow;
@@ -12,9 +12,9 @@ use std::str::FromStr;
 
 use samizdat_common::{Hash, Hint, PatriciaMap, PatriciaProof, Riddle};
 
-use crate::db::{writable_tx, Table};
+use crate::db::Table;
 
-use super::{Droppable, ObjectHeader, ObjectRef};
+use super::{ObjectHeader, ObjectRef};
 
 /// The function transforming an arbitrary string into its canonical path form.
 fn normalize(name: &str) -> Cow<str> {
@@ -188,7 +188,7 @@ pub struct CollectionItem {
 }
 
 impl Droppable for CollectionItem {
-    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let path = self.name.as_path();
         let locator = self.collection.locator_for(path);
 
@@ -260,7 +260,7 @@ impl CollectionItem {
 
                 if content_riddle.resolves(&hash) {
                     let item: CollectionItem =
-                        bincode::deserialize(&value).expect("can deserialize");
+                        bincode::deserialize(value).expect("can deserialize");
 
                     match item.object().and_then(|o| o.exists()) {
                         Ok(true) => return Some(Ok(item)),
@@ -277,15 +277,15 @@ impl CollectionItem {
     }
 
     /// Inserts this collection item in the database using the supplied [`Tx`].
-    pub fn insert_with(&self, tx: &Tx<'_>) {
+    pub fn insert_with(&self, tx: &mut WritableTx<'_>) {
         let locator = self.collection.locator_for(self.name.as_path());
 
         Table::CollectionItems.put(
             tx,
-            locator.hash().to_vec(),
+            locator.hash(),
             bincode::serialize(self).expect("can serialize"),
         );
-        Table::CollectionItemLocators.put(tx, locator.path(), locator.hash().to_vec());
+        Table::CollectionItemLocators.put(tx, locator.path(), locator.hash());
 
         tracing::info!("Inserting item {}: {:#?}", locator, self);
     }
@@ -307,7 +307,7 @@ pub struct CollectionRef {
 }
 
 impl Droppable for CollectionRef {
-    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         for name in self.list() {
             if let Some(item) = self.get(name.as_path())? {
                 item.drop_if_exists_with(tx)?;
@@ -444,7 +444,7 @@ impl Locator<'_> {
     /// Tries to retrieve the corresponding item from the database.
     pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
         Ok(Table::CollectionItems
-            .atomic_get(self.hash(), |item| bincode::deserialize(&item))
+            .atomic_get(self.hash(), |item| bincode::deserialize(item))
             .transpose()?)
     }
 

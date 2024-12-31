@@ -4,13 +4,14 @@ use axum::extract::Path;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::FutureExt;
+use samizdat_common::db::Droppable;
 use serde_derive::Deserialize;
 
 use samizdat_common::Key;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::{Droppable, Subscription, SubscriptionKind, SubscriptionRef};
+use crate::models::{Subscription, SubscriptionKind, SubscriptionRef};
 use crate::security_scope;
 
 /// The entrypoint of the subscriptions API.

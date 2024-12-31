@@ -5,6 +5,7 @@
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::{Json, Router};
 use futures::FutureExt;
+use samizdat_common::db::Table as _;
 use serde_derive::Deserialize;
 
 use crate::access::{AccessRight, Entity};
@@ -63,7 +64,7 @@ async fn get(
 ) -> ApiResponse<Option<String>> {
     async move {
         let maybe_value = Table::KVStore.atomic_get(key(&entity, &tail), |bytes| {
-            String::from_utf8_lossy(&bytes).into_owned()
+            String::from_utf8_lossy(bytes).into_owned()
         });
         Ok(maybe_value)
     }

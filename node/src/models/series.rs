@@ -4,7 +4,7 @@
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use futures::prelude::*;
-use jammdb::Tx;
+use samizdat_common::db::{writable_tx, Droppable, Table as _, WritableTx};
 use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -17,11 +17,11 @@ use samizdat_common::Hint;
 use samizdat_common::HASH_LEN;
 use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
 
-use crate::db::{writable_tx, Table};
+use crate::db::Table;
 use crate::system::ReceivedItem;
 use crate::{cli, hubs};
 
-use super::{BookmarkType, CollectionRef, Droppable, Inventory, ItemPath, ObjectRef};
+use super::{BookmarkType, CollectionRef, Inventory, ItemPath, ObjectRef};
 
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ pub struct SeriesOwner {
 }
 
 impl Droppable for SeriesOwner {
-    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         // Bad idea to drop series and not really worth it space wise.
         // self.series().drop_if_exists_with(batch)?; // bad!
 
@@ -52,17 +52,17 @@ impl Droppable for SeriesOwner {
 
 impl SeriesOwner {
     /// Inserts the series owner using the supplied [`WriteBatch`].
-    fn insert<'tx>(&self, tx: &Tx<'tx>) {
+    fn insert(&self, tx: &mut WritableTx<'_>) {
         let series = self.series();
 
         Table::SeriesOwners.put(
-            &tx,
-            self.name.to_string(),
+            tx,
+            &self.name,
             bincode::serialize(&self).expect("can serialize"),
         );
         Table::Series.put(
-            &tx,
-            series.key().to_owned(),
+            tx,
+            series.key(),
             bincode::serialize(&series).expect("can serialize"),
         );
     }
@@ -81,7 +81,7 @@ impl SeriesOwner {
         };
 
         writable_tx(|tx| {
-            owner.insert(&tx);
+            owner.insert(tx);
             Ok(owner)
         })
     }
@@ -101,7 +101,7 @@ impl SeriesOwner {
         };
 
         writable_tx(|tx| {
-            owner.insert(&tx);
+            owner.insert(tx);
             Ok(owner)
         })
     }
@@ -110,7 +110,7 @@ impl SeriesOwner {
     pub fn get(name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
         Ok(Table::SeriesOwners
             .atomic_get(name.as_bytes(), |serialized| {
-                bincode::deserialize(&serialized)
+                bincode::deserialize(serialized)
             })
             .transpose()?)
     }
@@ -119,7 +119,7 @@ impl SeriesOwner {
     pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
         Table::SeriesOwners
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
+            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
     }
 
     /// Retrieves the series reference for this series owner.
@@ -241,17 +241,17 @@ impl SeriesRef {
     pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SeriesRef>, crate::Error> {
         let outcome = Table::Series
             .prefix(hint.prefix())
-            .atomic_for_each(|key, value| match Key::from_bytes(&key) {
+            .atomic_for_each(|key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        Some(bincode::deserialize(&value).expect("can deserialize"))
+                        Some(bincode::deserialize(value).expect("can deserialize"))
                     } else {
                         None
                     }
                 }
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    return None;
+                    None
                 }
             });
 
@@ -262,7 +262,7 @@ impl SeriesRef {
     pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
         let outcome = Table::SeriesOwners.range(..).atomic_for_each(|_, owner| {
-            let owner: SeriesOwner = bincode::deserialize(&owner).expect("can deserialize");
+            let owner: SeriesOwner = bincode::deserialize(owner).expect("can deserialize");
             if self.public_key.as_ref() == &owner.keypair.verifying_key() {
                 Some(true)
             } else {
@@ -300,8 +300,7 @@ impl SeriesRef {
         let is_fresh = if let Some(latest) = self.get_last_edition() {
             Table::SeriesFreshnesses
                 .atomic_get(self.key(), |freshness| {
-                    let freshness: chrono::DateTime<chrono::Utc> =
-                        bincode::deserialize(&freshness)?;
+                    let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(freshness)?;
                     let ttl = chrono::Duration::from_std(latest.signed.ttl)
                         .expect("can convert duration");
 
@@ -322,7 +321,7 @@ impl SeriesRef {
     pub fn get_editions(&'_ self) -> impl Send + Sync + Iterator<Item = Edition> {
         let all_editions: Vec<Edition> = Table::Editions
             .prefix(self.key())
-            .atomic_collect(|_, value| bincode::deserialize(&value).expect("can deserialize"));
+            .atomic_collect(|_, value| bincode::deserialize(value).expect("can deserialize"));
 
         all_editions.into_iter().rev()
     }
@@ -345,12 +344,12 @@ impl SeriesRef {
         writable_tx(|tx| {
             // Insert series if you don't have it yet.
             Table::Series.put(
-                &tx,
-                self.key().to_vec(),
+                tx,
+                self.key(),
                 bincode::serialize(&self).expect("can serialize"),
             );
             Table::Editions.put(
-                &tx,
+                tx,
                 edition.key(),
                 bincode::serialize(&edition).expect("can serialize"),
             );
@@ -365,7 +364,7 @@ impl SeriesRef {
     pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
         Table::Series
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
+            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
     }
 }
 
@@ -556,7 +555,7 @@ impl Edition {
     pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
         Table::Editions
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
+            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
     }
 }
 

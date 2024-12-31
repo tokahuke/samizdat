@@ -1,19 +1,10 @@
-FROM rust:bullseye
+FROM rust:latest
 
 # Update APT:
 RUN apt-get update &&\
     apt-get install -y\
-    llvm\
-    libclang-dev\
     build-essential\
-    git\
-    libbz2-dev\
-    libgflags-dev\
-    libjemalloc-dev\
-    libsnappy-dev\
-    libtbb-dev\
-    zlib1g-dev\
-    lld &&\
+    git &&\
     apt-get clean autoclean && \
     apt-get autoremove --yes && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/
@@ -41,5 +32,9 @@ RUN rustup target add aarch64-apple-darwin && \
 # Copy build code:
 WORKDIR /build
 COPY . .
+
+# Inflate macOS sdk:
+RUN mkdir -p /darwin/sdk && cd /darwin/sdk && unzip /build/install/src/rust/darwin-sdk.zip
+ENV SDKROOT /darwin/sdk
 
 ENTRYPOINT [ "/bin/bash" ]

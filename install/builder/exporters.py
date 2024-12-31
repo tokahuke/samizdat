@@ -53,7 +53,7 @@ def _export(
                 yield from _export(project, [*path, name], subspec)
 
 
-def export(project: str, spec: dict[str, Any], output: str = "./dist"):
+def export(project: str, spec: dict[str, Any], output: str = "./dist") -> None:
     output = output if output.endswith("/") else output + "/"
 
     for subpath, contents in _export(project, [], spec):

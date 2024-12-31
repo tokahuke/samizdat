@@ -5,7 +5,7 @@ from typing import Any
 
 import builders
 import exporters
-
+import env
 
 def main():
     with open("build.yaml") as f:
@@ -16,6 +16,8 @@ def main():
 
     if "root" in buildspec:
         os.chdir(buildspec["root"])
+
+    env.set_env(buildspec["env"])
 
     builders.ensure_images(
         buildspec.get("project", "builder"),
@@ -28,9 +30,9 @@ def main():
         build=False,
     )
 
-    # exporters.export(
-    #     buildspec.get("project", "builder"), buildspec["exports"], output=output
-    # )
+    exporters.export(
+        buildspec.get("project", "builder"), buildspec["exports"], output=output
+    )
 
 
 if __name__ == "__main__":

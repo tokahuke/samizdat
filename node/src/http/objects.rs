@@ -5,6 +5,7 @@ use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use futures::FutureExt;
+use samizdat_common::db::Droppable;
 use samizdat_common::Hash;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -13,7 +14,7 @@ use tokio::time::Instant;
 
 use crate::access::AccessRight;
 use crate::http::ContentType;
-use crate::models::{BookmarkType, Droppable, ObjectHeader, ObjectRef};
+use crate::models::{BookmarkType, ObjectHeader, ObjectRef};
 use crate::security_scope;
 
 use super::resolvers::resolve_object;

@@ -19,7 +19,7 @@ use samizdat_common::address::ChannelId;
 use samizdat_common::quinn::{Connection, Endpoint};
 use samizdat_common::{quic, rpc::*, transport};
 
-use crate::CLI;
+use crate::cli::cli;
 
 use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
 
@@ -57,8 +57,8 @@ impl HubAsNodeServer {
 impl Node for HubAsNodeServer {
     async fn config(self, _: context::Context) -> NodeConfig {
         NodeConfig {
-            max_queries: CLI.max_queries_per_hub,
-            max_query_rate: CLI.max_query_rate_per_hub,
+            max_queries: cli().max_queries_per_hub,
+            max_query_rate: cli().max_query_rate_per_hub,
         }
     }
 
@@ -205,7 +205,7 @@ async fn connect(
 pub async fn run(partner: &str, endpoint: &Endpoint) {
     // TODO: resolve _all_ possible addresses:
     // Set up addresses
-    let (_, partner) = match CLI.resolution_mode.resolve(partner).await {
+    let (_, partner) = match cli().resolution_mode.resolve(partner).await {
         Ok(resolved) => resolved.into_iter().next().expect("iterator not empty"),
         Err(err) => {
             tracing::error!("Failed to connect to partner {partner}: {err}");

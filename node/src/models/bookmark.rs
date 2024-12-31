@@ -1,9 +1,9 @@
 //! Bookmarks prevent objects from being automatically deleted from the database.
 
-use jammdb::Tx;
+use samizdat_common::db::{writable_tx, Table as _, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::db::{writable_tx, MergeOperation, Table};
+use crate::db::{MergeOperation, Table};
 
 use super::ObjectRef;
 
@@ -47,7 +47,7 @@ impl Bookmark {
     /// reference bookmarks, which work like reference counting (i.e, `Rc` and `Arc`).
     pub fn get_count(&self) -> Result<i16, crate::Error> {
         let operation: MergeOperation = Table::Bookmarks
-            .atomic_get(self.key(), |serialized| bincode::deserialize(&serialized))
+            .atomic_get(self.key(), |serialized| bincode::deserialize(serialized))
             .transpose()?
             .unwrap_or_default();
 
@@ -62,7 +62,7 @@ impl Bookmark {
     /// Creates the bookmark in the database using the supplied [`WriteBatch`]. This will
     /// increase the count of reference bookmarks and set the count of user bookmarks to
     /// one.
-    pub fn mark_with(&self, tx: &Tx<'_>) {
+    pub fn mark_with(&self, tx: &mut WritableTx<'_>) {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(1),
             BookmarkType::User => MergeOperation::Set(1),
@@ -74,13 +74,16 @@ impl Bookmark {
     /// Creates the bookmark in the database. This will increase the count of reference
     /// bookmarks and set the count of user bookmarks to one.
     pub fn mark(&self) -> Result<(), crate::Error> {
-        writable_tx(|tx| Ok(self.mark_with(tx)))
+        writable_tx(|tx| {
+            self.mark_with(tx);
+            Ok(())
+        })
     }
 
     /// Removes the bookmark from the database using the supplied [`WriteBatch`]. This
     /// will decrease the count of reference bookmarks by one (or delete them if the
     /// count goes to zero) and delete user bookmarks.
-    pub fn unmark_with(&self, tx: &Tx<'_>) {
+    pub fn unmark_with(&self, tx: &mut WritableTx<'_>) {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(-1),
             BookmarkType::User => MergeOperation::Set(0),
@@ -93,12 +96,15 @@ impl Bookmark {
     /// reference bookmarks by one (or delete them if the count goes to zero) and delete
     /// user bookmarks.
     pub fn unmark(&self) -> Result<(), crate::Error> {
-        writable_tx(|tx| Ok(self.unmark_with(tx)))
+        writable_tx(|tx| {
+            self.unmark_with(tx);
+            Ok(())
+        })
     }
 
     /// Deletes the bookmark from the database using the supplied [`Tx`],
     /// _regardless_ of the reference count.
-    pub fn clear_with(&self, tx: &Tx<'_>) {
+    pub fn clear_with(&self, tx: &mut WritableTx<'_>) {
         Table::Bookmarks.delete(tx, self.key());
     }
 }

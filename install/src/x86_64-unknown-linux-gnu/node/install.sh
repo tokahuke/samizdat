@@ -7,7 +7,7 @@ if [ "$(expr substr $(uname -s) 1 5)" != "Linux" ]; then
     exit 1
 fi
 
-urlprefix=https://proxy.hubfederation.com/get-samizdat/$VERSION/node/x86_64-unknown-linux-gnu
+urlprefix=https://proxy.hubfederation.com/get-samizdat/$VERSION/x86_64-unknown-linux-gnu/node
 tmpdir=/tmp/samizdat-install-$RANDOM
 
 mkdir -p $tmpdir

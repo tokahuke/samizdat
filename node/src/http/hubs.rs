@@ -8,12 +8,12 @@ use axum::Json;
 use axum::Router;
 use futures::FutureExt;
 use samizdat_common::address::AddrResolutionMode;
+use samizdat_common::db::Droppable;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::Droppable;
 use crate::models::Hub;
 use crate::security_scope;
 

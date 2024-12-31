@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 
-use samizdat_common::blockchain;
+use samizdat_common::{blockchain, db::Table as _};
 
 use crate::{db::Table, models::SeriesRef};
 
@@ -19,7 +19,7 @@ static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 pub fn init_identity_provider() -> Result<(), crate::Error> {
     let provider = if let Some(provider) = Table::Global
         .atomic_get("ethereum_provider_endpoint", |endpoint| {
-            IdentityProvider::new(String::from_utf8_lossy(&endpoint).as_ref())
+            IdentityProvider::new(String::from_utf8_lossy(endpoint).as_ref())
         }) {
         provider
     } else {

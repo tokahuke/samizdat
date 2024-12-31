@@ -1,17 +1,19 @@
 //! A subscription is an active effort from the node to keep the full state of a given
 //! series as up-to-date as possible.
 
-use jammdb::Tx;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
 
-use samizdat_common::{Hint, Key, Riddle};
+use samizdat_common::{
+    db::{Droppable, Table as _, WritableTx},
+    Hint, Key, Riddle,
+};
 
 use crate::db::Table;
 use crate::hubs;
 
-use super::{Droppable, SeriesRef};
+use super::SeriesRef;
 
 /// The regimen of this subscription. Currently, only downloading the full inventory of
 /// the most current edition is supported.
@@ -54,7 +56,7 @@ impl Display for SubscriptionRef {
 }
 
 impl Droppable for SubscriptionRef {
-    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         Table::Subscriptions.delete(tx, self.key());
         Ok(())
     }
@@ -122,7 +124,7 @@ impl SubscriptionRef {
     /// exists.
     pub fn get(&self) -> Result<Option<Subscription>, crate::Error> {
         Ok(Table::Subscriptions
-            .atomic_get(self.key(), |value| bincode::deserialize(&value))
+            .atomic_get(self.key(), |value| bincode::deserialize(value))
             .transpose()?)
     }
 
@@ -130,7 +132,7 @@ impl SubscriptionRef {
     pub fn get_all() -> Result<Vec<Subscription>, crate::Error> {
         Table::Subscriptions
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(&value)?))
+            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
     }
 
     /// Runs through the database looking for a subscription the matches the supplied
@@ -138,10 +140,10 @@ impl SubscriptionRef {
     pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SubscriptionRef>, crate::Error> {
         let outcome = Table::Subscriptions
             .prefix(hint.prefix())
-            .atomic_for_each(|key, value| match Key::from_bytes(&key) {
+            .atomic_for_each(|key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        Some(bincode::deserialize(&value).expect("can deserialize"))
+                        Some(bincode::deserialize(value).expect("can deserialize"))
                     } else {
                         None
                     }

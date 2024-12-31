@@ -2,6 +2,7 @@
 //! that is not used anymore.
 
 use ordered_float::NotNan;
+use samizdat_common::db::{writable_tx, Droppable, Table as _};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
@@ -13,10 +14,8 @@ use samizdat_common::heap_entry::HeapEntry;
 use samizdat_common::Hash;
 
 use crate::cli::cli;
-use crate::db::{writable_tx, MergeOperation, Table};
-use crate::models::{
-    CollectionItem, Droppable, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior,
-};
+use crate::db::{MergeOperation, Table};
+use crate::models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior};
 
 /// Status for a vacuum task.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -38,7 +37,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     Table::ObjectStatistics
         .range(..)
         .atomic_for_each(|_, statistics| {
-            total_size += bincode::deserialize::<ObjectStatistics>(&statistics)
+            total_size += bincode::deserialize::<ObjectStatistics>(statistics)
                 .expect("can deserialize")
                 .size();
             None as Option<()>
@@ -61,7 +60,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
         .range(..)
         .atomic_for_each(|key, value| {
             let statistics: ObjectStatistics =
-                bincode::deserialize(&value).expect("can deserialize");
+                bincode::deserialize(value).expect("can deserialize");
             heap.push(HeapEntry {
                 priority: Reverse(
                     NotNan::try_from(statistics.byte_usefulness(&use_prior))
@@ -102,7 +101,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
         let mut items_to_drop = vec![];
 
         Table::CollectionItems.range(..).for_each(tx, |_, value| {
-            let item: CollectionItem = bincode::deserialize(&value).expect("can deserialize");
+            let item: CollectionItem = bincode::deserialize(value).expect("can deserialize");
             if dropped.contains(item.inclusion_proof.claimed_value()) {
                 items_to_drop.push(item);
             }
@@ -207,7 +206,7 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
         .range(..)
         .atomic_for_each(|_, metadata| {
             let metadata: ObjectMetadata =
-                bincode::deserialize(&metadata).expect("can deserialize");
+                bincode::deserialize(metadata).expect("can deserialize");
 
             for chunk_hash in metadata.hashes {
                 *ref_counts.entry(chunk_hash).or_default() += 1;
@@ -220,7 +219,7 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
         for (hash, ref_count) in ref_counts {
             Table::ObjectChunkRefCount.map(
                 tx,
-                hash.to_vec(),
+                hash,
                 MergeOperation::Set(ref_count).merger(),
             );
         }
@@ -243,7 +242,7 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
         .atomic_for_each(|hash, ref_count| {
             let hash = Hash::new(hash);
             let ref_count: MergeOperation =
-                bincode::deserialize(&ref_count).expect("can deserialize");
+                bincode::deserialize(ref_count).expect("can deserialize");
 
             match ref_count.eval_on_zero() {
                 1.. => {}
@@ -258,7 +257,7 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
         let dropped = chunks_to_drop.len();
 
         for hash in chunks_to_drop {
-            Table::ObjectChunks.delete(tx, hash.to_vec());
+            Table::ObjectChunks.delete(tx, hash);
         }
 
         Ok(dropped)
@@ -270,7 +269,7 @@ fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 
     let outcome = Table::CollectionItems.range(..).atomic_for_each(|_, item| {
-        let item: CollectionItem = bincode::deserialize(&item).expect("can deserialize");
+        let item: CollectionItem = bincode::deserialize(item).expect("can deserialize");
 
         item.object()
             .and_then(|o| o.exists())

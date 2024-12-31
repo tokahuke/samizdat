@@ -3,6 +3,7 @@
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use futures::FutureExt;
+use samizdat_common::db::Table as _;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::db::Table;
@@ -48,7 +49,7 @@ pub fn api() -> Router {
                     Ok(GetEthereumProviderResponse {
                         endpoint: Table::Global
                             .atomic_get("ethereum_provider_endpoint", |e| {
-                                String::from_utf8_lossy(&e).into_owned()
+                                String::from_utf8_lossy(e).into_owned()
                             })
                             .unwrap_or_else(|| {
                                 samizdat_common::blockchain::DEFAULT_PROVIDER_ENDPOINT.to_owned()

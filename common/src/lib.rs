@@ -6,6 +6,7 @@ pub extern crate rustls;
 pub mod address;
 pub mod blockchain;
 pub mod cipher;
+pub mod db;
 pub mod heap_entry;
 pub mod keyed_channel;
 pub mod pow;

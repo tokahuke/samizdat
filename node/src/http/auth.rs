@@ -9,6 +9,7 @@ use axum::{Json, Router};
 use axum_extra::extract::Query as AxumExtraQuery;
 use futures::FutureExt;
 use http::request::Parts;
+use samizdat_common::db::Table as _;
 use serde_derive::{Deserialize, Serialize};
 use url::{Host, Origin, Url};
 
@@ -38,7 +39,7 @@ fn get_auth() -> Router {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let current: Vec<AccessRight> = Table::AccessRights
-                    .atomic_get(serialized, |rights| bincode::deserialize(&rights))
+                    .atomic_get(serialized, |rights| bincode::deserialize(rights))
                     .transpose()?
                     .unwrap_or_default();
 
@@ -59,7 +60,7 @@ fn get_auth_current() -> Router {
             async move {
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let current: Vec<AccessRight> = Table::AccessRights
-                    .atomic_get(serialized, |rights| bincode::deserialize(&rights))
+                    .atomic_get(serialized, |rights| bincode::deserialize(rights))
                     .transpose()?
                     .unwrap_or_default();
 
@@ -86,8 +87,8 @@ fn get_auths() -> Router {
                 let all_auths = Table::AccessRights
                     .range(..)
                     .atomic_collect::<Result<Vec<_>, crate::Error>, _, _>(|key, value| {
-                        let entity: Entity = bincode::deserialize(&key)?;
-                        let granted_rights: Vec<AccessRight> = bincode::deserialize(&value)?;
+                        let entity: Entity = bincode::deserialize(key)?;
+                        let granted_rights: Vec<AccessRight> = bincode::deserialize(value)?;
                         Ok(Response {
                             entity,
                             granted_rights,
@@ -117,7 +118,7 @@ fn patch_auth() -> Router {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let mut current: Vec<AccessRight> = Table::AccessRights
-                    .atomic_get(&serialized, |rights| bincode::deserialize(&rights))
+                    .atomic_get(&serialized, |rights| bincode::deserialize(rights))
                     .transpose()?
                     .unwrap_or_default();
 

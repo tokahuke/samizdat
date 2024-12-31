@@ -23,10 +23,10 @@ use samizdat_common::{quinn, rpc::*, transport};
 // use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
 
+use crate::cli::cli;
 use crate::models::blacklisted_ip::BlacklistedIp;
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
-use crate::CLI;
 
 use self::hub_server::HubServer;
 use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
@@ -141,8 +141,8 @@ fn candidates_for_resolution(
     ROOM.with_peers(
         QuerySampler,
         client_addr,
-        CLI.max_resolutions_per_query,
-        CLI.max_candidates,
+        cli().max_resolutions_per_query,
+        cli().max_candidates,
         move |peer_id, peer| {
             tracing::debug!("Pairing client {client_addr} with peer {peer_id}");
             let resolution = resolution.clone();
@@ -232,7 +232,7 @@ async fn edition_for_request(
         .with_peers(
             EditionSampler,
             client_addr,
-            CLI.max_resolutions_per_query,
+            cli().max_resolutions_per_query,
             usize::MAX,
             |peer_id, peer| {
                 let latest = latest.clone();
@@ -281,7 +281,7 @@ async fn announce_edition(
     ROOM.with_peers(
         UniformSampler,
         client_addr,
-        CLI.max_resolutions_per_query,
+        cli().max_resolutions_per_query,
         usize::MAX,
         |peer_id, peer| {
             let announcement = announcement.clone();
@@ -434,7 +434,7 @@ pub async fn run_partners() {
     );
 
     // Resolve partner addresses (`CLI.partners` is an `Option`. Therefore, we flatten it!):
-    let partners = stream::iter(CLI.partners.iter().flatten())
+    let partners = stream::iter(cli().partners.iter().flatten())
         .map(|partner| hub_as_node::run(partner, &endpoint))
         .collect::<Vec<_>>()
         .await;

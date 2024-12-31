@@ -7,13 +7,12 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{SubsecRound, Utc};
 use futures::FutureExt;
+use samizdat_common::db::Droppable;
 use serde_derive::Deserialize;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::{
-    CollectionRef, Droppable, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner,
-};
+use crate::models::{CollectionRef, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner};
 use crate::{hubs, security_scope};
 
 /// The entrypoint of the series API.

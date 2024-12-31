@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use futures::prelude::*;
-use jammdb::Tx;
+use samizdat_common::db::{writable_tx, Droppable, Table as _, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
@@ -16,9 +16,9 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Hint, MerkleTree, Riddle};
 
-use crate::db::{writable_tx, MergeOperation, Table};
+use crate::db::{MergeOperation, Table};
 
-use super::{Bookmark, BookmarkType, Droppable};
+use super::{Bookmark, BookmarkType};
 
 /// The size of a chunk. An object consists of a sequence of chunks, the hash
 /// of which are used to create the Merkle tree whose root hash is the object
@@ -352,7 +352,7 @@ pub struct ObjectRef {
 }
 
 impl Droppable for ObjectRef {
-    fn drop_if_exists_with(&self, tx: &Tx<'_>) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         tracing::info!("Removing object {:?}", self);
 
         let Some(metadata) = self.metadata()? else {
@@ -366,11 +366,7 @@ impl Droppable for ObjectRef {
         // }
 
         for chunk_hash in metadata.hashes {
-            Table::ObjectChunkRefCount.map(
-                tx,
-                chunk_hash.to_vec(),
-                MergeOperation::Increment(-1).merger(),
-            );
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(-1).merger());
         }
 
         // leave the vacuum daemon to clean up unused chunks. It runs frequently.
@@ -411,14 +407,14 @@ impl ObjectRef {
     /// does not actually exist.
     pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
         Ok(Table::ObjectMetadata
-            .atomic_get(self.hash, |serialized| bincode::deserialize(&serialized))
+            .atomic_get(self.hash, |serialized| bincode::deserialize(serialized))
             .transpose()?)
     }
 
     /// Gets statistics on this object. Returns `Ok(None)` if the object does not exist.
     pub fn statistics(&self) -> Result<Option<ObjectStatistics>, crate::Error> {
         Ok(Table::ObjectStatistics
-            .atomic_get(self.hash, |serialized| bincode::deserialize(&serialized))
+            .atomic_get(self.hash, |serialized| bincode::deserialize(serialized))
             .transpose()?)
     }
 
@@ -437,7 +433,7 @@ impl ObjectRef {
 
                 Table::ObjectStatistics.put(
                     tx,
-                    self.hash.to_vec(),
+                    self.hash,
                     bincode::serialize(&statistics).expect("can serialize"),
                 );
             }
@@ -471,7 +467,7 @@ impl ObjectRef {
 
     /// Creates an object in the database.
     fn create_object_with(
-        tx: &Tx<'_>,
+        tx: &mut WritableTx<'_>,
         hash: Hash,
         metadata: &ObjectMetadata,
         statistics: &ObjectStatistics,
@@ -482,24 +478,20 @@ impl ObjectRef {
             tracing::warn!("Object {hash} already exists in the database; skipping creation");
             return;
         }
-        Table::Objects.put(tx, hash.to_vec(), []);
+        Table::Objects.put(tx, hash, []);
         Table::ObjectMetadata.put(
             tx,
-            hash.to_vec(),
+            hash,
             bincode::serialize(&metadata).expect("can serialize"),
         );
         Table::ObjectStatistics.put(
             tx,
-            hash.to_vec(),
+            hash,
             bincode::serialize(&statistics).expect("can serialize"),
         );
 
         for chunk_hash in &metadata.hashes {
-            Table::ObjectChunkRefCount.map(
-                tx,
-                chunk_hash.to_vec(),
-                MergeOperation::Increment(1).merger(),
-            );
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(1).merger());
         }
 
         if bookmark {
