@@ -11,7 +11,8 @@ jobs:
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
-      submodules: recursive
+      with:
+        submodules: recursive
 
     - name: Install poetry
       run: pipx install poetry
