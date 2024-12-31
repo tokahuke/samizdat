@@ -12,13 +12,16 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v2
 
+    - name: Install poetry
+      run: pipx install poetry
+    
     - uses: actions/setup-python@v5
       with:
         python-version: "3.13"
         cache: poetry
 
     - name: Setup virtualenv
-      run: pip install poetry && cd install && poetry install
+      run: cd install && poetry install
     
     - name: Run install builder
       run: cd install && poetry run python builder
