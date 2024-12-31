@@ -8,9 +8,6 @@ use samizdat_common::address::AddrResolutionMode;
 /// The Samizdat Hub.
 #[derive(Debug, StructOpt)]
 pub struct Cli {
-    /// Set logging level.
-    #[structopt(env = "SAMIZDAT_VERBOSE", long, short = "v")]
-    pub verbose: bool,
     /// The socket addresses for nodes to connect as clients.
     #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
     pub addresses: Vec<String>,

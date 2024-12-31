@@ -50,12 +50,12 @@ async fn main() -> Result<(), crate::Error> {
 
     // Spawn services:
     let candidate_channels = KeyedChannel::new();
-    let direct_rpc_server = tokio::spawn(crate::rpc::run_direct(hubs, candidate_channels.clone()));
+    let rpc_server = tokio::spawn(crate::rpc::run(hubs, candidate_channels.clone()));
     let partners = tokio::spawn(crate::rpc::run_partners());
     let http_server = tokio::spawn(http::serve());
 
     // Await for services to end:
-    maybe_resume_panic(direct_rpc_server.await);
+    maybe_resume_panic(rpc_server.await);
     maybe_resume_panic(http_server.await);
     maybe_resume_panic(partners.await);
 

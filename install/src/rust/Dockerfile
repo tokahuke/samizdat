@@ -34,7 +34,8 @@ WORKDIR /build
 COPY . .
 
 # Inflate macOS sdk:
-RUN mkdir -p /darwin/sdk && cd /darwin/sdk && unzip /build/install/src/rust/darwin-sdk.zip
-ENV SDKROOT /darwin/sdk
+# you can always count on https://github.com/alexey-lysiuk/macos-sdk for future updates!
+RUN mkdir -p /darwin && cd /darwin && tar xf /build/install/src/rust/MacOSX14.5.tar.xz
+ENV SDKROOT /darwin/MacOSX14.5.sdk
 
 ENTRYPOINT [ "/bin/bash" ]

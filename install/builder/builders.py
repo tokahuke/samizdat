@@ -1,5 +1,6 @@
 import docker
 import docker.errors
+import json
 
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
@@ -34,9 +35,21 @@ def _ensure_image(name: str, spec: dict[str, Any], build: bool) -> None:
 
     def create():
         print(f"building image {name}...")
-        _, logs = client().images.build(**{**spec, "tag": name, "pull": True})
-        for line in logs:
-            print(line)
+        logs = client().api.build(**{**spec, "tag": name, "pull": True})
+
+        for lines in logs:
+            for line in lines.split(b"\r\n"):
+                if line.strip() == b"":
+                    continue
+                log = json.loads(line)
+                if "stream" in log:
+                    print(log["stream"], end="")
+                elif "status" in log:
+                    print("Status:", log["status"])
+        try:
+            client().images.get(name)
+        except docker.errors.ImageNotFound:
+            raise Exception(f"build of image {name} failed. See logs.")
 
     def delete():
         print(f"removing image {name}...")
@@ -66,18 +79,32 @@ def ensure_images(
 def _run_builder(name: str, spec: dict[str, Any], build: bool) -> None:
     def get() -> bool:
         try:
-            client().containers.get(name)
-            print(f"container {name} found")
-            return True
+            container = client().containers.get(name)
+            result = container.wait()
+            status_code = result["StatusCode"]
+            if status_code == 0:
+                print(f"container {name} found")
+                return True
+            else:
+                print(f"container {name} found, but exited with error")
+                delete()
+                return False
         except docker.errors.NotFound:
             return False
 
     def create():
         print(f"running container {name}...")
+
         container = client().containers.run(**{**spec, "name": name}, detach=True)
+
         for line in container.logs(stream=True):
             line: bytes
             print(line.decode(), end="")
+
+        result = container.wait()
+        status_code = result["StatusCode"]
+        if status_code != 0:
+            raise Exception(f"container {name} exited with status {status_code}")
 
     def delete():
         print(f"removing container {name}...")

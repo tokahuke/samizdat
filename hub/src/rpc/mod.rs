@@ -310,10 +310,13 @@ async fn announce_edition(
 /// Runs the "direct" server. This is the system where the Hub acts as a server and the
 /// Node acts as a client. This is used for, e.g., the nodes to ask the server the
 /// resolution to a given query.
-pub async fn run_direct(
+pub async fn run(
     addrs: Vec<impl Into<SocketAddr>>,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<(), io::Error> {
+    let client_semaphore = Arc::new(Semaphore::new(cli().max_connections));
+    let server_semaphore = Arc::new(Semaphore::new(cli().max_connections));
+
     let all_endpoints = addrs
         .into_iter()
         .map(|addr| {
@@ -356,11 +359,21 @@ pub async fn run_direct(
             let candidate_channels = candidate_channels.clone();
 
             tracing::info!("Incoming connection from {client_addr}");
-            tokio::spawn(async move {
-                if let Err(err) =
-                    setup_connection(connection, client_addr, candidate_channels).await
-                {
-                    tracing::error!("failed to setup connection to {client_addr}: {err}")
+            tokio::spawn({
+                let client_semaphore = client_semaphore.clone();
+                let server_semaphore = server_semaphore.clone();
+                async move {
+                    if let Err(err) = setup_connection(
+                        client_semaphore,
+                        server_semaphore,
+                        connection,
+                        client_addr,
+                        candidate_channels,
+                    )
+                    .await
+                    {
+                        tracing::error!("failed to setup connection to {client_addr}: {err}")
+                    }
                 }
             });
 
@@ -372,6 +385,8 @@ pub async fn run_direct(
 }
 
 async fn setup_connection(
+    client_semaphore: Arc<Semaphore>,
+    server_semaphore: Arc<Semaphore>,
     connection: quinn::Connection,
     client_addr: SocketAddr,
     candidate_channels: KeyedChannel<Candidate>,
@@ -379,7 +394,13 @@ async fn setup_connection(
     let (direct_transport, reverse_transport) =
         transport::accept_bincode_transports(connection, MAX_LENGTH).await?;
 
+    // Serrver setup:
     tokio::spawn(async move {
+        let Ok(_permit) = server_semaphore.try_acquire() else {
+            tracing::error!("Too many servers! Not accepting connection from {client_addr}");
+            return;
+        };
+
         // Set up server:
         let server = HubServer::new(client_addr, candidate_channels);
         let server_task = server::BaseChannel::with_defaults(direct_transport)
@@ -395,6 +416,11 @@ async fn setup_connection(
 
     // Client task:
     tokio::spawn(async move {
+        let Ok(_permit) = client_semaphore.try_acquire() else {
+            tracing::error!("Too many clients! Not accepting connection from {client_addr}");
+            return;
+        };
+
         // Set up client (remember to drop it when connection is severed):
         let uninstrumented_client =
             NodeClient::new(tarpc::client::Config::default(), reverse_transport);
