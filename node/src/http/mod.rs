@@ -42,7 +42,6 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
         crate::Error::Message(_) => http::StatusCode::BAD_REQUEST,
         crate::Error::Rpc(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
         crate::Error::Base64(_) => http::StatusCode::BAD_REQUEST,
-        crate::Error::Db(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
         crate::Error::Io(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
         crate::Error::BadHashLength(_) => http::StatusCode::BAD_REQUEST,
         crate::Error::Bincode(_) => http::StatusCode::INTERNAL_SERVER_ERROR,

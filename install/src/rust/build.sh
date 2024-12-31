@@ -12,7 +12,8 @@ cargo zigbuild --release                \
 cargo zigbuild --release                \
     --target x86_64-pc-windows-gnu      \
     --package samizdat                  \
-    --package samizdat-node
+    --package samizdat-node             \
+    --package samizdat-service
 
 cargo zigbuild --release                \
     --target x86_64-unknown-linux-gnu   \

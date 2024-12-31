@@ -56,9 +56,12 @@ exports:
         import: /build/target/aarch64-apple-darwin/release/samizdat
   x86_64-pc-windows-gnu:
     node:
-      samizdat-node:
+      samizdat-node.exe:
         from: rust
-        import: /build/target/x86_64-pc-windows-gnu/release/samizdat-node
-      samizdat:
+        import: /build/target/x86_64-pc-windows-gnu/release/samizdat-node.exe
+      samizdat.exe:
         from: rust
-        import: /build/target/x86_64-pc-windows-gnu/release/samizdat
+        import: /build/target/x86_64-pc-windows-gnu/release/samizdat.exe
+      samizdat-service.exe:
+        from: rust
+        import: /build/target/x86_64-pc-windows-gnu/release/samizdat-service.exe

@@ -16,9 +16,6 @@ pub enum Error {
     /// Error decoding base64 encoded data.
     #[error("base64 decode error: {}", _0)]
     Base64(base64::DecodeError),
-    /// Errors from the database.
-    #[error("db error: {}", _0)]
-    Db(jammdb::Error),
     /// IO error.
     #[error("io error: {}", _0)]
     Io(io::Error),
@@ -72,12 +69,6 @@ impl From<String> for Error {
 impl From<&'static str> for Error {
     fn from(e: &'static str) -> Error {
         Error::Message(e.to_string())
-    }
-}
-
-impl From<jammdb::Error> for Error {
-    fn from(e: jammdb::Error) -> Error {
-        Error::Db(e)
     }
 }
 

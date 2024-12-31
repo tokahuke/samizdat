@@ -210,7 +210,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
 
     fn atomic_map<K, F>(self, key: K, map: F)
     where
-        K: AsRef<[u8]> + for<'a> jammdb::ToBytes<'a>,
+        K: AsRef<[u8]>,
         F: FnOnce(Option<&[u8]>) -> Vec<u8>,
     {
         writable_tx(|tx| {
