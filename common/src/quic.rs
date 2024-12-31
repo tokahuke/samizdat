@@ -75,7 +75,7 @@ static CRYPTO_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
 
 fn install_crypto_provider() {
     if CRYPTO_PROVIDER_INSTALLED.get().is_none() {
-        rustls::crypto::aws_lc_rs::default_provider()
+        rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
         CRYPTO_PROVIDER_INSTALLED.set(()).ok();

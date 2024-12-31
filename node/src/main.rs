@@ -13,7 +13,6 @@ mod vacuum;
 pub use samizdat_common::Error;
 
 pub use cli::cli;
-pub use db::db;
 
 use std::sync::OnceLock;
 
@@ -53,7 +52,7 @@ async fn main() -> Result<(), crate::Error> {
     );
 
     // Init resources:
-    init_db()?;
+    init_db::<crate::db::Table>(&cli().data.to_string_lossy())?;
     init_access_token()?;
     init_identity_provider()?;
     init_hubs().await?;

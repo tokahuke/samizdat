@@ -1,15 +1,13 @@
 //! Command line interface for the Samizdat node.
 
+use std::sync::OnceLock;
 use structopt::StructOpt;
 
 use samizdat_common::address::AddrResolutionMode;
 
 /// The Samizdat Hub.
-#[derive(StructOpt)]
+#[derive(Debug, StructOpt)]
 pub struct Cli {
-    /// Set logging level.
-    #[structopt(env = "SAMIZDAT_VERBOSE", long, short = "v")]
-    pub verbose: bool,
     /// The socket addresses for nodes to connect as clients.
     #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
     pub addresses: Vec<String>,
@@ -51,4 +49,25 @@ pub struct Cli {
     /// The port for the monitoring http server.
     #[structopt(env = "SAMIZDAT_HTTP_PORT", long, default_value = "45180")]
     pub http_port: u16,
+}
+
+/// The handle to the CLI parameters.
+static CLI: OnceLock<Cli> = OnceLock::new();
+
+/// Initializes the [`CLI`] with the values from the command line.
+pub fn init_cli() -> Result<(), crate::Error> {
+    let cli = Cli::from_args();
+
+    tracing::info!("Arguments from command line: {:#?}", cli);
+    std::fs::create_dir_all(&cli.data)?;
+    tracing::debug!("Initialized data folder");
+
+    CLI.set(cli).ok();
+
+    Ok(())
+}
+
+/// Returns a handle to the CLI arguments. Only use this after initialization.
+pub fn cli<'a>() -> &'a Cli {
+    CLI.get().expect("cli not initialized")
 }

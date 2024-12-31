@@ -6,9 +6,7 @@ static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// Retrieves the access token. Must be called after initialization.
 pub fn access_token<'a>() -> Result<&'a str, anyhow::Error> {
-    Ok(ACCESS_TOKEN
-        .get_or_try_init(init_access_token)?
-        .as_str())
+    Ok(ACCESS_TOKEN.get_or_try_init(init_access_token)?.as_str())
 }
 
 /// Initializes access token. The access token is a file in the local

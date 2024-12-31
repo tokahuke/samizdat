@@ -5,6 +5,7 @@ use axum::{
     Json, Router,
 };
 use futures::FutureExt;
+use samizdat_common::db::{readonly_tx, writable_tx};
 use serde_derive::Deserialize;
 
 use crate::{http::ApiResponse, models::blacklisted_ip::BlacklistedIp};
@@ -18,11 +19,19 @@ pub fn api() -> Router {
         .route(
             "/",
             post(|Json(request): Json<PostBlacklistedIPRequest>| {
-                async move { BlacklistedIp::new(request.address).insert() }.map(ApiResponse)
+                async move {
+                    writable_tx(|tx| {
+                        BlacklistedIp::new(request.address).insert(tx);
+                        Ok(())
+                    })
+                }
+                .map(ApiResponse)
             }),
         )
         .route(
             "/",
-            get(|| async move { BlacklistedIp::get_all() }.map(ApiResponse)),
+            get(|| {
+                async move { Ok(readonly_tx(|tx| BlacklistedIp::get_all(tx))) }.map(ApiResponse)
+            }),
         )
 }

@@ -11,9 +11,9 @@ use futures::{FutureExt, StreamExt};
 use serde_derive::Deserialize;
 use std::net::{Ipv6Addr, SocketAddr};
 
+use crate::cli::cli;
 use crate::rpc::node_sampler::QuerySampler;
 use crate::rpc::ROOM;
-use crate::CLI;
 
 /// Mapping of Samizdat errors into HTTP status codes.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
@@ -85,7 +85,7 @@ pub async fn serve() -> Result<(), crate::Error> {
         .layer(axum::middleware::from_fn(deny_outside_requests));
 
     axum::serve(
-        tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, CLI.http_port)).await?,
+        tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, cli().http_port)).await?,
         server.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await?;

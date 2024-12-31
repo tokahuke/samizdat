@@ -11,8 +11,8 @@ use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 use samizdat_common::address::{ChannelAddr, ChannelId};
 use samizdat_common::rpc::*;
 
+use crate::cli::cli;
 use crate::rpc::ROOM;
-use crate::CLI;
 
 use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
 
@@ -34,13 +34,14 @@ pub struct HubServer(Arc<HubServerInner>);
 
 impl HubServer {
     pub fn new(addr: SocketAddr, candidate_channels: KeyedChannel<Candidate>) -> HubServer {
-        let mut call_throttle = interval(Duration::from_secs_f64(1. / CLI.max_query_rate_per_node));
+        let mut call_throttle =
+            interval(Duration::from_secs_f64(1. / cli().max_query_rate_per_node));
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         HubServer(Arc::new(HubServerInner {
-            call_semaphore: Semaphore::new(CLI.max_queries_per_node),
+            call_semaphore: Semaphore::new(cli().max_queries_per_node),
             call_throttle: Mutex::new(interval(Duration::from_secs_f64(
-                1. / CLI.max_query_rate_per_node,
+                1. / cli().max_query_rate_per_node,
             ))),
             addr,
             candidate_channels,
@@ -92,13 +93,8 @@ impl Hub for HubServer {
             let channel_addr = ChannelAddr::new(server.0.addr, channel_id);
 
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&query) {
-                Ok(false) => return QueryResponse::Replayed,
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return QueryResponse::InternalError;
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&query) {
+                return QueryResponse::Replayed;
             }
 
             // If query is empty, nothing to be done:
@@ -187,13 +183,8 @@ impl Hub for HubServer {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&request) {
-                Ok(false) => return vec![],
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return vec![];
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&request) {
+                return vec![];
             }
 
             // Now broadcast the request:
@@ -206,13 +197,8 @@ impl Hub for HubServer {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
             // Se if you are not being replayed:
-            match REPLAY_RESISTANCE.lock().await.check(&announcement) {
-                Ok(false) => return,
-                Err(err) => {
-                    tracing::error!("error while checking for replay: {}", err);
-                    return;
-                }
-                _ => {}
+            if !REPLAY_RESISTANCE.lock().await.check(&announcement) {
+                return;
             }
 
             // Now, broadcast the announcement:

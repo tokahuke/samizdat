@@ -62,9 +62,7 @@ pub fn init_cli() -> Result<(), crate::Error> {
     let cli = Cli::from_args();
 
     tracing::info!("Arguments from command line: {:#?}", cli);
-
     std::fs::create_dir_all(&cli.data)?;
-
     tracing::debug!("Initialized data folder");
 
     CLI.set(cli).ok();

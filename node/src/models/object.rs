@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use futures::prelude::*;
-use rocksdb::WriteBatch;
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
@@ -16,9 +16,9 @@ use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, Hint, MerkleTree, Riddle};
 
-use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK, STATISTICS_MUTEXES};
+use crate::db::{MergeOperation, Table};
 
-use super::{Bookmark, BookmarkType, Droppable};
+use super::{Bookmark, BookmarkType};
 
 /// The size of a chunk. An object consists of a sequence of chunks, the hash
 /// of which are used to create the Merkle tree whose root hash is the object
@@ -130,9 +130,9 @@ impl ObjectHeader {
 }
 
 /// Helper function to get a chunk by its hash in the database.
-pub fn get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
-    Ok(db()
-        .get_cf(Table::ObjectChunks.get(), hash)?
+pub fn atomic_get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
+    Ok(Table::ObjectChunks
+        .atomic_get(hash, |slice| slice.to_vec())
         .ok_or_else(|| format!("Chunk missing: {}", hash))?)
 }
 
@@ -196,7 +196,7 @@ impl Iterator for BytesIter {
 
         // Try get new chunk:
         if let Some(hash) = self.hashes.next() {
-            match get_chunk(hash) {
+            match atomic_get_chunk(hash) {
                 // Found chunk? Load an try again!
                 Ok(chunk) => {
                     let mut iter = chunk.into_iter();
@@ -243,7 +243,7 @@ impl Iterator for ContentIter {
 
         // Try get new chunk:
         if let Some(hash) = self.hashes.next() {
-            match get_chunk(hash) {
+            match atomic_get_chunk(hash) {
                 // Found chunk? Yield.
                 Ok(chunk) => {
                     return Some(Ok(chunk));
@@ -289,7 +289,7 @@ impl Stream for ContentStream {
         // Try getting new chunk.
         let polled_chunk = Pin::new(&mut self.hashes)
             .poll_next(cx)
-            .map(|hash| hash.map(|hash| hash.and_then(get_chunk)));
+            .map(|hash| hash.map(|hash| hash.and_then(atomic_get_chunk)));
 
         match polled_chunk {
             Poll::Pending => Poll::Pending,
@@ -299,12 +299,16 @@ impl Stream for ContentStream {
                 Poll::Ready(Some(Err(err)))
             }
             Poll::Ready(Some(Ok(chunk))) => {
+                let content_size = readonly_tx(|tx| {
+                    Ok::<_, crate::Error>(self.object_ref.metadata(tx)?.unwrap().content_size)
+                })?;
+
                 // If an object header must be skipped, then skip it!
                 let chunk = if self.skip_header {
                     let mut iter = chunk.into_iter();
                     let (header_size, _) = ObjectHeader::read((&mut iter).map(Ok))?;
                     self.content_size.store(
-                        self.object_ref.metadata()?.unwrap().content_size - header_size,
+                        content_size - header_size,
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     self.skip_header = false;
@@ -312,10 +316,8 @@ impl Stream for ContentStream {
                     iter.collect()
                 } else if self.is_first {
                     self.is_first = false;
-                    self.content_size.store(
-                        self.object_ref.metadata()?.unwrap().content_size,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    self.content_size
+                        .store(content_size, std::sync::atomic::Ordering::Relaxed);
 
                     chunk
                 } else {
@@ -352,10 +354,10 @@ pub struct ObjectRef {
 }
 
 impl Droppable for ObjectRef {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         tracing::info!("Removing object {:?}", self);
 
-        let Some(metadata) = self.metadata()? else {
+        let Some(metadata) = self.metadata(tx)? else {
             // Object does not exist.
             return Ok(());
         };
@@ -366,21 +368,18 @@ impl Droppable for ObjectRef {
         // }
 
         for chunk_hash in metadata.hashes {
-            batch.merge_cf(
-                Table::ObjectChunkRefCount.get(),
-                chunk_hash,
-                bincode::serialize(&MergeOperation::Increment(-1)).expect("can serialize"),
-            );
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(-1).merger());
         }
 
         // leave the vacuum daemon to clean up unused chunks. It runs frequently.
 
-        self.bookmark(BookmarkType::Reference).clear_with(batch);
-        self.bookmark(BookmarkType::User).clear_with(batch);
+        self.bookmark(BookmarkType::Reference).clear(tx);
+        self.bookmark(BookmarkType::User).clear(tx);
 
-        batch.delete_cf(Table::ObjectStatistics.get(), self.hash);
-        batch.delete_cf(Table::ObjectMetadata.get(), self.hash);
-        batch.delete_cf(Table::Objects.get(), self.hash);
+        Table::ObjectStatistics.delete(tx, self.hash);
+        Table::ObjectMetadata.delete(tx, self.hash);
+        Table::ObjectMetadata.delete(tx, self.hash);
+        Table::Objects.delete(tx, self.hash);
 
         Ok(())
     }
@@ -401,116 +400,107 @@ impl ObjectRef {
         self == &NULL_OBJECT
     }
 
-    /// Returns whether an object exists in the database or not;
-    pub fn exists(&self) -> Result<bool, crate::Error> {
-        Ok(db()
-            .get_cf(Table::ObjectMetadata.get(), self.hash)?
-            .is_some())
+    /// Returns whether an object exists in the database or not.
+    pub fn exists<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
+        Ok(Table::ObjectMetadata.has(tx, self.hash))
     }
 
     /// Returns the metadata on this object. This function returns `Ok(None)` if the object
     /// does not actually exist.
-    pub fn metadata(&self) -> Result<Option<ObjectMetadata>, crate::Error> {
-        match db().get_cf(Table::ObjectMetadata.get(), self.hash)? {
-            Some(serialized) => Ok(Some(bincode::deserialize(&serialized)?)),
-            None => Ok(None),
-        }
+    pub fn metadata<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectMetadata>, crate::Error> {
+        Ok(Table::ObjectMetadata
+            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
+            .transpose()?)
     }
 
     /// Gets statistics on this object. Returns `Ok(None)` if the object does not exist.
-    pub fn statistics(&self) -> Result<Option<ObjectStatistics>, crate::Error> {
-        if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
-            let statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
-            Ok(Some(statistics))
-        } else {
-            Ok(None)
-        }
+    pub fn statistics<Tx: TxHandle>(
+        &self,
+        tx: &Tx,
+    ) -> Result<Option<ObjectStatistics>, crate::Error> {
+        Ok(Table::ObjectStatistics
+            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
+            .transpose()?)
     }
 
     /// Update statistics indicating that this object was used. This will signal to the
     /// vacuum daemon that this object is useful and therefore a worse candidate for deletion.
     ///
     /// This function has no effect if the object does not exist.
-    fn touch(&self) -> Result<(), crate::Error> {
-        if let Some(statistics) = db().get_cf(Table::ObjectStatistics.get(), self.hash)? {
-            // This lock solves a possible TOCTOU problem between reading the statistics
-            // and applying the statistics. Merge operations could be used instead.
-            let statistics_lock = STATISTICS_MUTEXES[self.hash[0] as usize % 12]
-                .lock()
-                .expect("statistics mutex poisoned");
+    fn touch(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
+        let maybe_statistics: Option<ObjectStatistics> = Table::ObjectStatistics
+            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
+            .transpose()?;
 
-            let mut statistics: ObjectStatistics = bincode::deserialize(&statistics)?;
+        if let Some(mut statistics) = maybe_statistics {
             statistics.touch();
-            db().put_cf(
-                Table::ObjectStatistics.get(),
+
+            Table::ObjectStatistics.put(
+                tx,
                 self.hash,
                 bincode::serialize(&statistics).expect("can serialize"),
-            )?;
-
-            drop(statistics_lock);
+            );
         }
 
         Ok(())
     }
 
     /// Tries to resolve a content riddle against all objects currently in the database.
-    pub fn find(content_riddle: &Riddle, hint: &Hint) -> Result<Option<ObjectRef>, crate::Error> {
-        let iter = db().prefix_iterator_cf(Table::Objects.get(), hint.prefix());
-
-        for item in iter {
-            let (key, _) = item?;
-            let hash: Hash = match key.as_ref().try_into() {
+    pub fn find<Tx: TxHandle>(
+        tx: &Tx,
+        content_riddle: &Riddle,
+        hint: &Hint,
+    ) -> Result<Option<ObjectRef>, crate::Error> {
+        let outcome = Table::Objects.prefix(hint.prefix()).for_each(tx, |key, _| {
+            let hash: Hash = match key.try_into() {
                 Ok(hash) => hash,
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    continue;
+                    return None;
                 }
             };
 
             if content_riddle.resolves(&hash) {
-                return Ok(Some(ObjectRef { hash }));
+                return Some(ObjectRef { hash });
             }
-        }
 
-        Ok(None)
+            None
+        });
+
+        Ok(outcome)
     }
 
     /// Creates an object in the database.
     fn create_object_with(
-        batch: &mut rocksdb::WriteBatch,
+        tx: &mut WritableTx,
         hash: Hash,
         metadata: &ObjectMetadata,
         statistics: &ObjectStatistics,
         bookmark: bool,
     ) {
         // Do not insert if object already exists. This will overwrite information!
-        if ObjectRef::new(hash).exists().unwrap_or(false) {
+        if ObjectRef::new(hash).exists(tx).unwrap_or(false) {
             tracing::warn!("Object {hash} already exists in the database; skipping creation");
             return;
         }
-
-        batch.put_cf(Table::Objects.get(), hash, []);
-        batch.put_cf(
-            Table::ObjectMetadata.get(),
+        Table::Objects.put(tx, hash, []);
+        Table::ObjectMetadata.put(
+            tx,
             hash,
             bincode::serialize(&metadata).expect("can serialize"),
         );
-        batch.put_cf(
-            Table::ObjectStatistics.get(),
+        Table::ObjectStatistics.put(
+            tx,
             hash,
             bincode::serialize(&statistics).expect("can serialize"),
         );
 
         for chunk_hash in &metadata.hashes {
-            batch.merge_cf(
-                Table::ObjectChunkRefCount.get(),
-                chunk_hash,
-                bincode::serialize(&MergeOperation::Increment(1)).expect("can serialize"),
-            );
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(1).merger());
         }
 
         if bookmark {
-            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark_with(batch);
+            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark(tx);
         }
     }
 
@@ -524,9 +514,6 @@ impl ObjectRef {
         let mut buffer = header.buffer(); // start the first chunk with the serialized header
         let mut hashes = Vec::new();
         let mut source = source.into_iter();
-        // Locks are expected to be infrequent and short-lived. And we need this function
-        // not to be async.
-        let chunk_lock = CHUNK_RW_LOCK.blocking_read();
 
         loop {
             // Extend buffer until (a) source stops (b) error (c) reaches limit.
@@ -541,7 +528,7 @@ impl ObjectRef {
             content_size += buffer.len();
 
             let chunk_hash = Hash::from_bytes(&buffer);
-            db().put_cf(Table::ObjectChunks.get(), chunk_hash, &buffer)?;
+            Table::ObjectChunks.atomic_put(chunk_hash.as_ref(), buffer.as_slice());
             hashes.push(chunk_hash);
 
             // Buffer not fille to the brim: it's over!
@@ -565,11 +552,11 @@ impl ObjectRef {
 
         tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
 
-        let mut batch = rocksdb::WriteBatch::default();
-        ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, bookmark);
-        db().write(batch)?;
-
-        drop(chunk_lock);
+        writable_tx(|tx| {
+            ObjectRef::create_object_with(tx, hash, &metadata, &statistics, bookmark);
+            Ok(())
+        })
+        .unwrap();
 
         Ok(ObjectRef { hash })
     }
@@ -652,7 +639,6 @@ impl ObjectRef {
         let mut content_size = 0;
         let mut maybe_header = None;
         let mut limited_chunks = chunks.take(merkle_tree.len());
-        let chunk_lock = CHUNK_RW_LOCK.read().await;
 
         while let Some(chunk) = limited_chunks.next().await.transpose()? {
             // Check if hash actually corresponds to hash in merkle tree.
@@ -689,7 +675,7 @@ impl ObjectRef {
             }
 
             // Put chunk in the database
-            db().put_cf(Table::ObjectChunks.get(), received_hash, &chunk)?;
+            Table::ObjectChunks.atomic_put(received_hash.as_ref(), chunk.as_slice());
 
             // Emit received chunk:
             tracing::info!("Chunk {chunk_id} for object {hash} received");
@@ -725,15 +711,12 @@ impl ObjectRef {
         };
         let statistics = ObjectStatistics::new(content_size, query_duration);
 
-        let mut batch = rocksdb::WriteBatch::default();
-        ObjectRef::create_object_with(&mut batch, hash, &metadata, &statistics, false);
-        db().write(batch)?;
+        writable_tx(|tx| {
+            ObjectRef::create_object_with(tx, hash, &metadata, &statistics, false);
+            tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
 
-        drop(chunk_lock);
-
-        tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Create a copy of this object, but with a different nonce header value. This new object
@@ -754,14 +737,15 @@ impl ObjectRef {
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
     pub fn iter_bytes(&self, skip_header: bool) -> Result<Option<BytesIter>, crate::Error> {
-        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+        let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
+        {
             metadata
         } else {
             return Ok(None);
         };
 
         // Touched because a `BytesIter` is created.
-        self.touch()?;
+        writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(BytesIter {
             hashes: metadata.hashes.into_iter(),
@@ -776,14 +760,15 @@ impl ObjectRef {
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
     pub fn stream_content(&self, skip_header: bool) -> Result<Option<ContentStream>, crate::Error> {
-        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+        let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
+        {
             metadata
         } else {
             return Ok(None);
         };
 
-        // Touched because a `ContentStream` is created.
-        self.touch()?;
+        // Touched because a `BytesIter` is created.
+        writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(ContentStream {
             object_ref: self.clone(),
@@ -799,14 +784,15 @@ impl ObjectRef {
     ///
     /// This function returns `Ok(None)` if the object does not actually exist.
     pub fn iter_content(&self) -> Result<Option<ContentIter>, crate::Error> {
-        let metadata: ObjectMetadata = if let Some(metadata) = self.metadata()? {
+        let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
+        {
             metadata
         } else {
             return Ok(None);
         };
 
-        // Touched because a `ContentIter` was created.
-        self.touch()?;
+        // Touched because a `BytesIter` is created.
+        writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(ContentIter {
             hashes: metadata.hashes.into_iter(),
@@ -841,18 +827,21 @@ impl ObjectRef {
     /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`]. If the object
     /// does not exist in the database, this function returns `Ok(false)`. You need to further
     /// check if the object actually exists.
-    pub fn is_bookmarked(&self) -> Result<bool, crate::Error> {
+    pub fn is_bookmarked<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         let reference = Bookmark::new(BookmarkType::Reference, self.clone());
         let user = Bookmark::new(BookmarkType::User, self.clone());
 
-        Ok(reference.is_marked()? || user.is_marked()?)
+        Ok(reference.is_marked(tx)? || user.is_marked(tx)?)
     }
 
     /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the
     /// database, this function returns `Ok(true)`. You may need to further check if the object
     ///  actually exists.
-    pub fn is_draft(&self) -> Result<bool, crate::Error> {
-        Ok(self.metadata()?.map(|m| m.header.is_draft).unwrap_or(true))
+    pub fn is_draft<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
+        Ok(self
+            .metadata(tx)?
+            .map(|m| m.header.is_draft)
+            .unwrap_or(true))
     }
 
     /// Create a self-sealed object for this object. A self-sealed object is an object that is

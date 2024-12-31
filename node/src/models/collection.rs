@@ -1,7 +1,7 @@
 //! Collections are a set of objects indexed by human-readable names. Collections are
 //! powered by Patricia trees and inclusion proofs.
 
-use rocksdb::WriteBatch;
+use samizdat_common::db::{writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::borrow::Cow;
@@ -12,9 +12,9 @@ use std::str::FromStr;
 
 use samizdat_common::{Hash, Hint, PatriciaMap, PatriciaProof, Riddle};
 
-use crate::db::{db, Table};
+use crate::db::Table;
 
-use super::{Droppable, ObjectHeader, ObjectRef};
+use super::{ObjectHeader, ObjectRef};
 
 /// The function transforming an arbitrary string into its canonical path form.
 fn normalize(name: &str) -> Cow<str> {
@@ -188,14 +188,14 @@ pub struct CollectionItem {
 }
 
 impl Droppable for CollectionItem {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let path = self.name.as_path();
         let locator = self.collection.locator_for(path);
 
         tracing::info!("Removing item {}: {:#?}", locator, self);
 
-        batch.delete_cf(Table::CollectionItemLocators.get(), locator.path());
-        batch.delete_cf(Table::CollectionItems.get(), locator.hash());
+        Table::CollectionItemLocators.delete(tx, locator.path());
+        Table::CollectionItems.delete(tx, locator.hash());
 
         Ok(())
     }
@@ -243,58 +243,52 @@ impl CollectionItem {
 
     /// Runs through the database trying to find an item that fits to the supplied
     /// content riddle. Returns `Ok(None)` if no matching item is found.
-    pub fn find(
+    pub fn find<Tx: TxHandle>(
+        tx: &Tx,
         content_riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<CollectionItem>, crate::Error> {
-        let iter = db().prefix_iterator_cf(Table::CollectionItems.get(), hint.prefix());
+        let outcome = Table::CollectionItems
+            .prefix(hint.prefix())
+            .for_each(tx, |key, value| {
+                let hash: Hash = match key.try_into() {
+                    Ok(hash) => hash,
+                    Err(err) => {
+                        tracing::warn!("{}", err);
+                        return None;
+                    }
+                };
 
-        for item in iter {
-            let (key, value) = item?;
-            let hash: Hash = match key.as_ref().try_into() {
-                Ok(hash) => hash,
-                Err(err) => {
-                    tracing::warn!("{}", err);
-                    continue;
+                if content_riddle.resolves(&hash) {
+                    let item: CollectionItem =
+                        bincode::deserialize(value).expect("can deserialize");
+
+                    match item.object().and_then(|o| o.exists(tx)) {
+                        Ok(true) => return Some(Ok(item)),
+                        Ok(false) => return None,
+                        Err(err) => return Some(Err(err)),
+                    }
                 }
-            };
 
-            if content_riddle.resolves(&hash) {
-                let item: CollectionItem = bincode::deserialize(&value)?;
-                if item.object()?.exists()? {
-                    return Ok(Some(item));
-                }
-            }
-        }
+                None
+            })
+            .transpose()?;
 
-        Ok(None)
+        Ok(outcome)
     }
 
-    /// Inserts this collection item in the database using the supplied [`WriteBatch`].
-    pub fn insert_with(&self, batch: &mut WriteBatch) {
+    /// Inserts this collection item in the database using the supplied [`Tx`].
+    pub fn insert(&self, tx: &mut WritableTx<'_>) {
         let locator = self.collection.locator_for(self.name.as_path());
 
-        batch.put_cf(
-            Table::CollectionItems.get(),
+        Table::CollectionItems.put(
+            tx,
             locator.hash(),
             bincode::serialize(self).expect("can serialize"),
         );
-        batch.put_cf(
-            Table::CollectionItemLocators.get(),
-            locator.path(),
-            locator.hash(),
-        );
+        Table::CollectionItemLocators.put(tx, locator.path(), locator.hash());
 
         tracing::info!("Inserting item {}: {:#?}", locator, self);
-    }
-
-    /// Inserts this collection item in the database.
-    pub fn insert(&self) -> Result<(), crate::Error> {
-        let mut batch = WriteBatch::default();
-        self.insert_with(&mut batch);
-        db().write(batch)?;
-
-        Ok(())
     }
 }
 
@@ -306,10 +300,10 @@ pub struct CollectionRef {
 }
 
 impl Droppable for CollectionRef {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        for name in self.list() {
-            if let Some(item) = self.get(name?.as_path())? {
-                item.drop_if_exists_with(batch)?;
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
+        for name in self.list(tx) {
+            if let Some(item) = self.get(tx, name.as_path())? {
+                item.drop_if_exists_with(tx)?;
             }
         }
 
@@ -350,24 +344,22 @@ impl CollectionRef {
         let root = *patricia_map.root();
         let collection = CollectionRef { hash: root };
 
-        let mut batch = WriteBatch::default();
+        writable_tx(|tx| {
+            for (name, _object) in objects.as_ref() {
+                let item = CollectionItem {
+                    collection: collection.clone(),
+                    name: name.clone(),
+                    inclusion_proof: patricia_map
+                        .proof_for(name.hash())
+                        .expect("name exists in map"),
+                    is_draft,
+                };
 
-        for (name, _object) in objects.as_ref() {
-            let item = CollectionItem {
-                collection: collection.clone(),
-                name: name.clone(),
-                inclusion_proof: patricia_map
-                    .proof_for(name.hash())
-                    .expect("name exists in map"),
-                is_draft,
-            };
+                item.insert(tx);
+            }
 
-            item.insert_with(&mut batch);
-        }
-
-        db().write(batch)?;
-
-        Ok(collection)
+            Ok(collection)
+        })
     }
 
     /// Builds the locator for the supplied item name in the current collection.
@@ -381,36 +373,37 @@ impl CollectionRef {
     /// Looks up in the database for an item with the given name in the current
     /// collection. Note that the item must exist in the database for a result to be
     /// returned.
-    pub fn get(&self, name: ItemPath) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn get<Tx: TxHandle>(
+        &self,
+        tx: &Tx,
+        name: ItemPath,
+    ) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
-        locator.get()
+        locator.get(tx)
     }
 
     /// Returns an iterator over all the item paths for the current collection that
     /// currently exist in the database.
-    pub fn list(&'_ self) -> impl '_ + Iterator<Item = Result<ItemPathBuf, crate::Error>> {
-        db().prefix_iterator_cf(Table::CollectionItemLocators.get(), self.hash.as_ref())
-            .map(move |item| {
-                let (key, _) = item?;
-                Ok(ItemPathBuf::from(&*String::from_utf8_lossy(
-                    &key[self.hash.as_ref().len()..],
-                )))
+    pub fn list<Tx: TxHandle>(&self, tx: &Tx) -> Vec<ItemPathBuf> {
+        Table::CollectionItemLocators
+            .prefix(self.hash)
+            .collect(tx, |key, _| {
+                ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..]))
             })
     }
 
     /// Returns an iterator over all the objects for the current collection that
     /// currently exist in the database.
-    pub fn list_objects(&'_ self) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
-        self.list().filter_map(move |name| {
-            name.and_then(|name| {
-                let locator = Locator {
-                    collection: self.clone(),
-                    name: name.as_path(),
-                };
-
-                locator.get_object()
-            })
-            .transpose()
+    pub fn list_objects<'tx, Tx: TxHandle>(
+        &'tx self,
+        tx: &'tx Tx,
+    ) -> impl 'tx + Iterator<Item = Result<ObjectRef, crate::Error>> {
+        self.list(tx).into_iter().filter_map(move |name| {
+            let locator = Locator {
+                collection: self.clone(),
+                name: name.as_path(),
+            };
+            locator.get_object(tx).transpose()
         })
     }
 }
@@ -449,20 +442,15 @@ impl Locator<'_> {
     }
 
     /// Tries to retrieve the corresponding item from the database.
-    pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
-        let maybe_item = db().get_cf(Table::CollectionItems.get(), self.hash())?;
-
-        if let Some(item) = maybe_item {
-            let item: CollectionItem = bincode::deserialize(&item)?;
-            Ok(Some(item))
-        } else {
-            Ok(None)
-        }
+    pub fn get<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<CollectionItem>, crate::Error> {
+        Ok(Table::CollectionItems
+            .get(tx, self.hash(), |item| bincode::deserialize(item))
+            .transpose()?)
     }
 
     /// Tries to retrieve the corresponding object from the database.
-    pub fn get_object(&self) -> Result<Option<ObjectRef>, crate::Error> {
-        if let Some(item) = self.get()? {
+    pub fn get_object<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectRef>, crate::Error> {
+        if let Some(item) = self.get(tx)? {
             Ok(Some(item.object()?))
         } else {
             Ok(None)

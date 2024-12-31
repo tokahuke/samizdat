@@ -7,13 +7,12 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{SubsecRound, Utc};
 use futures::FutureExt;
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
 use serde_derive::Deserialize;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::{
-    CollectionRef, Droppable, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner,
-};
+use crate::models::{CollectionRef, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner};
 use crate::{hubs, security_scope};
 
 /// The entrypoint of the series API.
@@ -52,20 +51,24 @@ pub fn api() -> Router {
             "/",
             post(|Json(request): Json<PostSeriesOwnerRequest>| {
                 async move {
-                    if let Some(Keypair { private_key }) = request.keypair {
-                        SeriesOwner::import(
-                            &request.series_owner_name,
-                            private_key.parse()?,
-                            Duration::from_secs(3_600),
-                            request.is_draft,
-                        )
-                    } else {
-                        SeriesOwner::create(
-                            &request.series_owner_name,
-                            Duration::from_secs(3_600),
-                            request.is_draft,
-                        )
-                    }
+                    writable_tx(|tx| {
+                        if let Some(Keypair { private_key }) = request.keypair {
+                            SeriesOwner::import(
+                                tx,
+                                &request.series_owner_name,
+                                private_key.parse()?,
+                                Duration::from_secs(3_600),
+                                request.is_draft,
+                            )
+                        } else {
+                            SeriesOwner::create(
+                                tx,
+                                &request.series_owner_name,
+                                Duration::from_secs(3_600),
+                                request.is_draft,
+                            )
+                        }
+                    })
                 }
                 .map(ApiResponse)
             })
@@ -76,7 +79,7 @@ pub fn api() -> Router {
             "/:series_owner_name",
             get(|Path(series_owner_name): Path<String>| {
                 async move {
-                    let maybe_owner = SeriesOwner::get(&series_owner_name)?;
+                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
                     Ok(maybe_owner)
                 }
                 .map(ApiResponse)
@@ -88,7 +91,7 @@ pub fn api() -> Router {
             "/:series_owner_name",
             delete(|Path(series_owner_name): Path<String>| {
                 async move {
-                    let maybe_owner = SeriesOwner::get(&series_owner_name)?;
+                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
                     let existed = maybe_owner
                         .map(|owner| owner.drop_if_exists())
                         .transpose()?
@@ -101,7 +104,7 @@ pub fn api() -> Router {
         )
         .route(
             "/",
-            get(|| async move { SeriesOwner::get_all() }.map(ApiResponse))
+            get(|| async move { readonly_tx(|tx| SeriesOwner::get_all(tx)) }.map(ApiResponse))
                 .layer(security_scope!(AccessRight::ManageSeries)),
         )
         .route(
@@ -110,7 +113,9 @@ pub fn api() -> Router {
             post(
                 |Path(series_owner_name): Path<String>, Json(request): Json<PostEditionRequest>| {
                     async move {
-                        let Some(series_owner) = SeriesOwner::get(&series_owner_name)? else {
+                        let Some(series_owner) =
+                            readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?
+                        else {
                             return Err(crate::Error::Message(format!(
                                 "Series owner {} not found",
                                 series_owner_name
@@ -151,12 +156,15 @@ pub fn api() -> Router {
                         .expect("Collection build task failed")?;
 
                         // Create edition:
-                        let edition = series_owner.advance(
-                            collection,
-                            timestamp,
-                            request.ttl,
-                            request.kind,
-                        )?;
+                        let edition = writable_tx(|tx| {
+                            series_owner.advance(
+                                tx,
+                                collection,
+                                timestamp,
+                                request.ttl,
+                                request.kind,
+                            )
+                        })?;
 
                         if !request.no_announce {
                             let announcement = edition.announcement();

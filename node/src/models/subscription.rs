@@ -1,17 +1,19 @@
 //! A subscription is an active effort from the node to keep the full state of a given
 //! series as up-to-date as possible.
 
-use rocksdb::{IteratorMode, WriteBatch};
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
 
-use samizdat_common::{Hint, Key, Riddle};
+use samizdat_common::{
+    db::{Droppable, Table as _, TxHandle, WritableTx},
+    Hint, Key, Riddle,
+};
 
 use crate::db::Table;
-use crate::{db, hubs};
+use crate::hubs;
 
-use super::{Droppable, SeriesRef};
+use super::SeriesRef;
 
 /// The regimen of this subscription. Currently, only downloading the full inventory of
 /// the most current edition is supported.
@@ -54,8 +56,8 @@ impl Display for SubscriptionRef {
 }
 
 impl Droppable for SubscriptionRef {
-    fn drop_if_exists_with(&self, batch: &mut WriteBatch) -> Result<(), crate::Error> {
-        batch.delete_cf(Table::Subscriptions.get(), self.key());
+    fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
+        Table::Subscriptions.delete(tx, self.key());
         Ok(())
     }
 }
@@ -71,10 +73,8 @@ impl SubscriptionRef {
     // }
 
     /// Whether the subscription exists in the local database.
-    pub fn exists(&self) -> Result<bool, crate::Error> {
-        Ok(db()
-            .get_cf(Table::Subscriptions.get(), self.public_key.as_bytes())?
-            .is_some())
+    pub fn exists<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
+        Ok(Table::Subscriptions.has(tx, self.public_key.as_bytes()))
     }
 
     /// The key of this subscription in the database.
@@ -83,16 +83,15 @@ impl SubscriptionRef {
     }
 
     /// Creates a subscription and inserts it into the database.
-    pub fn build(subscription: Subscription) -> Result<SubscriptionRef, crate::Error> {
-        let mut batch = rocksdb::WriteBatch::default();
-
-        batch.put_cf(
-            Table::Subscriptions.get(),
+    pub fn build(
+        tx: &mut WritableTx,
+        subscription: Subscription,
+    ) -> Result<SubscriptionRef, crate::Error> {
+        Table::Subscriptions.put(
+            tx,
             subscription.public_key.as_bytes(),
             bincode::serialize(&subscription).expect("can serialize"),
         );
-
-        db().write(batch)?;
 
         let subscription_ref = SubscriptionRef {
             public_key: subscription.public_key,
@@ -112,7 +111,9 @@ impl SubscriptionRef {
                     .refresh()
                     .await
                     .map_err(|err| {
-                        tracing::error!("While refreshing {series} with {latest:?}, node got: {err}");
+                        tracing::error!(
+                            "While refreshing {series} with {latest:?}, node got: {err}"
+                        );
                     })
                     .ok();
             } else {
@@ -125,50 +126,43 @@ impl SubscriptionRef {
 
     /// Gets the subscription corresponding to this reference in the database, if it
     /// exists.
-    pub fn get(&self) -> Result<Option<Subscription>, crate::Error> {
-        let maybe_value = db().get_cf(Table::Subscriptions.get(), self.key())?;
-        Ok(maybe_value
-            .map(|value| bincode::deserialize(&value))
+    pub fn get<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<Subscription>, crate::Error> {
+        Ok(Table::Subscriptions
+            .get(tx, self.key(), |value| bincode::deserialize(value))
             .transpose()?)
     }
 
     /// Gets all subscriptions currently in the database.
-    pub fn get_all() -> Result<Vec<Subscription>, crate::Error> {
-        db().iterator_cf(Table::Subscriptions.get(), IteratorMode::Start)
-            .map(|item| {
-                let (_, value) = item?;
-                Ok(bincode::deserialize(&value)?)
-            })
-            .collect::<Result<Vec<_>, crate::Error>>()
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Subscription>, crate::Error> {
+        Table::Subscriptions
+            .range(..)
+            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 
     /// Runs through the database looking for a subscription the matches the supplied
     /// riddle. Returns `None` if no subscription matches the riddle.
-    pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SubscriptionRef>, crate::Error> {
-        let it = db().prefix_iterator_cf(Table::Subscriptions.get(), hint.prefix());
-
-        for item in it {
-            let (key, value) = item?;
-            match Key::from_bytes(&key) {
+    pub fn find<Tx: TxHandle>(
+        tx: &Tx,
+        riddle: &Riddle,
+        hint: &Hint,
+    ) -> Result<Option<SubscriptionRef>, crate::Error> {
+        let outcome = Table::Subscriptions
+            .prefix(hint.prefix())
+            .for_each(tx, |key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        match bincode::deserialize(&value) {
-                            Ok(subscription) => return Ok(Some(subscription)),
-                            Err(err) => {
-                                tracing::warn!("{}", err);
-                                break;
-                            }
-                        }
+                        Some(bincode::deserialize(value).expect("can deserialize"))
+                    } else {
+                        None
                     }
                 }
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    continue;
+                    None
                 }
-            }
-        }
+            });
 
-        Ok(None)
+        Ok(outcome)
     }
 
     /// Reserved for future use.

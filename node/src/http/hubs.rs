@@ -8,12 +8,14 @@ use axum::Json;
 use axum::Router;
 use futures::FutureExt;
 use samizdat_common::address::AddrResolutionMode;
+use samizdat_common::db::readonly_tx;
+use samizdat_common::db::writable_tx;
+use samizdat_common::db::Droppable;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::Droppable;
 use crate::models::Hub;
 use crate::security_scope;
 
@@ -42,7 +44,7 @@ fn hub() -> Router {
                         resolution_mode: request.resolution_mode,
                     };
 
-                    hub.insert()?;
+                    writable_tx(|tx| hub.insert(tx))?;
 
                     Ok(PostHubResponse {})
                 }
@@ -53,20 +55,22 @@ fn hub() -> Router {
         .route(
             // Lists all hubs.
             "/",
-            get(|| async move { Hub::get_all() }.map(ApiResponse))
+            get(|| async move { readonly_tx(|tx| Hub::get_all(tx)) }.map(ApiResponse))
                 .layer(security_scope!(AccessRight::ManageHubs)),
         )
         .route(
             // Lists a single hubs.
             "/:hub",
-            get(|Path(hub): Path<String>| async move { Hub::get(&hub) }.map(ApiResponse))
-                .layer(security_scope!(AccessRight::ManageHubs)),
+            get(|Path(hub): Path<String>| {
+                async move { readonly_tx(|tx| Hub::get(tx, &hub)) }.map(ApiResponse)
+            })
+            .layer(security_scope!(AccessRight::ManageHubs)),
         )
         .route(
             "/:hub",
             delete(|Path(hub): Path<String>| {
                 async move {
-                    let existed = if let Some(hub) = Hub::get(&hub)? {
+                    let existed = if let Some(hub) = readonly_tx(|tx| Hub::get(tx, &hub))? {
                         hub.drop_if_exists()?;
                         true
                     } else {

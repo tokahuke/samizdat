@@ -1,4 +1,14 @@
-node_modules/
-node_modules/
+/target
+**/data
+**/node_modules
+**/dist
+**/bin
+**/__pycache__
+
+.Samizdat.priv
 dist/
-target/
+.xwin-cache
+network.ryan
+**/*.tfvars
+**/.terraform
+.intentionally-empty-file.o

@@ -1,5 +1,4 @@
 use futures::prelude::*;
-use quinn::{ReadToEndError, RecvStream};
 use samizdat_common::address::{ChannelAddr, ChannelId};
 use std::collections::BTreeMap;
 use std::io;
@@ -8,6 +7,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::OwnedMutexGuard;
 use tokio::sync::{mpsc, Mutex, RwLock};
+
+use samizdat_common::quinn::{ReadToEndError, RecvStream};
 
 use super::connection_manager::{connection_manager, DropMode};
 use super::multiplexed::Multiplexed;

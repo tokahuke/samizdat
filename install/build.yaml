@@ -1,0 +1,64 @@
+project: samizdat-builder
+output: dist
+root: src
+
+env:
+  VERSION:
+    run: env/version.sh
+
+images:
+  js:
+    path: ../..
+    dockerfile: install/src/js/Dockerfile
+  rust:
+    path: ../..
+    platform: linux/amd64
+    dockerfile: install/src/rust/Dockerfile
+
+builders:
+  js:
+    image: js
+    command: install/src/js/build.sh
+  rust:
+    image: rust
+    command: install/src/rust/build.sh
+
+exports:
+  js:
+    samizdat.js:
+      from: js
+      import: /build/js/dist/samizdat.js
+  x86_64-unknown-linux-gnu:
+    node:
+      samizdat-node.service: ~
+      install.sh:
+        run: x86_64-unknown-linux-gnu/node/build-install.sh
+      samizdat-node:
+        from: rust
+        import: /build/target/x86_64-unknown-linux-gnu/release/samizdat-node
+      samizdat:
+        from: rust
+        import: /build/target/x86_64-unknown-linux-gnu/release/samizdat
+    hub:
+      samizdat-hub.service: ~
+      install.sh:
+        run: x86_64-unknown-linux-gnu/hub/build-install.sh
+      samizdat-hub:
+        from: rust
+        import: /build/target/x86_64-unknown-linux-gnu/release/samizdat-hub
+  aarch64-apple-darwin:
+    node:
+      samizdat-node:
+        from: rust
+        import: /build/target/aarch64-apple-darwin/release/samizdat-node
+      samizdat:
+        from: rust
+        import: /build/target/aarch64-apple-darwin/release/samizdat
+  x86_64-pc-windows-gnu:
+    node:
+      samizdat-node:
+        from: rust
+        import: /build/target/x86_64-pc-windows-gnu/release/samizdat-node
+      samizdat:
+        from: rust
+        import: /build/target/x86_64-pc-windows-gnu/release/samizdat

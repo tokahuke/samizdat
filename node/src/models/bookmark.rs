@@ -1,9 +1,9 @@
 //! Bookmarks prevent objects from being automatically deleted from the database.
 
-use rocksdb::WriteBatch;
+use samizdat_common::db::{Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::db::{db, MergeOperation, Table};
+use crate::db::{MergeOperation, Table};
 
 use super::ObjectRef;
 
@@ -45,76 +45,49 @@ impl Bookmark {
 
     /// Gets the number of times this bookmark was created. This only makes sense for
     /// reference bookmarks, which work like reference counting (i.e, `Rc` and `Arc`).
-    pub fn get_count(&self) -> Result<i16, crate::Error> {
-        let maybe_key = db().get_cf(Table::Bookmarks.get(), self.key())?;
-        let key: MergeOperation = maybe_key
-            .map(|key| bincode::deserialize(&key))
+    pub fn get_count<Tx: TxHandle>(&self, tx: &Tx) -> Result<i16, crate::Error> {
+        let operation: MergeOperation = Table::Bookmarks
+            .get(tx, self.key(), |serialized| {
+                bincode::deserialize(serialized)
+            })
             .transpose()?
             .unwrap_or_default();
-        Ok(key.eval_on_zero())
+
+        Ok(operation.eval_on_zero())
     }
 
     /// Whether this bookmark exists in the database.
-    pub fn is_marked(&self) -> Result<bool, crate::Error> {
-        Ok(self.get_count()? != 0)
+    pub fn is_marked<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
+        Ok(self.get_count(tx)? != 0)
     }
 
     /// Creates the bookmark in the database using the supplied [`WriteBatch`]. This will
     /// increase the count of reference bookmarks and set the count of user bookmarks to
     /// one.
-    pub fn mark_with(&self, batch: &mut WriteBatch) {
+    pub fn mark(&self, tx: &mut WritableTx<'_>) {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(1),
             BookmarkType::User => MergeOperation::Set(1),
         };
 
-        batch.merge_cf(
-            Table::Bookmarks.get(),
-            self.key(),
-            bincode::serialize(&operation).expect("can serialize"),
-        )
-    }
-
-    /// Creates the bookmark in the database. This will increase the count of reference
-    /// bookmarks and set the count of user bookmarks to one.
-    pub fn mark(&self) -> Result<(), crate::Error> {
-        let mut batch = WriteBatch::default();
-        self.mark_with(&mut batch);
-        db().write(batch)?;
-
-        Ok(())
+        Table::Bookmarks.map(tx, self.key(), operation.merger());
     }
 
     /// Removes the bookmark from the database using the supplied [`WriteBatch`]. This
     /// will decrease the count of reference bookmarks by one (or delete them if the
     /// count goes to zero) and delete user bookmarks.
-    pub fn unmark_with(&self, batch: &mut WriteBatch) {
+    pub fn unmark(&self, tx: &mut WritableTx<'_>) {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(-1),
             BookmarkType::User => MergeOperation::Set(0),
         };
 
-        batch.merge_cf(
-            Table::Bookmarks.get(),
-            self.key(),
-            bincode::serialize(&operation).expect("can serialize"),
-        )
+        Table::Bookmarks.map(tx, self.key(), operation.merger());
     }
 
-    /// Removes the bookmark from the database. This will decrease the count of
-    /// reference bookmarks by one (or delete them if the count goes to zero) and delete
-    /// user bookmarks.
-    pub fn unmark(&self) -> Result<(), crate::Error> {
-        let mut batch = WriteBatch::default();
-        self.unmark_with(&mut batch);
-        db().write(batch)?;
-
-        Ok(())
-    }
-
-    /// Deletes the bookmark from the database using the supplied [`WriteBatch`],
+    /// Deletes the bookmark from the database using the supplied [`Tx`],
     /// _regardless_ of the reference count.
-    pub fn clear_with(&self, batch: &mut WriteBatch) {
-        batch.delete_cf(Table::Bookmarks.get(), self.key())
+    pub fn clear(&self, tx: &mut WritableTx<'_>) {
+        Table::Bookmarks.delete(tx, self.key());
     }
 }

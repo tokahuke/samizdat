@@ -7,13 +7,13 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
+use samizdat_common::db::readonly_tx;
 use transport::channel_manager;
 use transport::connection_manager;
 pub use transport::PEER_CONNECTIONS;
 
 use futures::prelude::*;
 use futures::stream;
-use quinn::Connection;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tarpc::client::NewClient;
@@ -28,6 +28,7 @@ use tokio::time::Instant;
 use samizdat_common::address::ChannelAddr;
 use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
+use samizdat_common::quinn::Connection;
 use samizdat_common::rpc::*;
 use samizdat_common::Hint;
 use samizdat_common::HASH_LEN;
@@ -382,7 +383,7 @@ impl Hubs {
 
     /// Initiates the set of all hub connections.
     pub async fn init() -> Result<Hubs, crate::Error> {
-        let all_hub_models = models::Hub::get_all()?;
+        let all_hub_models = readonly_tx(|tx| models::Hub::get_all(tx))?;
         let mut resolved_addresses = vec![];
 
         for hub_model in all_hub_models {

@@ -2,7 +2,7 @@
 //! that is not used anymore.
 
 use ordered_float::NotNan;
-use rocksdb::{IteratorMode, WriteBatch};
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
@@ -14,10 +14,8 @@ use samizdat_common::heap_entry::HeapEntry;
 use samizdat_common::Hash;
 
 use crate::cli::cli;
-use crate::db::{db, MergeOperation, Table, CHUNK_RW_LOCK};
-use crate::models::{
-    CollectionItem, Droppable, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior,
-};
+use crate::db::{MergeOperation, Table};
+use crate::models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior};
 
 /// Status for a vacuum task.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -34,16 +32,16 @@ pub enum VacuumStatus {
 pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // STEP 1: make up space if needed, deleting rarely used stuff:
 
-    // Do the vacuum operation atomically to avoid mishaps (resource leakage):
-    let mut batch = WriteBatch::default();
-
     // Test whether you should vacuum:
     let mut total_size = 0;
-    for item in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
-        let (_, value) = item?;
-        let statistics: ObjectStatistics = bincode::deserialize(&value)?;
-        total_size += statistics.size();
-    }
+    Table::ObjectStatistics
+        .range(..)
+        .atomic_for_each(|_, statistics| {
+            total_size += bincode::deserialize::<ObjectStatistics>(statistics)
+                .expect("can deserialize")
+                .size();
+            None as Option<()>
+        });
 
     // If within limits, very ok!
     if total_size < cli().max_storage * 1_000_000 {
@@ -58,52 +56,65 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     let use_prior = UsePrior::default();
 
     // Test what is good and what isn't:
-    for item in db().iterator_cf(Table::ObjectStatistics.get(), IteratorMode::Start) {
-        let (key, value) = item?;
-        let statistics: ObjectStatistics = bincode::deserialize(&value)?;
-        heap.push(HeapEntry {
-            priority: Reverse(
-                NotNan::try_from(statistics.byte_usefulness(&use_prior))
-                    .expect("byte usefulness was nan"),
-            ),
-            content: (key, statistics.size()),
+    Table::ObjectStatistics
+        .range(..)
+        .atomic_for_each(|key, value| {
+            let statistics: ObjectStatistics =
+                bincode::deserialize(value).expect("can deserialize");
+            heap.push(HeapEntry {
+                priority: Reverse(
+                    NotNan::try_from(statistics.byte_usefulness(&use_prior))
+                        .expect("byte usefulness was nan"),
+                ),
+                content: (key.to_vec(), statistics.size()),
+            });
+
+            None as Option<()>
         });
-    }
 
     // Prune until you get under the threshold.
     let mut status = VacuumStatus::Done;
     let mut dropped = BTreeSet::new();
-    while total_size >= cli().max_storage * 1_000_000 {
-        if let Some(HeapEntry {
-            content: (key, size),
-            ..
-        }) = heap.pop()
-        {
-            let object = ObjectRef::new(Hash::new(key));
-            if !object.is_bookmarked()? {
-                object.drop_if_exists_with(&mut batch)?;
-                dropped.insert(*object.hash());
-                total_size -= size;
+
+    writable_tx(|tx| {
+        while total_size >= cli().max_storage * 1_000_000 {
+            if let Some(HeapEntry {
+                content: (key, size),
+                ..
+            }) = heap.pop()
+            {
+                let object = ObjectRef::new(Hash::new(key));
+                if !readonly_tx(|tx| object.is_bookmarked(tx))? {
+                    object.drop_if_exists_with(tx)?;
+                    dropped.insert(*object.hash());
+                    total_size -= size;
+                }
+            } else {
+                status = VacuumStatus::Insufficient;
+                break;
             }
-        } else {
-            status = VacuumStatus::Insufficient;
-            break;
         }
-    }
 
-    tracing::debug!("to drop: {:#?}", dropped);
+        tracing::debug!("to drop: {:#?}", dropped);
 
-    // Prune items:
-    for item in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
-        let (_, value) = item?;
-        let item: CollectionItem = bincode::deserialize(&value)?;
-        if dropped.contains(item.inclusion_proof.claimed_value()) {
-            item.drop_if_exists_with(&mut batch)?;
+        // Prune items:
+        let mut items_to_drop = vec![];
+
+        Table::CollectionItems.range(..).for_each(tx, |_, value| {
+            let item: CollectionItem = bincode::deserialize(value).expect("can deserialize");
+            if dropped.contains(item.inclusion_proof.claimed_value()) {
+                items_to_drop.push(item);
+            }
+
+            None as Option<()>
+        });
+
+        for item in items_to_drop {
+            item.drop_if_exists_with(tx)?;
         }
-    }
 
-    // Apply all changes atomically:
-    db().write(batch)?;
+        Ok(())
+    })?;
 
     // STEP 2: garbage collection:
     let dropped_chunks = drop_orphan_chunks()?;
@@ -171,16 +182,18 @@ pub async fn run_vacuum_daemon() {
 
 /// Flushes the whole local cash.
 pub fn flush_all() {
-    // This is slow and inefficient, but at least it will be correct.
-    for item in db().iterator_cf(Table::ObjectMetadata.get(), IteratorMode::Start) {
-        match item {
-            Ok((hash, _)) => {
-                let object = ObjectRef::new(Hash::new(hash));
-                if let Err(err) = object.drop_if_exists() {
-                    tracing::warn!("Failed to drop {object:?}: {err}");
-                }
-            }
-            Err(err) => tracing::warn!("Failed to load an object from db for deletion: {err}"),
+    let mut all_objects = vec![];
+
+    Table::ObjectMetadata.range(..).atomic_for_each(|hash, _| {
+        all_objects.push(ObjectRef::new(Hash::new(hash)));
+        None as Option<()>
+    });
+
+    // No transaction here! Might take too long. Better to break in smaller
+    // one-per-object chunks.
+    for object in all_objects {
+        if let Err(err) = object.drop_if_exists() {
+            tracing::warn!("Failed to drop {object:?}: {err}");
         }
     }
 }
@@ -189,27 +202,25 @@ pub fn flush_all() {
 pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
     let mut ref_counts = BTreeMap::new();
 
-    for item in db().iterator_cf(Table::ObjectMetadata.get(), IteratorMode::Start) {
-        let (_, metadata) = item?;
-        let metadata: ObjectMetadata = bincode::deserialize(&metadata)?;
-        for chunk_hash in metadata.hashes {
-            *ref_counts.entry(chunk_hash).or_default() += 1;
+    Table::ObjectMetadata
+        .range(..)
+        .atomic_for_each(|_, metadata| {
+            let metadata: ObjectMetadata = bincode::deserialize(metadata).expect("can deserialize");
+
+            for chunk_hash in metadata.hashes {
+                *ref_counts.entry(chunk_hash).or_default() += 1;
+            }
+
+            None as Option<()>
+        });
+
+    writable_tx(|tx| {
+        for (hash, ref_count) in ref_counts {
+            Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger());
         }
-    }
 
-    let mut batch = rocksdb::WriteBatch::default();
-
-    for (hash, ref_count) in ref_counts {
-        batch.merge_cf(
-            Table::ObjectChunkRefCount.get(),
-            hash,
-            bincode::serialize(&MergeOperation::Set(ref_count)).expect("can serialize"),
-        );
-    }
-
-    db().write(batch)?;
-
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Drop chunks not associated with any object, i.e., those where the reference count has
@@ -219,45 +230,67 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
 ///
 /// Only call this function in a __blocking__ context. If `async` is needed, refactor!
 fn drop_orphan_chunks() -> Result<usize, crate::Error> {
-    // This is only called in a blocking context:
-    let chunk_lock = CHUNK_RW_LOCK.blocking_write();
-    let mut batch = rocksdb::WriteBatch::default();
+    let mut chunks_to_drop = vec![];
 
-    for item in db().iterator_cf(Table::ObjectChunkRefCount.get(), IteratorMode::Start) {
-        let (hash, ref_count) = item?;
-        let hash = Hash::new(hash);
-        let ref_count: MergeOperation = bincode::deserialize(&ref_count)?;
+    Table::ObjectChunkRefCount
+        .range(..)
+        .atomic_for_each(|hash, ref_count| {
+            let hash = Hash::new(hash);
+            let ref_count: MergeOperation =
+                bincode::deserialize(ref_count).expect("can deserialize");
 
-        match ref_count.eval_on_zero() {
-            1.. => {}
-            0 => batch.delete_cf(Table::ObjectChunks.get(), hash),
-            neg => tracing::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
+            match ref_count.eval_on_zero() {
+                1.. => {}
+                0 => chunks_to_drop.push(hash),
+                neg => tracing::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
+            }
+
+            None as Option<()>
+        });
+
+    writable_tx(|tx| {
+        let dropped = chunks_to_drop.len();
+
+        for hash in chunks_to_drop {
+            Table::ObjectChunks.delete(tx, hash);
         }
-    }
 
-    let dropped = batch.len();
-
-    db().write(batch)?;
-    drop(chunk_lock);
-
-    Ok(dropped)
+        Ok(dropped)
+    })
 }
 
 /// Drop items that don't point to anything anymore.
 fn drop_dangling_items() -> Result<usize, crate::Error> {
-    let mut batch = rocksdb::WriteBatch::default();
+    let mut items_to_drop = vec![];
 
-    for item in db().iterator_cf(Table::CollectionItems.get(), IteratorMode::Start) {
-        let (_, item) = item?;
-        let item: CollectionItem = bincode::deserialize(&item)?;
+    let outcome = readonly_tx(|tx| {
+        Table::CollectionItems.range(..).for_each(tx, |_, item| {
+            let item: CollectionItem = bincode::deserialize(item).expect("can deserialize");
 
-        if !item.object()?.exists()? {
-            item.drop_if_exists_with(&mut batch)?;
-        }
+            item.object()
+                .and_then(|o| o.exists(tx))
+                .map(|exists| {
+                    if !exists {
+                        items_to_drop.push(item);
+                    }
+                })
+                .err()?;
+
+            None
+        })
+    });
+
+    if let Some(err) = outcome {
+        return Err(err);
     }
 
-    let dropped = batch.len();
-    db().write(batch)?;
+    writable_tx(|tx| {
+        let dropped = items_to_drop.len();
 
-    Ok(dropped)
+        for item in items_to_drop {
+            item.drop_if_exists_with(tx)?;
+        }
+
+        Ok(dropped)
+    })
 }

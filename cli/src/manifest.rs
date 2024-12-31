@@ -72,7 +72,10 @@ impl Manifest {
         fs::write("./Samizdat.toml", rendered)?;
         let manifest = toml::from_str(&fs::read_to_string("./Samizdat.toml")?)?;
 
-        Ok((manifest, PrivateKey::from(response.keypair.to_scalar_bytes())))
+        Ok((
+            manifest,
+            PrivateKey::from(response.keypair.to_scalar_bytes()),
+        ))
     }
 
     pub fn run_build(&self, is_release: bool) -> Result<(), anyhow::Error> {

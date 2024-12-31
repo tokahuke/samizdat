@@ -1,0 +1,15 @@
+[Unit]
+Description=Samizdat Node
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+Environment=RUST_BACKTRACE=1
+ExecStart=/usr/local/bin/samizdat-node --data /var/lib/samizdat/node/
+
+[Install]
+WantedBy=multi-user.target

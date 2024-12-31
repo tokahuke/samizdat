@@ -1,7 +1,7 @@
 use base64_url::base64;
-use thiserror::Error;
 use std::io;
 use tarpc::client::RpcError;
+use thiserror::Error;
 
 /// Possible errors that can occur within Samizdat.
 #[derive(Debug, Error)]
@@ -18,7 +18,7 @@ pub enum Error {
     Base64(base64::DecodeError),
     /// Errors from the database.
     #[error("db error: {}", _0)]
-    Db(rocksdb::Error),
+    Db(jammdb::Error),
     /// IO error.
     #[error("io error: {}", _0)]
     Io(io::Error),
@@ -75,8 +75,8 @@ impl From<&'static str> for Error {
     }
 }
 
-impl From<rocksdb::Error> for Error {
-    fn from(e: rocksdb::Error) -> Error {
+impl From<jammdb::Error> for Error {
+    fn from(e: jammdb::Error) -> Error {
         Error::Db(e)
     }
 }

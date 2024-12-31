@@ -1,7 +1,0 @@
-[package]
-name = "samizdat-service"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-windows-service = "0.6.0"

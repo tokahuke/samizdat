@@ -5,6 +5,7 @@ use axum::response::Redirect;
 use axum::routing::get;
 use axum::Router;
 use futures::FutureExt;
+use samizdat_common::db::readonly_tx;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
@@ -77,7 +78,7 @@ pub fn api() -> Router {
         .route(
             // Lists all known public keys the node has seen, be they locally owned or not.
             "/",
-            get(|| async move { SeriesRef::get_all() }.map(ApiResponse))
+            get(|| async move { readonly_tx(|tx| SeriesRef::get_all(tx)) }.map(ApiResponse))
                 .layer(security_scope!(AccessRight::ManageSeries)),
         )
 }

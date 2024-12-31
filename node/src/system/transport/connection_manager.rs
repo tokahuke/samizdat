@@ -1,7 +1,8 @@
 use futures::future::join;
-use quinn::{Connection, Endpoint, Incoming};
 use samizdat_common::quic;
 use std::{net::SocketAddr, sync::OnceLock};
+
+use samizdat_common::quinn::{Connection, Endpoint, Incoming};
 
 use crate::utils;
 

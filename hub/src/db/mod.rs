@@ -2,63 +2,13 @@
 
 mod migrations;
 
-use std::fmt::Display;
-use std::{collections::BTreeSet, sync::OnceLock};
-use strum::IntoEnumIterator;
-use strum_macros::{EnumIter, IntoStaticStr};
+use samizdat_common::db::Migration;
+use strum_macros::{IntoStaticStr, VariantArray};
 
-use crate::CLI;
-
-/// The handle to the RocksDB database.
-static DB: OnceLock<rocksdb::DB> = OnceLock::new();
-
-/// Retrieves a reference to the RocksDB database. Must be called after initialization.
-pub fn db<'a>() -> &'a rocksdb::DB {
-    DB.get().expect("db not initialized")
-}
-
-/// Initializes the RocksDB for use by the Samizdat hub.
-pub fn init_db() -> Result<(), crate::Error> {
-    tracing::info!("Starting RocksDB");
-
-    let db_path = format!("{}/db", CLI.data.as_str());
-
-    // Make sure all column families are initialized;
-    // (ignore db error in this case because db may not exist; let it explode later...)
-    let existing_cf_names = rocksdb::DB::list_cf(&rocksdb::Options::default(), &db_path)
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let needed_cf_names = Table::names().collect::<BTreeSet<_>>();
-    let useless_cfs = existing_cf_names
-        .difference(&needed_cf_names)
-        .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, rocksdb::Options::default()));
-
-    // Database options:
-    let mut db_opts = rocksdb::Options::default();
-    db_opts.create_missing_column_families(true);
-    db_opts.create_if_missing(true);
-
-    // Open with _all_ column families (otherwise RocksDB will complain. Yes, that is the
-    // default behavior. No, you can't change that):
-    let db = rocksdb::DB::open_cf_descriptors(
-        &db_opts,
-        &db_path,
-        Table::descriptors().chain(useless_cfs),
-    )?;
-
-    DB.set(db).ok();
-
-    // Run possible migrations (needs DB set, but still requires exclusive access):
-    tracing::info!("RocksDB up. Running migrations...");
-    migrations::migrate()?;
-    tracing::info!("... done running all migrations.");
-
-    Ok(())
-}
+pub use samizdat_common::db::init_db;
 
 /// All column families in the RocksDB database.
-#[derive(Debug, Clone, Copy, EnumIter, IntoStaticStr)]
+#[derive(Debug, Clone, Copy, VariantArray, IntoStaticStr)]
 pub enum Table {
     /// Global, singleton information.
     Global,
@@ -70,34 +20,14 @@ pub enum Table {
     BlacklistedIps,
 }
 
-impl Display for Table {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", <&'static str>::from(self))
-    }
-}
+impl samizdat_common::db::Table for Table {
+    const MIGRATIONS: Self = Table::Migrations;
 
-impl Table {
-    /// An iterator for all column family descriptors in the database.
-    fn descriptors() -> impl Iterator<Item = rocksdb::ColumnFamilyDescriptor> {
-        Table::iter().map(Table::descriptor)
+    fn base_migration() -> Box<dyn Migration<Self>> {
+        Box::new(migrations::BaseMigration)
     }
 
-    /// An iterator for all column family names in the database.
-    fn names() -> impl Iterator<Item = String> {
-        Table::iter().map(|table| table.to_string())
-    }
-
-    /// Descriptor for column family initialization.
-    fn descriptor(self) -> rocksdb::ColumnFamilyDescriptor {
-        let column_opts = rocksdb::Options::default();
-        let name = self.to_string();
-
-        rocksdb::ColumnFamilyDescriptor::new(name, column_opts)
-    }
-
-    /// Gets the underlying column family after database initialization.
-    pub fn get<'a>(self) -> &'a rocksdb::ColumnFamily {
-        let db = db();
-        db.cf_handle(self.into()).expect("column family exists")
+    fn discriminant(self) -> usize {
+        self as usize
     }
 }

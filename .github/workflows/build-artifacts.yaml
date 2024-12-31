@@ -1,9 +1,8 @@
 name: Check
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+
 
 jobs:
   check:
@@ -13,20 +12,11 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v2
     
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        default: true
-        profile: minimal
-
-    - name: Running cache
-      uses: Swatinem/rust-cache@v1
-      with:
-        cache-on-failure: true
+    - name: Setup virtualenv
+      run: cd install && poetry lock
     
-    - name: Running `cargo check`
-      run: cargo check
+    - name: Run install builder
+      run: cd install && poetry run python builder
 
     - name: Done
       run: echo Done
