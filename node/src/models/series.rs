@@ -4,7 +4,7 @@
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use futures::prelude::*;
-use samizdat_common::db::{writable_tx, Droppable, Table as _, WritableTx};
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -69,6 +69,7 @@ impl SeriesOwner {
 
     /// Creates a new [`SeriesOwner`] and inserts it into the database.
     pub fn create(
+        tx: &mut WritableTx,
         name: &str,
         default_ttl: Duration,
         is_draft: bool,
@@ -80,14 +81,13 @@ impl SeriesOwner {
             is_draft,
         };
 
-        writable_tx(|tx| {
-            owner.insert(tx);
-            Ok(owner)
-        })
+        owner.insert(tx);
+        Ok(owner)
     }
 
     /// Creates a [`SeriesOwner`] from existing data and inserts it into the database.
     pub fn import(
+        tx: &mut WritableTx,
         name: &str,
         private_key: PrivateKey,
         default_ttl: Duration,
@@ -100,26 +100,24 @@ impl SeriesOwner {
             is_draft,
         };
 
-        writable_tx(|tx| {
-            owner.insert(tx);
-            Ok(owner)
-        })
+        owner.insert(tx);
+        Ok(owner)
     }
 
     /// Retrieves a series owner from the database using the internal series name.
-    pub fn get(name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
+    pub fn get<Tx: TxHandle>(tx: &Tx, name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
         Ok(Table::SeriesOwners
-            .atomic_get(name.as_bytes(), |serialized| {
+            .get(tx, name.as_bytes(), |serialized| {
                 bincode::deserialize(serialized)
             })
             .transpose()?)
     }
 
     /// Gets all series owners in this node.
-    pub fn get_all() -> Result<Vec<SeriesOwner>, crate::Error> {
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesOwner>, crate::Error> {
         Table::SeriesOwners
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 
     /// Retrieves the series reference for this series owner.
@@ -156,34 +154,33 @@ impl SeriesOwner {
     /// Advances the series by creating a new edition and inserting it into the database.
     pub fn advance(
         &self,
+        tx: &mut WritableTx,
         collection: CollectionRef,
         timestamp: chrono::DateTime<Utc>,
         ttl: Option<Duration>,
         kind: EditionKind,
     ) -> Result<Edition, crate::Error> {
-        writable_tx(|tx| {
-            // But first, unbookmark all your old assets...
-            if let Some(edition) = self.series().get_last_edition() {
-                for object in edition.collection().list_objects() {
-                    object?.bookmark(BookmarkType::Reference).unmark_with(tx);
-                }
+        // But first, unbookmark all your old assets...
+        if let Some(edition) = self.series().get_last_edition(tx) {
+            for object in edition.collection().list_objects(tx).collect::<Vec<_>>() {
+                object?.bookmark(BookmarkType::Reference).unmark(tx);
             }
+        }
 
-            // ... and bookmark all your new ones
-            for object in collection.list_objects() {
-                object?.bookmark(BookmarkType::Reference).mark_with(tx);
-            }
+        // ... and bookmark all your new ones
+        for object in collection.list_objects(tx).collect::<Vec<_>>() {
+            object?.bookmark(BookmarkType::Reference).mark(tx);
+        }
 
-            let edition = self.sign(collection, timestamp, ttl, kind);
+        let edition = self.sign(collection, timestamp, ttl, kind);
 
-            Table::Editions.put(
-                tx,
-                edition.key(),
-                bincode::serialize(&edition).expect("can serialize"),
-            );
+        Table::Editions.put(
+            tx,
+            edition.key(),
+            bincode::serialize(&edition).expect("can serialize"),
+        );
 
-            Ok(edition)
-        })
+        Ok(edition)
     }
 }
 
@@ -238,10 +235,14 @@ impl SeriesRef {
 
     /// Runs through the database looking for a series that matches the supplied riddle.
     /// Returns `Ok(None)` if none is found.
-    pub fn find(riddle: &Riddle, hint: &Hint) -> Result<Option<SeriesRef>, crate::Error> {
+    pub fn find<Tx: TxHandle>(
+        tx: &Tx,
+        riddle: &Riddle,
+        hint: &Hint,
+    ) -> Result<Option<SeriesRef>, crate::Error> {
         let outcome = Table::Series
             .prefix(hint.prefix())
-            .atomic_for_each(|key, value| match Key::from_bytes(key) {
+            .for_each(tx, |key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
                         Some(bincode::deserialize(value).expect("can deserialize"))
@@ -259,9 +260,9 @@ impl SeriesRef {
     }
 
     /// Whether there is a local "series owner" for this series.
-    pub fn is_locally_owned(&self) -> Result<bool, crate::Error> {
+    pub fn is_locally_owned<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
-        let outcome = Table::SeriesOwners.range(..).atomic_for_each(|_, owner| {
+        let outcome = Table::SeriesOwners.range(..).for_each(tx, |_, owner| {
             let owner: SeriesOwner = bincode::deserialize(owner).expect("can deserialize");
             if self.public_key.as_ref() == &owner.keypair.verifying_key() {
                 Some(true)
@@ -274,9 +275,10 @@ impl SeriesRef {
     }
 
     /// Set this series as just recently refresh.
-    pub fn refresh(&self) -> Result<(), crate::Error> {
+    pub fn refresh(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         tracing::info!("Setting series {self} as fresh");
-        Table::SeriesFreshnesses.atomic_put(
+        Table::SeriesFreshnesses.put(
+            tx,
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
         );
@@ -285,9 +287,10 @@ impl SeriesRef {
     }
 
     /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
-    pub fn mark_delayed(&self) -> Result<(), crate::Error> {
+    pub fn mark_delayed(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         tracing::info!("Setting series {self} as delayed");
-        Table::SeriesFreshnesses.atomic_put(
+        Table::SeriesFreshnesses.put(
+            tx,
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
         );
@@ -296,10 +299,10 @@ impl SeriesRef {
     }
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
-    pub fn is_fresh(&self) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_last_edition() {
+    pub fn is_fresh<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
+        let is_fresh = if let Some(latest) = self.get_last_edition(tx) {
             Table::SeriesFreshnesses
-                .atomic_get(self.key(), |freshness| {
+                .get(tx, self.key(), |freshness| {
                     let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(freshness)?;
                     let ttl = chrono::Duration::from_std(latest.signed.ttl)
                         .expect("can convert duration");
@@ -318,21 +321,25 @@ impl SeriesRef {
     /// Returns the latest editions for a series in the local database, no matter the
     /// freshness or local ownership. This iterator is guaranteed to yield items in
     /// reverse chronological order.
-    pub fn get_editions(&'_ self) -> impl Send + Sync + Iterator<Item = Edition> {
-        let all_editions: Vec<Edition> = Table::Editions
-            .prefix(self.key())
-            .atomic_collect(|_, value| bincode::deserialize(value).expect("can deserialize"));
+    pub fn get_editions<Tx: TxHandle>(
+        &self,
+        tx: &Tx,
+    ) -> impl Send + Sync + Iterator<Item = Edition> {
+        let all_editions: Vec<Edition> =
+            Table::Editions.prefix(self.key()).collect(tx, |_, value| {
+                bincode::deserialize(value).expect("can deserialize")
+            });
 
         all_editions.into_iter().rev()
     }
 
     /// Gets the last edition for this series in the database.
-    pub fn get_last_edition(&self) -> Option<Edition> {
-        self.get_editions().next()
+    pub fn get_last_edition<Tx: TxHandle>(&self, tx: &Tx) -> Option<Edition> {
+        self.get_editions(tx).next()
     }
 
     /// Advances the series with the supplied edition, if the edition is valid.
-    pub fn advance(&self, edition: &Edition) -> Result<(), crate::Error> {
+    pub fn advance(&self, tx: &mut WritableTx, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {
             return Err(crate::Error::InvalidEdition);
         }
@@ -341,30 +348,28 @@ impl SeriesRef {
             return Err(crate::Error::DifferentPublicKeys);
         }
 
-        writable_tx(|tx| {
-            // Insert series if you don't have it yet.
-            Table::Series.put(
-                tx,
-                self.key(),
-                bincode::serialize(&self).expect("can serialize"),
-            );
-            Table::Editions.put(
-                tx,
-                edition.key(),
-                bincode::serialize(&edition).expect("can serialize"),
-            );
+        // Insert series if you don't have it yet.
+        Table::Series.put(
+            tx,
+            self.key(),
+            bincode::serialize(&self).expect("can serialize"),
+        );
+        Table::Editions.put(
+            tx,
+            edition.key(),
+            bincode::serialize(&edition).expect("can serialize"),
+        );
 
-            // TODO: do some cleanup on the old values.
+        // TODO: do some cleanup on the old values.
 
-            Ok(())
-        })
+        Ok(())
     }
 
     /// Gets all the series references in the database.
-    pub fn get_all() -> Result<Vec<SeriesRef>, crate::Error> {
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesRef>, crate::Error> {
         Table::Series
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 }
 
@@ -493,9 +498,12 @@ impl Edition {
             .locator_for(ItemPath::from(inventory_location.as_str()))
             .hash();
 
-        let series = self.series();
-        series.advance(self)?;
-        series.refresh()?;
+        writable_tx(|tx| {
+            let series = self.series();
+            series.advance(tx, self)?;
+            series.refresh(tx)?;
+            Ok(())
+        })?;
 
         if let Some(received_item) = hubs()
             .query_with_retry(
@@ -525,7 +533,7 @@ impl Edition {
 
             // Make the necessary calls indiscriminately:
             for (item_path, hash) in &inventory {
-                if !ObjectRef::new(*hash).exists()? {
+                if !readonly_tx(|tx| ObjectRef::new(*hash).exists(tx))? {
                     let content_hash = collection.locator_for(item_path.as_path()).hash();
                     tokio::spawn(
                         hubs()
@@ -552,10 +560,10 @@ impl Edition {
     }
 
     /// Gets all the editions currently in the database.
-    pub fn get_all() -> Result<Vec<Edition>, crate::Error> {
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Edition>, crate::Error> {
         Table::Editions
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 }
 
@@ -563,7 +571,7 @@ impl Edition {
 fn generate_series_ownership() {
     println!(
         "{}",
-        SeriesOwner::create("a series", Duration::from_secs(3600), true)
+        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
             .unwrap()
             .series()
     );
@@ -571,7 +579,9 @@ fn generate_series_ownership() {
 
 #[test]
 fn validate_edition() {
-    let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
+    let owner =
+        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
+            .unwrap();
     let _series = owner.series();
     let current_collection = CollectionRef::rand();
     let edition = owner.sign(current_collection, Utc::now(), None, EditionKind::Base);
@@ -581,10 +591,14 @@ fn validate_edition() {
 
 #[test]
 fn not_validate_edition() {
-    let owner = SeriesOwner::create("a series", Duration::from_secs(3600), true).unwrap();
+    let owner =
+        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
+            .unwrap();
 
-    let other_owner =
-        SeriesOwner::create("another series", Duration::from_secs(3600), true).unwrap();
+    let other_owner = writable_tx(|tx| {
+        SeriesOwner::create(tx, "another series", Duration::from_secs(3600), true)
+    })
+    .unwrap();
     let other_series = other_owner.series();
 
     let current_collection = CollectionRef::rand();

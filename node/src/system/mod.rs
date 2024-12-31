@@ -7,6 +7,7 @@ mod transport;
 
 pub use file_transfer::{ReceivedItem, ReceivedObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
+use samizdat_common::db::readonly_tx;
 use transport::channel_manager;
 use transport::connection_manager;
 pub use transport::PEER_CONNECTIONS;
@@ -382,7 +383,7 @@ impl Hubs {
 
     /// Initiates the set of all hub connections.
     pub async fn init() -> Result<Hubs, crate::Error> {
-        let all_hub_models = models::Hub::get_all()?;
+        let all_hub_models = readonly_tx(|tx| models::Hub::get_all(tx))?;
         let mut resolved_addresses = vec![];
 
         for hub_model in all_hub_models {

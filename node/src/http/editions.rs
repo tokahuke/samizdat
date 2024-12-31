@@ -3,6 +3,7 @@
 use axum::routing::get;
 use axum::Router;
 use futures::FutureExt;
+use samizdat_common::db::readonly_tx;
 
 use crate::models::Edition;
 use crate::{access::AccessRight, security_scope};
@@ -17,7 +18,7 @@ pub fn api() -> Router {
 fn editions() -> Router {
     Router::new().route(
         "/",
-        get(|| async move { Edition::get_all() }.map(ApiResponse))
+        get(|| async move { readonly_tx(|tx| Edition::get_all(tx)) }.map(ApiResponse))
             .layer(security_scope!(AccessRight::ManageSeries)),
     )
 }

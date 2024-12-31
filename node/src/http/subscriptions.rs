@@ -4,7 +4,7 @@ use axum::extract::Path;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::FutureExt;
-use samizdat_common::db::Droppable;
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
 use serde_derive::Deserialize;
 
 use samizdat_common::Key;
@@ -30,10 +30,12 @@ pub fn api() -> Router {
             "/",
             post(|Json(request): Json<PostSubscriptionRequest>| {
                 async move {
-                    let subscription = SubscriptionRef::build(Subscription::new(
-                        request.public_key.parse()?,
-                        request.kind,
-                    ));
+                    let subscription = writable_tx(|tx| {
+                        SubscriptionRef::build(
+                            tx,
+                            Subscription::new(request.public_key.parse()?, request.kind),
+                        )
+                    });
                     Ok(subscription?.public_key.to_string())
                 }
                 .map(ApiResponse)
@@ -47,7 +49,7 @@ pub fn api() -> Router {
                 async move {
                     let subscription_ref = SubscriptionRef::new(public_key);
 
-                    if subscription_ref.exists()? {
+                    if readonly_tx(|tx| subscription_ref.exists(tx))? {
                         subscription_ref.trigger_manual_refresh();
                         Ok(())
                     } else {
@@ -64,7 +66,7 @@ pub fn api() -> Router {
             delete(|Path(public_key): Path<Key>| {
                 async move {
                     let subscription = SubscriptionRef::new(public_key);
-                    let existed = subscription.get()?.is_some();
+                    let existed = readonly_tx(|tx| subscription.get(tx))?.is_some();
                     subscription.drop_if_exists()?;
                     Ok(existed)
                 }
@@ -77,7 +79,8 @@ pub fn api() -> Router {
             "/:key",
             get(|Path(public_key): Path<Key>| {
                 async move {
-                    let maybe_subscription = SubscriptionRef::new(public_key).get()?;
+                    let maybe_subscription =
+                        readonly_tx(|tx| SubscriptionRef::new(public_key).get(tx))?;
                     Ok(maybe_subscription)
                 }
                 .map(ApiResponse)
@@ -86,7 +89,7 @@ pub fn api() -> Router {
         )
         .route(
             "/",
-            get(|| async move { SubscriptionRef::get_all() }.map(ApiResponse))
+            get(|| async move { readonly_tx(|tx| SubscriptionRef::get_all(tx)) }.map(ApiResponse))
                 .layer(security_scope!(AccessRight::ManageSubscriptions)),
         )
 }

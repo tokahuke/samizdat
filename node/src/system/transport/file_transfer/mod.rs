@@ -10,6 +10,7 @@ use std::time::Duration;
 use brotli::{CompressorReader, Decompressor};
 use futures::prelude::*;
 use samizdat_common::cipher::TransferCipher;
+use samizdat_common::db::{readonly_tx, writable_tx};
 use samizdat_common::{Hash, MerkleTree};
 use serde_derive::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -381,7 +382,7 @@ pub async fn send_object(
                     // This doesn't make stuff much faster, but... I did it on the
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
-                        let chunk_content = models::get_chunk(chunk)?;
+                        let chunk_content = models::atomic_get_chunk(chunk)?;
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()
@@ -466,13 +467,17 @@ pub async fn recv_item(
     let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
 
     // Insert item (should already be validated by this point.)
-    item.insert()?;
+    writable_tx(|tx| {
+        item.insert(tx);
+        Ok(())
+    })
+    .expect("infallible");
 
     // Get object ref:
     let object_ref = ObjectRef::new(merkle_tree.root());
 
     // Go away if you already have what you wanted:
-    if object_ref.exists()? || object_ref.is_null() {
+    if readonly_tx(|tx| object_ref.exists(tx))? || object_ref.is_null() {
         if object_ref.is_null() {
             tracing::info!("Got null object as response. Ending transmission");
         } else {
@@ -577,7 +582,7 @@ pub async fn send_item(
                     // This doesn't make stuff much faster, but... I did it on the
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
-                        let chunk_content = models::get_chunk(chunk)?;
+                        let chunk_content = models::atomic_get_chunk(chunk)?;
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()

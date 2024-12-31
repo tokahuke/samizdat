@@ -1,7 +1,7 @@
 //! Collections are a set of objects indexed by human-readable names. Collections are
 //! powered by Patricia trees and inclusion proofs.
 
-use samizdat_common::db::{writable_tx, Droppable, Table as _, WritableTx};
+use samizdat_common::db::{writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::borrow::Cow;
@@ -243,13 +243,14 @@ impl CollectionItem {
 
     /// Runs through the database trying to find an item that fits to the supplied
     /// content riddle. Returns `Ok(None)` if no matching item is found.
-    pub fn find(
+    pub fn find<Tx: TxHandle>(
+        tx: &Tx,
         content_riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<CollectionItem>, crate::Error> {
         let outcome = Table::CollectionItems
             .prefix(hint.prefix())
-            .atomic_for_each(|key, value| {
+            .for_each(tx, |key, value| {
                 let hash: Hash = match key.try_into() {
                     Ok(hash) => hash,
                     Err(err) => {
@@ -262,7 +263,7 @@ impl CollectionItem {
                     let item: CollectionItem =
                         bincode::deserialize(value).expect("can deserialize");
 
-                    match item.object().and_then(|o| o.exists()) {
+                    match item.object().and_then(|o| o.exists(tx)) {
                         Ok(true) => return Some(Ok(item)),
                         Ok(false) => return None,
                         Err(err) => return Some(Err(err)),
@@ -277,7 +278,7 @@ impl CollectionItem {
     }
 
     /// Inserts this collection item in the database using the supplied [`Tx`].
-    pub fn insert_with(&self, tx: &mut WritableTx<'_>) {
+    pub fn insert(&self, tx: &mut WritableTx<'_>) {
         let locator = self.collection.locator_for(self.name.as_path());
 
         Table::CollectionItems.put(
@@ -288,14 +289,6 @@ impl CollectionItem {
         Table::CollectionItemLocators.put(tx, locator.path(), locator.hash());
 
         tracing::info!("Inserting item {}: {:#?}", locator, self);
-    }
-
-    /// Inserts this collection item in the database.
-    pub fn insert(&self) -> Result<(), crate::Error> {
-        writable_tx(|tx| {
-            self.insert_with(tx);
-            Ok(())
-        })
     }
 }
 
@@ -308,8 +301,8 @@ pub struct CollectionRef {
 
 impl Droppable for CollectionRef {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
-        for name in self.list() {
-            if let Some(item) = self.get(name.as_path())? {
+        for name in self.list(tx) {
+            if let Some(item) = self.get(tx, name.as_path())? {
                 item.drop_if_exists_with(tx)?;
             }
         }
@@ -362,7 +355,7 @@ impl CollectionRef {
                     is_draft,
                 };
 
-                item.insert_with(tx);
+                item.insert(tx);
             }
 
             Ok(collection)
@@ -380,30 +373,37 @@ impl CollectionRef {
     /// Looks up in the database for an item with the given name in the current
     /// collection. Note that the item must exist in the database for a result to be
     /// returned.
-    pub fn get(&self, name: ItemPath) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn get<Tx: TxHandle>(
+        &self,
+        tx: &Tx,
+        name: ItemPath,
+    ) -> Result<Option<CollectionItem>, crate::Error> {
         let locator = self.locator_for(name);
-        locator.get()
+        locator.get(tx)
     }
 
     /// Returns an iterator over all the item paths for the current collection that
     /// currently exist in the database.
-    pub fn list(&'_ self) -> Vec<ItemPathBuf> {
+    pub fn list<Tx: TxHandle>(&self, tx: &Tx) -> Vec<ItemPathBuf> {
         Table::CollectionItemLocators
             .prefix(self.hash)
-            .atomic_collect(|key, _| {
+            .collect(tx, |key, _| {
                 ItemPathBuf::from(&*String::from_utf8_lossy(&key[self.hash.as_ref().len()..]))
             })
     }
 
     /// Returns an iterator over all the objects for the current collection that
     /// currently exist in the database.
-    pub fn list_objects(&'_ self) -> impl '_ + Iterator<Item = Result<ObjectRef, crate::Error>> {
-        self.list().into_iter().filter_map(move |name| {
+    pub fn list_objects<'tx, Tx: TxHandle>(
+        &'tx self,
+        tx: &'tx Tx,
+    ) -> impl 'tx + Iterator<Item = Result<ObjectRef, crate::Error>> {
+        self.list(tx).into_iter().filter_map(move |name| {
             let locator = Locator {
                 collection: self.clone(),
                 name: name.as_path(),
             };
-            locator.get_object().transpose()
+            locator.get_object(tx).transpose()
         })
     }
 }
@@ -442,15 +442,15 @@ impl Locator<'_> {
     }
 
     /// Tries to retrieve the corresponding item from the database.
-    pub fn get(&self) -> Result<Option<CollectionItem>, crate::Error> {
+    pub fn get<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<CollectionItem>, crate::Error> {
         Ok(Table::CollectionItems
-            .atomic_get(self.hash(), |item| bincode::deserialize(item))
+            .get(tx, self.hash(), |item| bincode::deserialize(item))
             .transpose()?)
     }
 
     /// Tries to retrieve the corresponding object from the database.
-    pub fn get_object(&self) -> Result<Option<ObjectRef>, crate::Error> {
-        if let Some(item) = self.get()? {
+    pub fn get_object<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectRef>, crate::Error> {
+        if let Some(item) = self.get(tx)? {
             Ok(Some(item.object()?))
         } else {
             Ok(None)

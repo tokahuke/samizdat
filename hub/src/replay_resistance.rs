@@ -37,8 +37,7 @@ impl ReplayResistance {
                 let mut nonces_to_drop = vec![];
 
                 Table::RecentNonces.range(..).atomic_for_each(|key, value| {
-                    let then =
-                        i64::from_be_bytes(value.try_into().expect("bad timestamp from db"));
+                    let then = i64::from_be_bytes(value.try_into().expect("bad timestamp from db"));
                     if now - then > 2 * TOLERATED_AGE {
                         // Errors here are leaky, but not a security risk.
                         nonces_to_drop.push(key.to_vec());

@@ -2,7 +2,7 @@
 //! that is not used anymore.
 
 use ordered_float::NotNan;
-use samizdat_common::db::{writable_tx, Droppable, Table as _};
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
@@ -84,7 +84,7 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
             }) = heap.pop()
             {
                 let object = ObjectRef::new(Hash::new(key));
-                if !object.is_bookmarked()? {
+                if !readonly_tx(|tx| object.is_bookmarked(tx))? {
                     object.drop_if_exists_with(tx)?;
                     dropped.insert(*object.hash());
                     total_size -= size;
@@ -205,8 +205,7 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
     Table::ObjectMetadata
         .range(..)
         .atomic_for_each(|_, metadata| {
-            let metadata: ObjectMetadata =
-                bincode::deserialize(metadata).expect("can deserialize");
+            let metadata: ObjectMetadata = bincode::deserialize(metadata).expect("can deserialize");
 
             for chunk_hash in metadata.hashes {
                 *ref_counts.entry(chunk_hash).or_default() += 1;
@@ -217,11 +216,7 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
 
     writable_tx(|tx| {
         for (hash, ref_count) in ref_counts {
-            Table::ObjectChunkRefCount.map(
-                tx,
-                hash,
-                MergeOperation::Set(ref_count).merger(),
-            );
+            Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger());
         }
 
         Ok(())
@@ -268,19 +263,21 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
 fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 
-    let outcome = Table::CollectionItems.range(..).atomic_for_each(|_, item| {
-        let item: CollectionItem = bincode::deserialize(item).expect("can deserialize");
+    let outcome = readonly_tx(|tx| {
+        Table::CollectionItems.range(..).for_each(tx, |_, item| {
+            let item: CollectionItem = bincode::deserialize(item).expect("can deserialize");
 
-        item.object()
-            .and_then(|o| o.exists())
-            .map(|exists| {
-                if !exists {
-                    items_to_drop.push(item);
-                }
-            })
-            .err()?;
+            item.object()
+                .and_then(|o| o.exists(tx))
+                .map(|exists| {
+                    if !exists {
+                        items_to_drop.push(item);
+                    }
+                })
+                .err()?;
 
-        None
+            None
+        })
     });
 
     if let Some(err) = outcome {

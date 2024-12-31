@@ -5,7 +5,7 @@ use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use futures::FutureExt;
-use samizdat_common::db::Droppable;
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
 use samizdat_common::Hash;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -132,8 +132,13 @@ fn object_bookmark() -> Router {
             // by the vacuum daemon.
             "/:hash/bookmark",
             post(|Path(hash): Path<Hash>| {
-                async move { ObjectRef::new(hash).bookmark(BookmarkType::User).mark() }
-                    .map(ApiResponse)
+                async move {
+                    writable_tx(|tx| {
+                        ObjectRef::new(hash).bookmark(BookmarkType::User).mark(tx);
+                        Ok(())
+                    })
+                }
+                .map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::ManageBookmarks)),
         )
@@ -146,9 +151,11 @@ fn object_bookmark() -> Router {
             "/:hash/bookmark",
             get(|Path(hash): Path<Hash>| {
                 async move {
-                    ObjectRef::new(hash)
-                        .bookmark(BookmarkType::User)
-                        .is_marked()
+                    readonly_tx(|tx| {
+                        ObjectRef::new(hash)
+                            .bookmark(BookmarkType::User)
+                            .is_marked(tx)
+                    })
                 }
                 .map(ApiResponse)
             })
@@ -158,8 +165,13 @@ fn object_bookmark() -> Router {
             // Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
             "/:hash/bookmark",
             delete(|Path(hash): Path<Hash>| {
-                async move { ObjectRef::new(hash).bookmark(BookmarkType::User).unmark() }
-                    .map(ApiResponse)
+                async move {
+                    writable_tx(|tx| {
+                        ObjectRef::new(hash).bookmark(BookmarkType::User).unmark(tx);
+                        Ok(())
+                    })
+                }
+                .map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::ManageBookmarks)),
         )
@@ -176,9 +188,11 @@ fn object_stats() -> Router {
             "/:hash/reference-count",
             get(|Path(hash): Path<Hash>| {
                 async move {
-                    ObjectRef::new(hash)
-                        .bookmark(BookmarkType::Reference)
-                        .get_count()
+                    readonly_tx(|tx| {
+                        ObjectRef::new(hash)
+                            .bookmark(BookmarkType::Reference)
+                            .get_count(tx)
+                    })
                 }
                 .map(ApiResponse)
             })
@@ -187,7 +201,8 @@ fn object_stats() -> Router {
         .route(
             "/:hash/stats",
             get(|Path(hash): Path<Hash>| {
-                async move { ObjectRef::new(hash).statistics() }.map(ApiResponse)
+                async move { readonly_tx(|tx| ObjectRef::new(hash).statistics(tx)) }
+                    .map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::GetObjectStats)),
         )
@@ -195,9 +210,12 @@ fn object_stats() -> Router {
             "/:hash/stats/byte-usefulness",
             get(|Path(hash): Path<Hash>| {
                 async move {
-                    ObjectRef::new(hash).statistics().map(|stats| {
-                        stats
-                            .map(|stats| stats.byte_usefulness(&crate::models::UsePrior::default()))
+                    readonly_tx(|tx| {
+                        ObjectRef::new(hash).statistics(tx).map(|stats| {
+                            stats.map(|stats| {
+                                stats.byte_usefulness(&crate::models::UsePrior::default())
+                            })
+                        })
                     })
                 }
                 .map(ApiResponse)

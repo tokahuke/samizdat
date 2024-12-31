@@ -3,6 +3,7 @@
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use futures::TryStreamExt;
+use samizdat_common::db::{readonly_tx, writable_tx};
 use tokio::time::Instant;
 
 use samizdat_common::rpc::QueryKind;
@@ -90,7 +91,7 @@ fn resolve_existing_object(
     object: ObjectRef,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Resolved, crate::Error> {
-    let metadata = object.metadata()?.expect("object exists");
+    let metadata = readonly_tx(|tx| object.metadata(tx))?.expect("object exists");
     let content_stream = object.stream_content(true)?.expect("object exists");
 
     Ok(Resolved {
@@ -99,7 +100,10 @@ fn resolve_existing_object(
             .into_iter()
             .chain([
                 ("ETag", format!("\"{}\"", object.hash())),
-                ("X-Samizdat-Bookmark", object.is_bookmarked()?.to_string()),
+                (
+                    "X-Samizdat-Bookmark",
+                    readonly_tx(|tx| object.is_bookmarked(tx))?.to_string(),
+                ),
                 (
                     "X-Samizdat-Is-Draft",
                     metadata.header.is_draft().to_string(),
@@ -127,7 +131,7 @@ pub async fn resolve_object(
         .into_response());
     }
 
-    if object.exists()? {
+    if readonly_tx(|tx| object.exists(tx))? {
         tracing::info!("Found local hash {}", object.hash());
         return Ok(resolve_existing_object(object, ext_headers)?.into_response());
     }
@@ -174,7 +178,7 @@ pub async fn resolve_item(
     )]);
 
     tracing::info!("Resolving item {locator}");
-    if let Some(item) = locator.get()? {
+    if let Some(item) = readonly_tx(|tx| locator.get(tx))? {
         // If the object is known locally, we can simply deffer to querying the object.
         tracing::info!("Found item {locator} locally. Resolving object.");
         let object = item.object().expect("found invalid object for item");
@@ -227,29 +231,31 @@ pub async fn resolve_series(
     tracing::info!("Resolving series item {series}/{name}");
 
     tracing::info!("Ensuring series {series} is fresh");
-    if !series.is_fresh()? {
+    if !readonly_tx(|tx| series.is_fresh(tx))? {
         tracing::info!("Series is not fresh. Asking the network...");
         if let Some(latest) = hubs().get_latest(&series).await {
             tracing::info!("Found an edition (new or existing): {latest:?}. Inserting");
-            series.advance(&latest)?;
-            series.refresh()?;
+            writable_tx(|tx| {
+                series.advance(tx, &latest)?;
+                series.refresh(tx)
+            })?;
         } else {
             tracing::info!(
                 "No edition returned from the network for series {series}. Does it exist?"
             );
-            series.mark_delayed()?;
+            writable_tx(|tx| series.mark_delayed(tx))?;
         }
     }
 
     tracing::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
-    for edition in series.get_editions() {
+    for edition in readonly_tx(|tx| series.get_editions(tx).collect::<Vec<_>>()) {
         empty = false;
         tracing::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());
 
-        let maybe_item = if let Some(item) = locator.get()? {
+        let maybe_item = if let Some(item) = readonly_tx(|tx| locator.get(tx))? {
             tracing::info!("Found item {locator} locally. Resolving object.");
             Some(item)
         } else {
@@ -258,7 +264,7 @@ pub async fn resolve_series(
                 .query(locator.hash(), QueryKind::Item, deadline)
                 .await;
 
-            locator.get()?
+            readonly_tx(|tx| locator.get(tx))?
         };
 
         if let Some(item) = maybe_item {

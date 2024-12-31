@@ -2,7 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use samizdat_common::{
     address::AddrResolutionMode,
-    db::{Droppable, Table as _, WritableTx},
+    db::{Droppable, Table as _, TxHandle, WritableTx},
 };
 
 use crate::db::Table;
@@ -24,11 +24,12 @@ impl Droppable for Hub {
 
 impl Hub {
     /// Inserts the current identity in the database using the supplied [`WriteBatch`].
-    pub fn insert(&self) -> Result<(), crate::Error> {
+    pub fn insert(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         let hub = self.clone();
         tokio::spawn(async move { crate::hubs().insert(hub).await });
 
-        Table::Hubs.atomic_put(
+        Table::Hubs.put(
+            tx,
             self.address.as_str(),
             bincode::serialize(&self).expect("can serialize"),
         );
@@ -37,15 +38,15 @@ impl Hub {
     }
 
     /// Lists all hubs currently in the database.
-    pub fn get_all() -> Result<Vec<Hub>, crate::Error> {
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Hub>, crate::Error> {
         Table::Hubs
             .range(..)
-            .atomic_collect(|_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 
-    pub fn get(address: &str) -> Result<Option<Hub>, crate::Error> {
+    pub fn get<Tx: TxHandle>(tx: &Tx, address: &str) -> Result<Option<Hub>, crate::Error> {
         Ok(Table::Hubs
-            .atomic_get(address, |k| bincode::deserialize(k))
+            .get(tx, address, |k| bincode::deserialize(k))
             .transpose()?)
     }
 }

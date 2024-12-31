@@ -1,6 +1,7 @@
 use brotli::{CompressorReader, Decompressor};
 use chrono::TimeZone;
 use futures::prelude::*;
+use samizdat_common::db::readonly_tx;
 use samizdat_common::MerkleTree;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
@@ -165,8 +166,7 @@ impl ObjectMessage {
             });
         }
 
-        let mut metadata = object
-            .metadata()?
+        let mut metadata = readonly_tx(|tx| object.metadata(tx))?
             .ok_or_else(|| format!("Object message for inexistent object: {object:?}"))?;
 
         // Need to omit some details before sending through the wire:

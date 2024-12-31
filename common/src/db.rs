@@ -1,12 +1,14 @@
 //! The Samizdat Hub database, based on top of RocksDb.
 
-use lmdb::{Cursor, Transaction, WriteFlags};
+use lmdb::{Cursor, DatabaseFlags, Transaction, WriteFlags};
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::{Bound, RangeBounds};
 use std::sync::OnceLock;
 
+/// Maximum lmdb size. Approx. 68GB; may be changed later...
+const MAP_SIZE: usize = 1 << 36;
 static DB: OnceLock<Database> = OnceLock::new();
 
 /// Initializes the database at the suppiled path using the supplied table type. This
@@ -15,6 +17,11 @@ static DB: OnceLock<Database> = OnceLock::new();
 pub fn init_db<T: Table>(root: &str) -> Result<(), crate::Error> {
     let database = Database::init::<T>(root)?;
     DB.set(database).expect("DB was already initialized");
+
+    // Run possible migrations (needs DB set, but still requires exclusive access):
+    tracing::info!("running migrations...");
+    T::base_migration().migrate()?;
+    tracing::info!("... done running all migrations.");
 
     Ok(())
 }
@@ -34,8 +41,10 @@ impl Database {
     fn init<T: Table>(root: &str) -> Result<Database, crate::Error> {
         let db_path = format!("{root}/lmdb");
         tracing::info!("starting LMDB on {db_path}");
+        std::fs::create_dir_all(&db_path)?;
         let environment = lmdb::Environment::new()
             .set_max_dbs(T::VARIANTS.len() as u32)
+            .set_map_size(MAP_SIZE)
             .open(db_path.as_ref())
             .map_err(|err| format!("failed to start LMDB: {err}"))?;
 
@@ -44,15 +53,10 @@ impl Database {
         for table in T::VARIANTS {
             let name = (*table).into();
             let handle = environment
-                .open_db(Some(name))
+                .create_db(Some(name), DatabaseFlags::default())
                 .map_err(|err| format!("failed to open table {name}: {err}"))?;
             tables.push(handle);
         }
-
-        // Run possible migrations (needs DB set, but still requires exclusive access):
-        tracing::info!("running migrations...");
-        T::base_migration().migrate()?;
-        tracing::info!("... done running all migrations.");
 
         Ok(Database {
             environment,
@@ -232,6 +236,15 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    #[must_use]
+    fn has<Tx, K>(self, tx: &Tx, key: K) -> bool
+    where
+        Tx: TxHandle,
+        K: AsRef<[u8]>,
+    {
+        self.get(tx, key, |_| ()).is_some()
+    }
+
     fn put<K, V>(self, tx: &mut WritableTx, key: K, value: V)
     where
         K: AsRef<[u8]>,
@@ -310,39 +323,12 @@ where
     }
 
     #[must_use]
-    pub fn atomic_collect<C, F, V>(self, mut map: F) -> C
+    pub fn atomic_collect<C, F, V>(self, map: F) -> C
     where
         F: FnMut(&[u8], &[u8]) -> V,
         C: FromIterator<V>,
     {
-        readonly_tx(|tx| {
-            let mut cursor = tx
-                .get_tx()
-                .open_ro_cursor(self.table.get_handle())
-                .expect("failed to open readonly cursor");
-            let iter = match self.range.start_bound() {
-                Bound::Included(start) => cursor.iter_from(start),
-                Bound::Excluded(_) => panic!("not supported"),
-                Bound::Unbounded => cursor.iter_start(),
-            };
-
-            match self.range.end_bound() {
-                Bound::Included(end) => C::from_iter(
-                    iter.map(|item| item.expect("unable to advance cursor"))
-                        .take_while(|(key, _)| key <= end)
-                        .map(|(key, value)| map(key, value)),
-                ),
-                Bound::Excluded(end) => C::from_iter(
-                    iter.map(|item| item.expect("unable to advance cursor"))
-                        .take_while(|(key, _)| key < end)
-                        .map(|(key, value)| map(key, value)),
-                ),
-                Bound::Unbounded => C::from_iter(
-                    iter.map(|item| item.expect("unable to advance cursor"))
-                        .map(|(key, value)| map(key, value)),
-                ),
-            }
-        })
+        readonly_tx(|tx| self.collect(tx, map))
     }
 
     pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Option<U>
@@ -399,6 +385,41 @@ where
 
         None
     }
+
+    #[must_use]
+    pub fn collect<Tx, C, F, V>(self, tx: &Tx, mut map: F) -> C
+    where
+        Tx: TxHandle,
+        F: FnMut(&[u8], &[u8]) -> V,
+        C: FromIterator<V>,
+    {
+        let mut cursor = tx
+            .get_tx()
+            .open_ro_cursor(self.table.get_handle())
+            .expect("failed to open readonly cursor");
+        let iter = match self.range.start_bound() {
+            Bound::Included(start) => cursor.iter_from(start),
+            Bound::Excluded(_) => panic!("not supported"),
+            Bound::Unbounded => cursor.iter_start(),
+        };
+
+        match self.range.end_bound() {
+            Bound::Included(end) => C::from_iter(
+                iter.map(|item| item.expect("unable to advance cursor"))
+                    .take_while(|(key, _)| key <= end)
+                    .map(|(key, value)| map(key, value)),
+            ),
+            Bound::Excluded(end) => C::from_iter(
+                iter.map(|item| item.expect("unable to advance cursor"))
+                    .take_while(|(key, _)| key < end)
+                    .map(|(key, value)| map(key, value)),
+            ),
+            Bound::Unbounded => C::from_iter(
+                iter.map(|item| item.expect("unable to advance cursor"))
+                    .map(|(key, value)| map(key, value)),
+            ),
+        }
+    }
 }
 
 pub struct TablePrefix<T, P>
@@ -423,25 +444,12 @@ where
     }
 
     #[must_use]
-    pub fn atomic_collect<C, F, V>(self, mut map: F) -> C
+    pub fn atomic_collect<C, F, V>(self, map: F) -> C
     where
         F: FnMut(&[u8], &[u8]) -> V,
         C: FromIterator<V>,
     {
-        readonly_tx(|tx| {
-            let mut cursor = tx
-                .get_tx()
-                .open_ro_cursor(self.table.get_handle())
-                .expect("failed to open readonly cursor");
-
-            C::from_iter(
-                cursor
-                    .iter_from(self.prefix.as_ref())
-                    .map(|item| item.expect("unable to advance cursor"))
-                    .take_while(|(key, _)| key.starts_with(self.prefix.as_ref()))
-                    .map(|(key, value)| map(key, value)),
-            )
-        })
+        readonly_tx(|tx| self.collect(tx, map))
     }
 
     pub fn atomic_delete(self) {
@@ -496,6 +504,27 @@ where
         }
 
         None
+    }
+
+    #[must_use]
+    pub fn collect<Tx, C, F, V>(self, tx: &Tx, mut map: F) -> C
+    where
+        Tx: TxHandle,
+        F: FnMut(&[u8], &[u8]) -> V,
+        C: FromIterator<V>,
+    {
+        let mut cursor = tx
+            .get_tx()
+            .open_ro_cursor(self.table.get_handle())
+            .expect("failed to open readonly cursor");
+
+        C::from_iter(
+            cursor
+                .iter_from(self.prefix.as_ref())
+                .map(|item| item.expect("unable to advance cursor"))
+                .take_while(|(key, _)| key.starts_with(self.prefix.as_ref()))
+                .map(|(key, value)| map(key, value)),
+        )
     }
 }
 

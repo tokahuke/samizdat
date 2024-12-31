@@ -8,6 +8,7 @@ mod room;
 
 use futures::prelude::*;
 use lazy_static::lazy_static;
+use samizdat_common::db::readonly_tx;
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::io;
 use std::net::SocketAddr;
@@ -336,7 +337,7 @@ pub async fn run_direct(
             let remote_addr = utils::socket_to_canonical(connecting.remote_address());
 
             // Validate if address is not blacklisted:
-            if BlacklistedIp::get(remote_addr.ip())
+            if readonly_tx(|tx| BlacklistedIp::get(tx, remote_addr.ip()))
                 .expect("db error")
                 .is_some()
             {

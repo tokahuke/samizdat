@@ -1,6 +1,7 @@
 //! RPC implementation for the Node. This RPC is called by the hubs to trigger object resolution.
 
 use futures::prelude::*;
+use samizdat_common::db::readonly_tx;
 use std::sync::Arc;
 use tarpc::context;
 
@@ -40,8 +41,8 @@ impl NodeServer {
             return ResolutionResponse::NotFound;
         }
 
-        let object = match ObjectRef::find(content_riddle, &resolution.hint) {
-            Ok(Some(object)) if !object.is_draft().unwrap_or(true) => object,
+        let object = match readonly_tx(|tx| ObjectRef::find(tx, content_riddle, &resolution.hint)) {
+            Ok(Some(object)) if !readonly_tx(|tx| object.is_draft(tx)).unwrap_or(true) => object,
             Ok(Some(_)) => {
                 tracing::info!("Hash found but object is draft");
                 return ResolutionResponse::NotFound;
@@ -107,21 +108,22 @@ impl NodeServer {
             return ResolutionResponse::NotFound;
         }
 
-        let item = match CollectionItem::find(content_riddle, &resolution.hint) {
-            Ok(Some(item)) if !item.is_draft => item,
-            Ok(Some(_)) => {
-                tracing::info!("hash found, but item is draft");
-                return ResolutionResponse::NotFound;
-            }
-            Ok(None) => {
-                tracing::info!("hash not found for resolution");
-                return ResolutionResponse::NotFound;
-            }
-            Err(e) => {
-                tracing::error!("error looking for hash: {}", e);
-                return ResolutionResponse::NotFound;
-            }
-        };
+        let item =
+            match readonly_tx(|tx| CollectionItem::find(tx, content_riddle, &resolution.hint)) {
+                Ok(Some(item)) if !item.is_draft => item,
+                Ok(Some(_)) => {
+                    tracing::info!("hash found, but item is draft");
+                    return ResolutionResponse::NotFound;
+                }
+                Ok(None) => {
+                    tracing::info!("hash not found for resolution");
+                    return ResolutionResponse::NotFound;
+                }
+                Err(e) => {
+                    tracing::error!("error looking for hash: {}", e);
+                    return ResolutionResponse::NotFound;
+                }
+            };
 
         // Code smell?
         let hash = item.locator().hash();
@@ -199,30 +201,31 @@ impl Node for NodeServer {
             return vec![];
         }
 
-        let maybe_response =
-            if let Some(series) = SeriesRef::find(&latest.key_riddle, &latest.hint).transpose() {
-                match series.map(|s| s.get_last_edition()) {
-                    Ok(None) => None,
-                    // Do not publish draft editions in non-draft series!
-                    Ok(Some(latest)) if latest.is_draft() => None,
-                    Ok(Some(latest)) => {
-                        let cipher_key = latest.public_key().hash();
-                        let rand = Hash::rand();
-                        let cipher = TransferCipher::new(&cipher_key, &rand);
+        let maybe_response = if let Some(series) =
+            readonly_tx(|tx| SeriesRef::find(tx, &latest.key_riddle, &latest.hint)).transpose()
+        {
+            match series.map(|s| readonly_tx(|tx| s.get_last_edition(tx))) {
+                Ok(None) => None,
+                // Do not publish draft editions in non-draft series!
+                Ok(Some(latest)) if latest.is_draft() => None,
+                Ok(Some(latest)) => {
+                    let cipher_key = latest.public_key().hash();
+                    let rand = Hash::rand();
+                    let cipher = TransferCipher::new(&cipher_key, &rand);
 
-                        Some(EditionResponse {
-                            rand,
-                            series: cipher.encrypt_opaque(&latest),
-                        })
-                    }
-                    Err(err) => {
-                        tracing::error!("error resolving edition for {latest:?}: {err}");
-                        None
-                    }
+                    Some(EditionResponse {
+                        rand,
+                        series: cipher.encrypt_opaque(&latest),
+                    })
                 }
-            } else {
-                None
-            };
+                Err(err) => {
+                    tracing::error!("error resolving edition for {latest:?}: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         if let Some(response) = maybe_response.as_ref() {
             tracing::info!("Edition found: {response:?}");
@@ -245,7 +248,9 @@ impl Node for NodeServer {
             return;
         }
 
-        match SubscriptionRef::find(&announcement.key_riddle, &announcement.hint) {
+        match readonly_tx(|tx| {
+            SubscriptionRef::find(tx, &announcement.key_riddle, &announcement.hint)
+        }) {
             Err(err) => tracing::error!("error processing {announcement:?}: {err}"),
             Ok(None) => {
                 tracing::info!("No subscription found for announcement");
