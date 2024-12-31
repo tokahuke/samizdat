@@ -7,7 +7,6 @@ members = [
     "cli",
     "proxy",
     "install/src/x86_64-pc-windows-gnu/node/samizdat-service",
-    "test-quic",
 ]
 resolver = "2"
 

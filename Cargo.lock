@@ -4830,17 +4830,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-quic"
-version = "0.1.0"
-dependencies = [
- "futures",
- "samizdat-common",
- "serde",
- "serde_derive",
- "tokio",
-]
-
-[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
