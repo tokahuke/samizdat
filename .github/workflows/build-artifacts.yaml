@@ -1,19 +1,19 @@
-name: Check
+name: Build
 
 on:
   workflow_dispatch:
 
 
 jobs:
-  check:
-    name: Check
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
     - name: Check out repository code
       uses: actions/checkout@v2
-    
+
     - name: Setup virtualenv
-      run: cd install && poetry lock
+      run: pip install poetry && cd install && poetry lock
     
     - name: Run install builder
       run: cd install && poetry run python builder
