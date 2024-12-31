@@ -2,7 +2,7 @@
 //! that is not used anymore.
 
 use ordered_float::NotNan;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _};
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
@@ -34,14 +34,16 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 
     // Test whether you should vacuum:
     let mut total_size = 0;
-    Table::ObjectStatistics
-        .range(..)
-        .atomic_for_each(|_, statistics| {
-            total_size += bincode::deserialize::<ObjectStatistics>(statistics)
-                .expect("can deserialize")
-                .size();
-            None as Option<()>
-        });
+    readonly_tx(|tx| {
+        Table::ObjectStatistics
+            .range(..)
+            .for_each(tx, |_, statistics| {
+                total_size += bincode::deserialize::<ObjectStatistics>(statistics)
+                    .expect("can deserialize")
+                    .size();
+                None as Option<()>
+            })
+    });
 
     // If within limits, very ok!
     if total_size < cli().max_storage * 1_000_000 {
@@ -56,21 +58,23 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     let use_prior = UsePrior::default();
 
     // Test what is good and what isn't:
-    Table::ObjectStatistics
-        .range(..)
-        .atomic_for_each(|key, value| {
-            let statistics: ObjectStatistics =
-                bincode::deserialize(value).expect("can deserialize");
-            heap.push(HeapEntry {
-                priority: Reverse(
-                    NotNan::try_from(statistics.byte_usefulness(&use_prior))
-                        .expect("byte usefulness was nan"),
-                ),
-                content: (key.to_vec(), statistics.size()),
-            });
+    readonly_tx(|tx| {
+        Table::ObjectStatistics
+            .range(..)
+            .for_each(tx, |key, value| {
+                let statistics: ObjectStatistics =
+                    bincode::deserialize(value).expect("can deserialize");
+                heap.push(HeapEntry {
+                    priority: Reverse(
+                        NotNan::try_from(statistics.byte_usefulness(&use_prior))
+                            .expect("byte usefulness was nan"),
+                    ),
+                    content: (key.to_vec(), statistics.size()),
+                });
 
-            None as Option<()>
-        });
+                None as Option<()>
+            })
+    });
 
     // Prune until you get under the threshold.
     let mut status = VacuumStatus::Done;
@@ -184,9 +188,11 @@ pub async fn run_vacuum_daemon() {
 pub fn flush_all() {
     let mut all_objects = vec![];
 
-    Table::ObjectMetadata.range(..).atomic_for_each(|hash, _| {
-        all_objects.push(ObjectRef::new(Hash::new(hash)));
-        None as Option<()>
+    readonly_tx(|tx| {
+        Table::ObjectMetadata.range(..).for_each(tx, |hash, _| {
+            all_objects.push(ObjectRef::new(Hash::new(hash)));
+            None as Option<()>
+        })
     });
 
     // No transaction here! Might take too long. Better to break in smaller
@@ -199,28 +205,24 @@ pub fn flush_all() {
 }
 
 /// Fixes chunk reference count.
-pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
+pub fn fix_chunk_ref_count(tx: &mut WritableTx) -> Result<(), crate::Error> {
     let mut ref_counts = BTreeMap::new();
 
-    Table::ObjectMetadata
-        .range(..)
-        .atomic_for_each(|_, metadata| {
-            let metadata: ObjectMetadata = bincode::deserialize(metadata).expect("can deserialize");
+    Table::ObjectMetadata.range(..).for_each(tx, |_, metadata| {
+        let metadata: ObjectMetadata = bincode::deserialize(metadata).expect("can deserialize");
 
-            for chunk_hash in metadata.hashes {
-                *ref_counts.entry(chunk_hash).or_default() += 1;
-            }
-
-            None as Option<()>
-        });
-
-    writable_tx(|tx| {
-        for (hash, ref_count) in ref_counts {
-            Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger());
+        for chunk_hash in metadata.hashes {
+            *ref_counts.entry(chunk_hash).or_default() += 1;
         }
 
-        Ok(())
-    })
+        None as Option<()>
+    });
+
+    for (hash, ref_count) in ref_counts {
+        Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger());
+    }
+
+    Ok(())
 }
 
 /// Drop chunks not associated with any object, i.e., those where the reference count has
@@ -232,21 +234,25 @@ pub fn fix_chunk_ref_count() -> Result<(), crate::Error> {
 fn drop_orphan_chunks() -> Result<usize, crate::Error> {
     let mut chunks_to_drop = vec![];
 
-    Table::ObjectChunkRefCount
-        .range(..)
-        .atomic_for_each(|hash, ref_count| {
-            let hash = Hash::new(hash);
-            let ref_count: MergeOperation =
-                bincode::deserialize(ref_count).expect("can deserialize");
+    readonly_tx(|tx| {
+        Table::ObjectChunkRefCount
+            .range(..)
+            .for_each(tx, |hash, ref_count| {
+                let hash = Hash::new(hash);
+                let ref_count: MergeOperation =
+                    bincode::deserialize(ref_count).expect("can deserialize");
 
-            match ref_count.eval_on_zero() {
-                1.. => {}
-                0 => chunks_to_drop.push(hash),
-                neg => tracing::error!("Chunk {hash} reference count dropped to negative: {neg}!"),
-            }
+                match ref_count.eval_on_zero() {
+                    1.. => {}
+                    0 => chunks_to_drop.push(hash),
+                    neg => {
+                        tracing::error!("Chunk {hash} reference count dropped to negative: {neg}!")
+                    }
+                }
 
-            None as Option<()>
-        });
+                None as Option<()>
+            })
+    });
 
     writable_tx(|tx| {
         let dropped = chunks_to_drop.len();

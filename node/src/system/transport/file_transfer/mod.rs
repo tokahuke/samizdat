@@ -382,7 +382,7 @@ pub async fn send_object(
                     // This doesn't make stuff much faster, but... I did it on the
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
-                        let chunk_content = models::atomic_get_chunk(chunk)?;
+                        let chunk_content = readonly_tx(|tx| models::get_chunk(tx, chunk))?;
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()
@@ -582,7 +582,7 @@ pub async fn send_item(
                     // This doesn't make stuff much faster, but... I did it on the
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
-                        let chunk_content = models::atomic_get_chunk(chunk)?;
+                        let chunk_content = readonly_tx(|tx| models::get_chunk(tx, chunk))?;
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()

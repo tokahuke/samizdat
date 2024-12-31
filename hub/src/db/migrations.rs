@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use samizdat_common::db::Migration;
+use samizdat_common::db::{Migration, WritableTx};
 
 use super::Table;
 
@@ -15,7 +15,7 @@ impl Migration<Table> for BaseMigration {
         None
     }
 
-    fn up(&self) -> Result<(), crate::Error> {
+    fn up(&self, _: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         Ok(())
     }
 }

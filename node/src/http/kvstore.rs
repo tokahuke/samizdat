@@ -5,7 +5,7 @@
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::{Json, Router};
 use futures::FutureExt;
-use samizdat_common::db::Table as _;
+use samizdat_common::db::{readonly_tx, writable_tx, Table as _};
 use serde_derive::Deserialize;
 
 use crate::access::{AccessRight, Entity};
@@ -63,8 +63,10 @@ async fn get(
     SecurityScope(entity): SecurityScope,
 ) -> ApiResponse<Option<String>> {
     async move {
-        let maybe_value = Table::KVStore.atomic_get(key(&entity, &tail), |bytes| {
-            String::from_utf8_lossy(bytes).into_owned()
+        let maybe_value = readonly_tx(|tx| {
+            Table::KVStore.get(tx, key(&entity, &tail), |bytes| {
+                String::from_utf8_lossy(bytes).into_owned()
+            })
         });
         Ok(maybe_value)
     }
@@ -85,8 +87,10 @@ async fn put(
     Json(request): Json<PutRequest>,
 ) -> ApiResponse<()> {
     async move {
-        Table::KVStore.atomic_put(key(&entity, &tail), request.value.as_str());
-        Ok(())
+        writable_tx(|tx| {
+            Table::KVStore.put(tx, key(&entity, &tail), request.value.as_str());
+            Ok(())
+        })
     }
     .map(ApiResponse)
     .await
@@ -95,8 +99,10 @@ async fn put(
 /// Clears a key in the store.
 async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
-        Table::KVStore.atomic_delete(key(&entity, &tail));
-        Ok(())
+        writable_tx(|tx| {
+            Table::KVStore.delete(tx, key(&entity, &tail));
+            Ok(())
+        })
     }
     .map(ApiResponse)
     .await
@@ -105,8 +111,10 @@ async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) 
 /// Clears the whole store.
 async fn clear(SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
-        Table::KVStore.prefix(prefix(&entity)).atomic_delete();
-        Ok(())
+        writable_tx(|tx| {
+            Table::KVStore.prefix(prefix(&entity)).delete(tx);
+            Ok(())
+        })
     }
     .map(ApiResponse)
     .await

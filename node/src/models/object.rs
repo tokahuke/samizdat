@@ -7,7 +7,6 @@ use futures::prelude::*;
 use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -130,9 +129,9 @@ impl ObjectHeader {
 }
 
 /// Helper function to get a chunk by its hash in the database.
-pub fn atomic_get_chunk(hash: Hash) -> Result<Vec<u8>, crate::Error> {
+pub fn get_chunk<Tx: TxHandle>(tx: &Tx, hash: Hash) -> Result<Vec<u8>, crate::Error> {
     Ok(Table::ObjectChunks
-        .atomic_get(hash, |slice| slice.to_vec())
+        .get(tx, hash, |slice| slice.to_vec())
         .ok_or_else(|| format!("Chunk missing: {}", hash))?)
 }
 
@@ -196,7 +195,7 @@ impl Iterator for BytesIter {
 
         // Try get new chunk:
         if let Some(hash) = self.hashes.next() {
-            match atomic_get_chunk(hash) {
+            match readonly_tx(|tx| get_chunk(tx, hash)) {
                 // Found chunk? Load an try again!
                 Ok(chunk) => {
                     let mut iter = chunk.into_iter();
@@ -243,7 +242,7 @@ impl Iterator for ContentIter {
 
         // Try get new chunk:
         if let Some(hash) = self.hashes.next() {
-            match atomic_get_chunk(hash) {
+            match readonly_tx(|tx| get_chunk(tx, hash)) {
                 // Found chunk? Yield.
                 Ok(chunk) => {
                     return Some(Ok(chunk));
@@ -264,18 +263,12 @@ impl Iterator for ContentIter {
 /// A stream over the chunks of an object.
 #[must_use]
 pub struct ContentStream {
-    /// The object this content stream is streaming.
-    object_ref: ObjectRef,
     /// A stream over the chunk hashes, in order.
     hashes: Pin<Box<dyn Send + Stream<Item = Result<Hash, crate::Error>>>>,
     /// Indicates whether an error has occurred.
     is_error: bool,
-    /// Indicates whether this is the first chunk or not.
-    is_first: bool,
     /// Indicates whether an object header must be skipped for the next chunk.
     skip_header: bool,
-    /// The size of the content.
-    content_size: AtomicUsize,
 }
 
 impl Stream for ContentStream {
@@ -289,7 +282,7 @@ impl Stream for ContentStream {
         // Try getting new chunk.
         let polled_chunk = Pin::new(&mut self.hashes)
             .poll_next(cx)
-            .map(|hash| hash.map(|hash| hash.and_then(atomic_get_chunk)));
+            .map(|hash| hash.map(|hash| hash.and_then(|h| readonly_tx(|tx| get_chunk(tx, h)))));
 
         match polled_chunk {
             Poll::Pending => Poll::Pending,
@@ -299,27 +292,13 @@ impl Stream for ContentStream {
                 Poll::Ready(Some(Err(err)))
             }
             Poll::Ready(Some(Ok(chunk))) => {
-                let content_size = readonly_tx(|tx| {
-                    Ok::<_, crate::Error>(self.object_ref.metadata(tx)?.unwrap().content_size)
-                })?;
-
                 // If an object header must be skipped, then skip it!
                 let chunk = if self.skip_header {
                     let mut iter = chunk.into_iter();
-                    let (header_size, _) = ObjectHeader::read((&mut iter).map(Ok))?;
-                    self.content_size.store(
-                        content_size - header_size,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    ObjectHeader::read((&mut iter).map(Ok))?;
                     self.skip_header = false;
 
                     iter.collect()
-                } else if self.is_first {
-                    self.is_first = false;
-                    self.content_size
-                        .store(content_size, std::sync::atomic::Ordering::Relaxed);
-
-                    chunk
                 } else {
                     chunk
                 };
@@ -528,7 +507,13 @@ impl ObjectRef {
             content_size += buffer.len();
 
             let chunk_hash = Hash::from_bytes(&buffer);
-            Table::ObjectChunks.atomic_put(chunk_hash.as_ref(), buffer.as_slice());
+
+            writable_tx(|tx| {
+                Table::ObjectChunks.put(tx, chunk_hash.as_ref(), buffer.as_slice());
+                Ok(())
+            })
+            .expect("infalible");
+
             hashes.push(chunk_hash);
 
             // Buffer not fille to the brim: it's over!
@@ -569,7 +554,6 @@ impl ObjectRef {
         query_duration: Duration,
         chunks: impl 'static + Send + Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
     ) -> ContentStream {
-        let hash = merkle_tree.root();
         let (send, recv) = mpsc::unbounded_channel();
         let task_send = send.clone();
         let mut next_to_send = 0usize;
@@ -605,12 +589,9 @@ impl ObjectRef {
         .try_flatten();
 
         ContentStream {
-            object_ref: ObjectRef::new(hash),
             hashes: Box::pin(hashes),
             is_error: false,
-            is_first: true,
             skip_header: true,
-            content_size: AtomicUsize::default(),
         }
     }
 
@@ -675,7 +656,11 @@ impl ObjectRef {
             }
 
             // Put chunk in the database
-            Table::ObjectChunks.atomic_put(received_hash.as_ref(), chunk.as_slice());
+            writable_tx(|tx| {
+                Table::ObjectChunks.put(tx, received_hash.as_ref(), chunk.as_slice());
+                Ok(())
+            })
+            .expect("infalible");
 
             // Emit received chunk:
             tracing::info!("Chunk {chunk_id} for object {hash} received");
@@ -771,12 +756,9 @@ impl ObjectRef {
         writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(ContentStream {
-            object_ref: self.clone(),
-            hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
+            hashes: Box::pin(stream::iter(metadata.hashes.clone().into_iter().map(Ok))),
             is_error: false,
-            is_first: true,
             skip_header,
-            content_size: AtomicUsize::default(),
         }))
     }
 

@@ -4,7 +4,7 @@
 use std::convert::TryInto;
 use tokio::time::{interval, Duration};
 
-use samizdat_common::db::{writable_tx, Table as _};
+use samizdat_common::db::{readonly_tx, writable_tx, Table as _};
 use samizdat_common::rpc::{
     EditionAnnouncement, EditionRequest, IdentityRequest, Query, Resolution,
 };
@@ -36,14 +36,17 @@ impl ReplayResistance {
                 let now = chrono::Utc::now().timestamp();
                 let mut nonces_to_drop = vec![];
 
-                Table::RecentNonces.range(..).atomic_for_each(|key, value| {
-                    let then = i64::from_be_bytes(value.try_into().expect("bad timestamp from db"));
-                    if now - then > 2 * TOLERATED_AGE {
-                        // Errors here are leaky, but not a security risk.
-                        nonces_to_drop.push(key.to_vec());
-                    }
+                readonly_tx(|tx| {
+                    Table::RecentNonces.range(..).for_each(tx, |key, value| {
+                        let then =
+                            i64::from_be_bytes(value.try_into().expect("bad timestamp from db"));
+                        if now - then > 2 * TOLERATED_AGE {
+                            // Errors here are leaky, but not a security risk.
+                            nonces_to_drop.push(key.to_vec());
+                        }
 
-                    None as Option<()>
+                        None as Option<()>
+                    })
                 });
 
                 writable_tx(|tx| {
@@ -76,11 +79,15 @@ impl ReplayResistance {
         let nonce = nonce.nonce();
 
         // Have I already seen this none before?
-        if Table::RecentNonces.atomic_has(nonce) {
+        if readonly_tx(|tx| Table::RecentNonces.has(tx, nonce)) {
             return false;
         }
 
-        Table::RecentNonces.atomic_put(nonce.as_ref(), now.to_be_bytes());
+        writable_tx(|tx| {
+            Table::RecentNonces.put(tx, nonce.as_ref(), now.to_be_bytes());
+            Ok(())
+        })
+        .expect("infalible");
 
         true
     }

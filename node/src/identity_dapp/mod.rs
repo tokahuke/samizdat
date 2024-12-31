@@ -7,7 +7,10 @@ use std::{
 };
 use tokio::sync::RwLock;
 
-use samizdat_common::{blockchain, db::Table as _};
+use samizdat_common::{
+    blockchain,
+    db::{readonly_tx, writable_tx, Table as _},
+};
 
 use crate::{db::Table, models::SeriesRef};
 
@@ -17,10 +20,11 @@ pub static IDENTITY_CACHE: LazyLock<RwLock<BTreeMap<String, Arc<Identity>>>> =
 static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 
 pub fn init_identity_provider() -> Result<(), crate::Error> {
-    let provider = if let Some(provider) = Table::Global
-        .atomic_get("ethereum_provider_endpoint", |endpoint| {
+    let provider = if let Some(provider) = readonly_tx(|tx| {
+        Table::Global.get(tx, "ethereum_provider_endpoint", |endpoint| {
             IdentityProvider::new(String::from_utf8_lossy(endpoint).as_ref())
-        }) {
+        })
+    }) {
         provider
     } else {
         tracing::warn!(
@@ -101,7 +105,11 @@ impl IdentityProvider {
             rpc_client.clone(),
         );
 
-        Table::Global.atomic_put("ethereum_provider_endpoint", new_endpoint);
+        writable_tx(|tx| {
+            Table::Global.put(tx, "ethereum_provider_endpoint", new_endpoint);
+            Ok(())
+        })
+        .expect("infalible");
 
         *self.storage_contract.write().await = storage_contract;
     }

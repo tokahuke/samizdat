@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::{Bound, RangeBounds};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 /// Maximum lmdb size. Approx. 68GB; may be changed later...
 const MAP_SIZE: usize = 1 << 36;
@@ -89,6 +90,7 @@ impl<'tx> TxHandle for ReadonlyTx<'tx> {
     }
 }
 
+#[inline]
 pub fn writable_tx<F, T>(f: F) -> Result<T, crate::Error>
 where
     F: FnOnce(&mut WritableTx) -> Result<T, crate::Error>,
@@ -126,8 +128,13 @@ where
                 .begin_rw_txn()
                 .expect("cannot create writable transaction"),
         );
+        let start = Instant::now();
 
         let ret = f(&mut tx);
+
+        if start.elapsed() > Duration::from_millis(100) {
+            tracing::warn!("long running writable tx took {:?}", start.elapsed())
+        }
 
         if ret.is_ok() {
             tx.0.commit().expect("cannot commit writable transaction");
@@ -139,22 +146,58 @@ where
     })
 }
 
+#[inline]
 pub fn readonly_tx<F, T>(f: F) -> T
 where
     F: FnOnce(&ReadonlyTx) -> T,
 {
-    let db = db();
-    let tx = ReadonlyTx(
-        db.environment
-            .begin_ro_txn()
-            .expect("cannot create readonly transaction"),
-    );
+    thread_local! {
+        static RUNNING_TX_GUARD: RefCell<bool> = const { RefCell::new(false) };
+    }
 
-    let ret = f(&tx);
+    /// Guarantees drop even in the presence of a panic.
+    struct DeferGuard<'a>(&'a RefCell<bool>);
 
-    tx.0.commit().expect("cannot commit readonly transaction");
+    impl Drop for DeferGuard<'_> {
+        fn drop(&mut self) {
+            // Does not panic if underlying `RefCell` is not borrowed.
+            *self.0.borrow_mut() = false;
+        }
+    }
 
-    ret
+    impl<'a> DeferGuard<'a> {
+        fn new(guard: &'a RefCell<bool>) -> Self {
+            if *guard.borrow() {
+                panic!("other readonly tx already running. This might lead to errors!");
+            }
+
+            *guard.borrow_mut() = true;
+
+            DeferGuard(guard)
+        }
+    }
+
+    RUNNING_TX_GUARD.with(|guard| {
+        let defer_guard = DeferGuard::new(guard);
+        let tx = ReadonlyTx(
+            db().environment
+                .begin_ro_txn()
+                .expect("cannot create readonly transaction"),
+        );
+        let start = Instant::now();
+
+        let ret = f(&tx);
+
+        if start.elapsed() > Duration::from_millis(100) {
+            tracing::warn!("long running writable tx took {:?}", start.elapsed())
+        }
+
+        tx.0.commit().expect("cannot commit readonly transaction");
+
+        drop(defer_guard);
+
+        ret
+    })
 }
 
 pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
@@ -162,6 +205,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
     fn base_migration() -> Box<dyn Migration<Self>>;
     fn discriminant(self) -> usize;
 
+    #[inline]
     fn get_handle(self) -> lmdb::Database {
         assert_eq!(
             TypeId::of::<Self>(),
@@ -171,55 +215,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         db().tables[self.discriminant()]
     }
 
-    /// Gets the underlying column family after database initialization.
-    #[must_use]
-    fn atomic_get<K, F, T>(self, key: K, transform: F) -> Option<T>
-    where
-        K: AsRef<[u8]>,
-        F: FnOnce(&[u8]) -> T,
-    {
-        readonly_tx(|tx| self.get(tx, key, transform))
-    }
-
-    #[must_use]
-    fn atomic_has<K>(self, key: K) -> bool
-    where
-        K: AsRef<[u8]>,
-    {
-        readonly_tx(|tx| self.get(tx, key, |_| ()).is_some())
-    }
-
-    fn atomic_put<K, V>(self, key: K, value: V)
-    where
-        K: AsRef<[u8]>,
-        V: AsRef<[u8]>,
-    {
-        writable_tx(|tx| {
-            self.put(tx, key, value);
-            Ok(())
-        })
-        .expect("infallible")
-    }
-
-    fn atomic_delete<K>(self, key: K) -> bool
-    where
-        K: AsRef<[u8]>,
-    {
-        writable_tx(|tx| Ok(self.delete(tx, key))).expect("infallible")
-    }
-
-    fn atomic_map<K, F>(self, key: K, map: F)
-    where
-        K: AsRef<[u8]>,
-        F: FnOnce(Option<&[u8]>) -> Vec<u8>,
-    {
-        writable_tx(|tx| {
-            self.map(tx, key, map);
-            Ok(())
-        })
-        .expect("infallible")
-    }
-
+    #[inline]
     #[must_use]
     fn get<Tx, K, F, T>(self, tx: &Tx, key: K, transform: F) -> Option<T>
     where
@@ -236,6 +232,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    #[inline]
     #[must_use]
     fn has<Tx, K>(self, tx: &Tx, key: K) -> bool
     where
@@ -245,6 +242,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         self.get(tx, key, |_| ()).is_some()
     }
 
+    #[inline]
     fn put<K, V>(self, tx: &mut WritableTx, key: K, value: V)
     where
         K: AsRef<[u8]>,
@@ -254,6 +252,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
             .expect("unable to perform put");
     }
 
+    #[inline]
     fn delete<K>(self, tx: &mut WritableTx, key: K) -> bool
     where
         K: AsRef<[u8]>,
@@ -266,6 +265,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    #[inline]
     fn map<K, F>(self, tx: &mut WritableTx, key: K, map: F)
     where
         K: AsRef<[u8]>,
@@ -281,6 +281,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
             .expect("unable to perform put");
     }
 
+    #[inline]
     #[must_use]
     fn range<R>(self, range: R) -> TableRange<Self, R>
     where
@@ -289,6 +290,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         TableRange { table: self, range }
     }
 
+    #[inline]
     #[must_use]
     fn prefix<P>(self, prefix: P) -> TablePrefix<Self, P>
     where
@@ -315,22 +317,6 @@ where
     T: Table,
     R: for<'a> RangeBounds<&'a [u8]>,
 {
-    pub fn atomic_for_each<F, U>(self, map: F) -> Option<U>
-    where
-        F: FnMut(&[u8], &[u8]) -> Option<U>,
-    {
-        readonly_tx(|tx| self.for_each(tx, map))
-    }
-
-    #[must_use]
-    pub fn atomic_collect<C, F, V>(self, map: F) -> C
-    where
-        F: FnMut(&[u8], &[u8]) -> V,
-        C: FromIterator<V>,
-    {
-        readonly_tx(|tx| self.collect(tx, map))
-    }
-
     pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Option<U>
     where
         Tx: TxHandle,
@@ -436,49 +422,28 @@ where
     T: Table,
     P: AsRef<[u8]>,
 {
-    pub fn atomic_for_each<F, U>(self, map: F) -> Option<U>
-    where
-        F: FnMut(&[u8], &[u8]) -> Option<U>,
-    {
-        readonly_tx(|tx| self.for_each(tx, map))
-    }
+    pub fn delete(self, tx: &mut WritableTx) {
+        let mut cursor =
+            tx.0.open_rw_cursor(self.table.get_handle())
+                .expect("failed to open writable cursor");
+        // cannot delete while iterating!
+        let mut to_delete = vec![];
 
-    #[must_use]
-    pub fn atomic_collect<C, F, V>(self, map: F) -> C
-    where
-        F: FnMut(&[u8], &[u8]) -> V,
-        C: FromIterator<V>,
-    {
-        readonly_tx(|tx| self.collect(tx, map))
-    }
+        for item in cursor.iter_from(self.prefix.as_ref()) {
+            let (key, _) = item.expect("unable to advance cursor");
 
-    pub fn atomic_delete(self) {
-        writable_tx(|tx| {
-            let mut cursor =
-                tx.0.open_rw_cursor(self.table.get_handle())
-                    .expect("failed to open writable cursor");
-            // cannot delete while iterating!
-            let mut to_delete = vec![];
-
-            for item in cursor.iter_from(self.prefix.as_ref()) {
-                let (key, _) = item.expect("unable to advance cursor");
-
-                if !key.starts_with(self.prefix.as_ref()) {
-                    break;
-                }
-
-                to_delete.push(key);
+            if !key.starts_with(self.prefix.as_ref()) {
+                break;
             }
 
-            drop(cursor);
+            to_delete.push(key);
+        }
 
-            for key in to_delete {
-                self.table.delete(tx, key);
-            }
+        drop(cursor);
 
-            Ok(())
-        })
-        .expect("infallible");
+        for key in to_delete {
+            self.table.delete(tx, key);
+        }
     }
 
     pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Option<U>
@@ -534,25 +499,29 @@ where
     T: Table,
 {
     fn next(&self) -> Option<Box<dyn Migration<T>>>;
-    fn up(&self) -> Result<(), crate::Error>;
+    fn up(&self, tx: &mut WritableTx) -> Result<(), crate::Error>;
 
-    fn is_up(&self) -> bool {
+    fn is_up(&self, tx: &mut WritableTx) -> bool {
         let migration_key = format!("{self:?}");
-        T::MIGRATIONS.atomic_has(migration_key)
+        T::MIGRATIONS.has(tx, migration_key)
     }
 
     fn migrate(&self) -> Result<(), crate::Error> {
-        if !self.is_up() {
-            let migration_key = format!("{self:?}");
+        writable_tx(|tx| {
+            if !self.is_up(tx) {
+                let migration_key = format!("{self:?}");
 
-            // This should be atomic, but... oh! dear...
-            tracing::info!("Applying migration {self:?}...");
-            self.up()?;
-            T::MIGRATIONS.atomic_put(migration_key, []);
-            tracing::info!("... done.");
-        } else {
-            tracing::info!("Migration {self:?} already up.");
-        }
+                // This should be atomic, but... oh! dear...
+                tracing::info!("Applying migration {self:?}...");
+                self.up(tx)?;
+                T::MIGRATIONS.put(tx, migration_key, []);
+                tracing::info!("... done.");
+            } else {
+                tracing::info!("Migration {self:?} already up.");
+            }
+
+            Ok(())
+        })?;
 
         // Tail-recurse:
         if let Some(last) = self.next() {

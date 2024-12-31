@@ -1,7 +1,7 @@
 //! Migrations to be run to evolve the schema of the database and ensure forward
 //! version compatibility.
 
-use samizdat_common::db::Migration;
+use samizdat_common::db::{Migration, WritableTx};
 
 use super::Table;
 
@@ -13,7 +13,7 @@ impl Migration<Table> for BaseMigration {
         Some(Box::new(CreateChunkRefCount))
     }
 
-    fn up(&self) -> Result<(), crate::Error> {
+    fn up(&self, _: &mut WritableTx) -> Result<(), crate::Error> {
         Ok(())
     }
 }
@@ -26,8 +26,8 @@ impl Migration<Table> for CreateChunkRefCount {
         None
     }
 
-    fn up(&self) -> Result<(), crate::Error> {
-        crate::vacuum::fix_chunk_ref_count()?;
+    fn up(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
+        crate::vacuum::fix_chunk_ref_count(tx)?;
         Ok(())
     }
 }
