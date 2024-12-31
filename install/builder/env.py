@@ -3,6 +3,8 @@ import os
 from subprocess import Popen, PIPE
 from typing import Any
 
+from utils import shell
+
 
 def _set_env(
     env: str,
@@ -13,7 +15,7 @@ def _set_env(
             os.environ[env] = spec.strip()
         case {"run": script}:
             proc = Popen(
-                [os.environ["SHELL"], script.split("/")[-1]],
+                [shell(), script.split("/")[-1]],
                 stdout=PIPE,
                 stderr=PIPE,
                 cwd="./" + "/".join(script.split("/")[:-1]),

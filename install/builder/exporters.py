@@ -10,6 +10,8 @@ from io import BytesIO
 
 import builders
 
+from utils import shell
+
 
 def dbg[T](x: T) -> T:
     print(x)
@@ -27,7 +29,7 @@ def _export(
                 yield path, f.read()
         case {"run": script}:
             proc = Popen(
-                [os.environ["SHELL"], script.split("/")[-1]],
+                [shell(), script.split("/")[-1]],
                 stdout=PIPE,
                 stderr=PIPE,
                 cwd="./" + "/".join(script.split("/")[:-1]),
@@ -44,7 +46,7 @@ def _export(
                 .containers.get(f"{project}_{builder}")
                 .get_archive(resource)
             )
-            with tarfile.open(fileobj=BytesIO(b''.join(stream)), mode='r') as tar:
+            with tarfile.open(fileobj=BytesIO(b"".join(stream)), mode="r") as tar:
                 buf = tar.extractfile(resource.split("/")[-1])
                 assert buf is not None
                 yield path, buf.read()
