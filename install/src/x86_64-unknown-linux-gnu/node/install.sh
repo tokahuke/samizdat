@@ -2,33 +2,41 @@
 
 set -e
 
+# Only works on linux:
 if [ "$(expr substr $(uname -s) 1 5)" != "Linux" ]; then
     echo "Not Linux"
     exit 1
 fi
 
-urlprefix=https://proxy.hubfederation.com/get-samizdat/$VERSION/x86_64-unknown-linux-gnu/node
+# Set preifx and a temporary work directory:
+urlprefix=http://proxy.hubfederation.com/get-samizdat/$VERSION/x86_64-unknown-linux-gnu/node
 tmpdir=/tmp/samizdat-install-$RANDOM
+mkdir -p $tmpdir && cd $tmpdir
 
-mkdir -p $tmpdir
-cd $tmpdir
-
-curl $urlprefix/samizdat-node > samizdat-node
+# Download artifacts:
 curl $urlprefix/samizdat > samizdat
+curl $urlprefix/samizdat-node > samizdat-node
 curl $urlprefix/samizdat-node.service > samizdat-node.service
+curl $urlprefix/node.toml > node.toml
 
-chmod +x samizdat-node
+# Mark executables:
 chmod +x samizdat
+chmod +x samizdat-node
 
-(systemctl stop samizdat-node || echo 'No running node detected')
+# Move artifacts to their correct places:
 cp samizdat-node /usr/local/bin
 cp samizdat /usr/local/bin
-cp samizdat-node.service /etc/systemd/system/samizdat-node.service
+cp samizdat-node.service /etc/systemd/system
+mkdir -p /etc/samizdat && cp node.toml /etc/samizdat
+
+# Enable service:
+systemctl stop samizdat-node || echo 'No running node detected'
 systemctl daemon-reload
 systemctl enable --now samizdat-node
-sleep 2
 
 # Post install:
+sleep 2
 samizdat hub new testbed.hubfederation.com 'UseBoth'
 
+# Remove temporary directory:
 rm -rf $tmpdir

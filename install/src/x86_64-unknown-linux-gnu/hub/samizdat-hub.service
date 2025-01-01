@@ -9,7 +9,7 @@ Restart=always
 RestartSec=1
 User=root
 Environment=RUST_BACKTRACE=1
-ExecStart=/usr/local/bin/samizdat-hub --data /var/lib/samizdat/hub
+ExecStart=/usr/local/bin/samizdat-hub --config /etc/samizdat/hub.toml
 
 [Install]
 WantedBy=multi-user.target

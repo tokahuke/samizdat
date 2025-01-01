@@ -1,15 +1,20 @@
 //! Command line interface for the Samizdat node.
 
-use std::sync::OnceLock;
+use serde_derive::Deserialize;
+use std::{fs, sync::OnceLock};
 use structopt::StructOpt;
 
 use samizdat_common::address::AddrResolutionMode;
 
 /// The Samizdat Hub.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Deserialize)]
 pub struct Cli {
+    /// Reads the command line arguments from a supplied path as toml.
+    #[structopt(long)]
+    #[serde(default, skip_deserializing)]
+    config: Option<String>,
     /// The socket addresses for nodes to connect as clients.
-    #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511/4512")]
+    #[structopt(env = "SAMIZDAT_ADDRESSES", long, default_value = "[::]:4511")]
     pub addresses: Vec<String>,
     /// Path to the locally stored program data.
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/hub")]
@@ -51,12 +56,22 @@ pub struct Cli {
     pub http_port: u16,
 }
 
+impl Cli {
+    fn or_read_from_file(self) -> Result<Self, crate::Error> {
+        let Some(config) = self.config else {
+            return Ok(self);
+        };
+
+        Ok(toml::from_str(&fs::read_to_string(config)?).map_err(|err| err.to_string())?)
+    }
+}
+
 /// The handle to the CLI parameters.
 static CLI: OnceLock<Cli> = OnceLock::new();
 
 /// Initializes the [`CLI`] with the values from the command line.
 pub fn init_cli() -> Result<(), crate::Error> {
-    let cli = Cli::from_args();
+    let cli = Cli::from_args().or_read_from_file()?;
 
     tracing::info!("Arguments from command line: {:#?}", cli);
     std::fs::create_dir_all(&cli.data)?;

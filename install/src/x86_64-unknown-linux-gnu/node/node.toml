@@ -1,0 +1,9 @@
+# All keys have the same names as in CLI, except that they are in snake_case, instead of
+# kebab-case. For more information on each option see `samizdat-node --help`.
+
+# this is not the default of the CLI, but it's the "right place" in Linux:
+data = "/var/lib/samizdat/node"
+
+# (MB) The maximum total size of all cached files and _disposable_ files. Note that the total size may still
+# exceed this value, since some of the allocated space is used to store data that is valuable to you
+max_storage = 1_000 # 1GB

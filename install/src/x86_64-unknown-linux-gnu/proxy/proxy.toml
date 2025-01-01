@@ -1,0 +1,11 @@
+# All keys have the same names as in CLI, except that they are in snake_case, instead of
+# kebab-case. For more information on each option see `samizdat-proxy --help`.
+
+# this is not the default of the CLI, but it's the "right place" in Linux:
+data = "/var/lib/samizdat/proxy"
+
+# Whether to user HTTS. To enable this, you need to get a domain name and email to
+# LetsEncrypt.
+https = false
+domain = "example.org"  # you need to buy one
+owner = "john.doe@example.org"  # give Let's Encrypt your email for a free certificate!

@@ -1,0 +1,11 @@
+# All keys have the same names as in CLI, except that they are in snake_case, instead of
+# kebab-case. For more information on each option see `samizdat-hub --help`.
+
+# this is the default hub port:
+addresses = ["[::]:4511"]
+
+# this is not the default of the CLI, but it's the "right place" in Linux:
+data = "/var/lib/samizdat/hub"
+
+# your friends (other servers to which to listen to) go here:
+partners = []
