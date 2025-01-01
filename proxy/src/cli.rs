@@ -1,11 +1,9 @@
 use serde_derive::Deserialize;
+use serde_inline_default::serde_inline_default;
 use std::{fs, sync::OnceLock};
 use structopt::StructOpt;
 
-fn default_node() -> String {
-    "http://localhost:4510".to_owned()
-}
-
+#[serde_inline_default]
 #[derive(Debug, StructOpt, Deserialize)]
 pub struct Cli {
     /// Reads the command line arguments from a supplied path as toml.
@@ -14,26 +12,35 @@ pub struct Cli {
     config: Option<String>,
     /// The node to which to connect to. Defaults to localhost:4510.
     #[structopt(long, default_value = "http://localhost:4510")]
-    #[serde(default = "default_node")]
+    #[serde_inline_default("http://localhost:4510".to_string())]
     pub node: String,
-    /// The port on which to serve the proxy. This only has effect when serving HTTP only.
-    #[structopt(long)]
-    #[serde(default)]
-    pub port: Option<u16>,
     /// Whether to serve with HTTPS. This is meant for production only.
     #[structopt(long)]
     #[serde(default)]
     pub https: bool,
+    /// The port on which to serve the proxy. This defaults to 443 when HTTPS is enabled
+    /// and to 8080 when HTTP is enabled.
+    #[structopt(long)]
+    #[serde(default)]
+    pub port: Option<u16>,
     /// The name of the domain that this proxy will serve (only applicable if HTTPS is
     /// set).
     #[structopt(long)]
     #[serde(default)]
     pub domain: Option<String>,
-    /// The e-mail of the owned of the domain (this will be passed to `certbot`; only
-    /// applicable if HTTPS is set).
+    /// The e-mail of the owner of the domain (only applicable if HTTPS is set).
     #[structopt(long)]
     #[serde(default)]
     pub owner: Option<String>,
+    /// The directory that provides certificates. Defaults to the Let's Encrypt v2 ACME
+    /// directory (only applicable if HTTPS is set).
+    #[structopt(long, default_value = "https://acme-v02.api.letsencrypt.org/directory")]
+    #[serde_inline_default("https://acme-v02.api.letsencrypt.org/directory".to_string())]
+    pub acme_directory: String,
+    /// The place where certificates are stored (only applicable if HTTPS is set).
+    #[structopt(long, default_value = "data/proxy")]
+    #[serde_inline_default("data/proxy".to_string())]
+    pub cert_cache: String,
 }
 
 impl Cli {

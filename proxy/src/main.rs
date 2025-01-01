@@ -1,8 +1,10 @@
+mod acme;
 mod cli;
 mod html;
 mod http;
 
-use axum_server::tls_rustls::RustlsConfig;
+use std::net::Ipv4Addr;
+
 use cli::cli;
 
 #[tokio::main]
@@ -17,36 +19,20 @@ async fn main() -> Result<(), anyhow::Error> {
         samizdat_common::rustls::crypto::ring::default_provider()
             .install_default()
             .expect("failed to install crypto provider `ring`");
-
-        // Run certbot:
-        let status = std::process::Command::new("certbot")
-            .arg("certonly")
-            .arg("--standalone")
-            .arg("--non-interactive")
-            .arg("--email")
-            .arg(cli().owner()?)
-            .arg("--agree-tos")
-            .arg("--domain")
-            .arg(cli().domain()?)
-            .spawn()
-            .expect("failed to spawn certbot")
-            .wait()
-            .expect("failed to run certbot");
-        assert_eq!(status.code().expect("there always is a code (?)"), 0);
-
-        let config = RustlsConfig::from_pem_file(
-            format!("/etc/letsencrypt/live/{}/fullchain.pem", cli().domain()?),
-            format!("/etc/letsencrypt/live/{}/privkey.pem", cli().domain()?),
+        acme::serve(
+            cli().owner()?,
+            cli().domain()?,
+            &cli().acme_directory,
+            &cli().cert_cache,
+            (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
+            crate::http::api(),
         )
-        .await?;
-
-        axum_server::bind_rustls(([0, 0, 0, 0], cli().port.unwrap_or(443)).into(), config)
-            .serve(crate::http::api().into_make_service())
-            .await?;
+        .await?
     } else {
         // Start server:
         axum::serve(
-            tokio::net::TcpListener::bind(("0.0.0.0", cli().port.unwrap_or(8080))).await?,
+            tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(8080)))
+                .await?,
             crate::http::api().into_make_service(),
         )
         .await?;
