@@ -79,7 +79,14 @@ impl Cli {
             return Ok(self);
         };
 
-        Ok(toml::from_str(&fs::read_to_string(config)?).map_err(|err| err.to_string())?)
+        let loaded: Self =
+            toml::from_str(&fs::read_to_string(config)?).map_err(|err| err.to_string())?;
+
+        if loaded.config.is_some() {
+            tracing::warn!("`config` variable set in config file. This has no effect");
+        }
+
+        Ok(loaded)
     }
 }
 

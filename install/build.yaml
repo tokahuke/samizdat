@@ -63,6 +63,9 @@ exports:
       samizdat:
         from: rust
         import: /build/target/aarch64-apple-darwin/release/samizdat
+      samizdat.tar.gz:
+        from: rust
+        import: /build/target/aarch64-apple-darwin/release/samizdat.tar.gz
   x86_64-pc-windows-gnu:
     node:
       samizdat-node.exe:

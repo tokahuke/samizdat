@@ -1,5 +1,10 @@
 #! /usr/bin/env bash
 
+# This script installs the samizdat proxy on your local machine. For license and 
+# copyright, see http://github.com/tokahuke/samizdat.
+#
+# You will need `sudo` to run this code.
+
 set -e
 
 # Only works on linux:
@@ -24,7 +29,7 @@ chmod +x samizdat-proxy
 # Move artifacts to their correct places:
 cp samizdat-proxy /usr/local/bin
 cp samizdat-proxy.service /etc/systemd/system
-mkdir -p /etc/samizdat && cp proxy.toml /etc/samizdat
+mkdir -p /etc/samizdat && cp --no-clobber proxy.toml /etc/samizdat
 
 # Enable service:
 systemctl stop samizdat-proxy || echo 'No running proxy detected'

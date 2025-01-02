@@ -1,5 +1,10 @@
 #! /usr/bin/env bash
 
+# This script installs the samizdat hub your local machine. For license and 
+# copyright, see http://github.com/tokahuke/samizdat.
+#
+# You will need `sudo` to run this code.
+
 set -e
 
 # Only works on linux:
@@ -25,7 +30,7 @@ chmod +x samizdat-hub
 cp samizdat-hub /usr/local/bin
 cp samizdat /usr/local/bin
 cp samizdat-hub.service /etc/systemd/system
-mkdir -p /etc/samizdat && cp hub.toml /etc/samizdat
+mkdir -p /etc/samizdat && cp --no-clobber hub.toml /etc/samizdat
 
 # Enable service:
 systemctl stop samizdat-hub || echo 'No running hub detected'

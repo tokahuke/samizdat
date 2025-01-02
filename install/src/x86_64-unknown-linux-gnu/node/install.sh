@@ -1,5 +1,12 @@
 #! /usr/bin/env bash
 
+
+# This script installs the samizdat node and CLI on your local machine. For license and 
+# copyright, see http://github.com/tokahuke/samizdat.
+#
+# You will need `sudo` to run this code.
+
+
 set -e
 
 # Only works on linux:
@@ -27,7 +34,7 @@ chmod +x samizdat-node
 cp samizdat-node /usr/local/bin
 cp samizdat /usr/local/bin
 cp samizdat-node.service /etc/systemd/system
-mkdir -p /etc/samizdat && cp node.toml /etc/samizdat
+mkdir -p /etc/samizdat && cp --no-clobber node.toml /etc/samizdat
 
 # Enable service:
 systemctl stop samizdat-node || echo 'No running node detected'

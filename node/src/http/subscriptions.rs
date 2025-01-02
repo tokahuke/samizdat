@@ -45,8 +45,9 @@ pub fn api() -> Router {
         .route(
             // Triggers a manual refresh on a subscription.
             "/:key/refresh",
-            get(|Path(public_key): Path<Key>| {
+            get(|Path(public_key): Path<String>| {
                 async move {
+                    let public_key: Key = public_key.parse()?;
                     let subscription_ref = SubscriptionRef::new(public_key);
 
                     if readonly_tx(|tx| subscription_ref.exists(tx))? {
@@ -63,8 +64,9 @@ pub fn api() -> Router {
         .route(
             // Removes a subscription.
             "/:key",
-            delete(|Path(public_key): Path<Key>| {
+            delete(|Path(public_key): Path<String>| {
                 async move {
+                    let public_key: Key = public_key.parse()?;
                     let subscription = SubscriptionRef::new(public_key);
                     let existed = readonly_tx(|tx| subscription.get(tx))?.is_some();
                     subscription.drop_if_exists()?;
@@ -77,8 +79,9 @@ pub fn api() -> Router {
         .route(
             // Gets information associates with a series owner
             "/:key",
-            get(|Path(public_key): Path<Key>| {
+            get(|Path(public_key): Path<String>| {
                 async move {
+                    let public_key: Key = public_key.parse()?;
                     let maybe_subscription =
                         readonly_tx(|tx| SubscriptionRef::new(public_key).get(tx))?;
                     Ok(maybe_subscription)

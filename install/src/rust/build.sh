@@ -20,3 +20,8 @@ cargo zigbuild --release                \
     --package samizdat-node             \
     --package samizdat-hub              \
     --package samizdat-proxy
+
+
+# This is needed for the homebrew distribution:
+cd target/aarch64-apple-darwin/release
+tar -czvf samizdat.tar.gz samizdat samizdat-node

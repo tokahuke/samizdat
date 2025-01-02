@@ -15,7 +15,7 @@ cd $OUTPUT &&
 tar -czvf samizdat.tar.gz samizdat samizdat-node &&
 cd $pwd &&
 
-echo "Rendeing homebrew formula"
+echo "Rendering homebrew formula"
 
 export SHA256SUM=$(sha256sum $OUTPUT/samizdat.tar.gz | cut -f 1 -d " ")
 export REVISION_COUNT=$(git rev-list --count stable)

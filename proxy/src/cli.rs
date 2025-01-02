@@ -10,6 +10,10 @@ pub struct Cli {
     #[structopt(long)]
     #[serde(default, skip_deserializing)]
     config: Option<String>,
+    /// Path to the locally stored program data.
+    #[structopt(long, default_value = "data/proxy")]
+    #[serde_inline_default("data/proxy".to_string())]
+    pub data: String,
     /// The node to which to connect to. Defaults to localhost:4510.
     #[structopt(long, default_value = "http://localhost:4510")]
     #[serde_inline_default("http://localhost:4510".to_string())]
@@ -37,10 +41,6 @@ pub struct Cli {
     #[structopt(long, default_value = "https://acme-v02.api.letsencrypt.org/directory")]
     #[serde_inline_default("https://acme-v02.api.letsencrypt.org/directory".to_string())]
     pub acme_directory: String,
-    /// The place where certificates are stored (only applicable if HTTPS is set).
-    #[structopt(long, default_value = "data/proxy")]
-    #[serde_inline_default("data/proxy".to_string())]
-    pub cert_cache: String,
 }
 
 impl Cli {
@@ -49,9 +49,14 @@ impl Cli {
             return Ok(self);
         };
 
-        Ok(toml::from_str(&fs::read_to_string(config)?)?)
-    }
+        let loaded: Self = toml::from_str(&fs::read_to_string(config)?)?;
 
+        if loaded.config.is_some() {
+            tracing::warn!("`config` variable set in config file. This has no effect");
+        }
+
+        Ok(loaded)
+    }
     pub fn domain(&self) -> Result<&str, anyhow::Error> {
         let Some(domain) = self.domain.as_ref() else {
             anyhow::bail!("missing domain parameter")

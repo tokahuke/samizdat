@@ -23,7 +23,7 @@ async fn main() -> Result<(), anyhow::Error> {
             cli().owner()?,
             cli().domain()?,
             &cli().acme_directory,
-            &cli().cert_cache,
+            &format!("{}/acme", cli().data),
             (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
             crate::http::api(),
         )
