@@ -16,87 +16,87 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v2
     
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        default: true
-        profile: minimal
+  #   - name: Install Rust
+  #     uses: actions-rs/toolchain@v1
+  #     with:
+  #       toolchain: nightly
+  #       default: true
+  #       profile: minimal
 
-    - name: Running cache
-      uses: Swatinem/rust-cache@v1
-      with:
-        cache-on-failure: true
+  #   - name: Running cache
+  #     uses: Swatinem/rust-cache@v1
+  #     with:
+  #       cache-on-failure: true
     
-    - name: Running build
-      run: cargo build --all --release
+  #   - name: Running build
+  #     run: cargo build --all --release
 
-   # See https://zellwk.com/blog/github-actions-deploy/
-    - name: Install SSH Key
-      uses: shimataro/ssh-key-action@v2
-      with:
-        key: ${{ secrets.SSH_KEY }}
-        known_hosts: 'just-a-placeholder-so-we-dont-get-errors'
+  #  # See https://zellwk.com/blog/github-actions-deploy/
+  #   - name: Install SSH Key
+  #     uses: shimataro/ssh-key-action@v2
+  #     with:
+  #       key: ${{ secrets.SSH_KEY }}
+  #       known_hosts: 'just-a-placeholder-so-we-dont-get-errors'
     
-    - name: Adding Known Hosts
-      uses: kielabokkie/ssh-key-and-known-hosts-action@v1
-      with:
-        ssh-private-key: ${{ secrets.SSH_KEY }}
-        ssh-host: ${{ secrets.SSH_HOST }}
+  #   - name: Adding Known Hosts
+  #     uses: kielabokkie/ssh-key-and-known-hosts-action@v1
+  #     with:
+  #       ssh-private-key: ${{ secrets.SSH_KEY }}
+  #       ssh-host: ${{ secrets.SSH_HOST }}
 
-    - name: Test upload with rsync
-      run: |
-          echo 'test payload' > test.txt
-          rsync -avz --mkpath ./test.txt ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:test.txt
+  #   - name: Test upload with rsync
+  #     run: |
+  #         echo 'test payload' > test.txt
+  #         rsync -avz --mkpath ./test.txt ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:test.txt
       
-    - name: Upload with rsync
-      run: |
-        rsync -avz --mkpath \
-          ./target/release/samizdat-hub \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
-        rsync -avz --mkpath \
-          ./install/hub/x86_64-unknown-linux-gnu/samizdat-hub.service \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
-        rsync -avz \
-          ./target/release/samizdat-node \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
-        rsync -avz --mkpath \
-          ./install/node/x86_64-unknown-linux-gnu/samizdat-node.service \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
-        rsync -avz --mkpath \
-          ./target/release/samizdat-proxy \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
-        rsync -avz --mkpath \
-          ./proxy/samizdat-proxy.service \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service &&
-        OWNER=${{ secrets.PROXY_OWNER }} DOMAIN=${{ secrets.PROXY_DOMAIN }} \
-          envsubst < ./proxy/proxy.toml.template > ./proxy/proxy.toml &&
-        rsync -avz --mkpath \
-          ./proxy/proxy.toml \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/samizdat/proxy.toml
-        rsync -avz --mkpath \
-          ./target/release/samizdat \
-          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat
+  #   - name: Upload with rsync
+  #     run: |
+  #       rsync -avz --mkpath \
+  #         ./target/release/samizdat-hub \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-hub &&
+  #       rsync -avz --mkpath \
+  #         ./install/hub/x86_64-unknown-linux-gnu/samizdat-hub.service \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-hub.service &&
+  #       rsync -avz \
+  #         ./target/release/samizdat-node \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-node &&
+  #       rsync -avz --mkpath \
+  #         ./install/node/x86_64-unknown-linux-gnu/samizdat-node.service \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-node.service &&
+  #       rsync -avz --mkpath \
+  #         ./target/release/samizdat-proxy \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat-proxy &&
+  #       rsync -avz --mkpath \
+  #         ./proxy/samizdat-proxy.service \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/systemd/system/samizdat-proxy.service &&
+  #       OWNER=${{ secrets.PROXY_OWNER }} DOMAIN=${{ secrets.PROXY_DOMAIN }} \
+  #         envsubst < ./proxy/proxy.toml.template > ./proxy/proxy.toml &&
+  #       rsync -avz --mkpath \
+  #         ./proxy/proxy.toml \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/etc/samizdat/proxy.toml
+  #       rsync -avz --mkpath \
+  #         ./target/release/samizdat \
+  #         ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/usr/local/bin/samizdat
     
-    - name: Restart services
-      run: |
-        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
-          "mkdir -p /etc/samizdat/ &&
-           systemctl disable --now samizdat-proxy &&
-           systemctl disable --now samizdat-node &&
-           systemctl disable --now samizdat-hub &&
-           systemctl enable --now samizdat-hub &&
-           systemctl enable --now samizdat-node &&
-           systemctl enable --now samizdat-proxy &&
-           # Wait for stuff to stabilize:
-           sleep 3 &&
-           # Link to local hub:
-           samizdat hub new testbed.hubfederation.com UseBoth &&
-           # Get Samizdat:
-           samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM &&
-           # Samizdat blog:
-           samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
-           "
+  #   - name: Restart services
+  #     run: |
+  #       ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} -- \
+  #         "mkdir -p /etc/samizdat/ &&
+  #          systemctl disable --now samizdat-proxy &&
+  #          systemctl disable --now samizdat-node &&
+  #          systemctl disable --now samizdat-hub &&
+  #          systemctl enable --now samizdat-hub &&
+  #          systemctl enable --now samizdat-node &&
+  #          systemctl enable --now samizdat-proxy &&
+  #          # Wait for stuff to stabilize:
+  #          sleep 3 &&
+  #          # Link to local hub:
+  #          samizdat hub new testbed.hubfederation.com UseBoth &&
+  #          # Get Samizdat:
+  #          samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM &&
+  #          # Samizdat blog:
+  #          samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
+  #          "
     
-    - name: Done
-      run: echo Done
+  #   - name: Done
+  #     run: echo Done
