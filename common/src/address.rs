@@ -2,7 +2,7 @@
 
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use crate::Hash;
@@ -156,8 +156,27 @@ impl AddrResolutionMode {
     }
 
     pub async fn resolve(&self, host: &str) -> Result<Vec<(String, SocketAddr)>, crate::Error> {
+        if let Ok(socket) = host.parse::<SocketAddr>() {
+            return Ok(vec![(host.to_owned(), socket)]);
+        }
+
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(vec![(host.to_owned(), SocketAddr::new(ip, 4511))]);
+        }
+
+        // Now we know it's not a socket or IP address, we can do this safely:
+        // (remember: IPv6 also have `:`)
+        let (domain, port_str) = host.rsplit_once(':').unwrap_or((host, "4511"));
+        let port: u16 = port_str
+            .parse()
+            .map_err(|err| format!("bad host name {host}: {err}"))?;
+
         Ok(self
-            .filter_hosts(&tokio::net::lookup_host(host).await?.collect::<Vec<_>>())
+            .filter_hosts(
+                &tokio::net::lookup_host((domain, port))
+                    .await?
+                    .collect::<Vec<_>>(),
+            )
             .into_iter()
             .map(|addrs| (host.to_owned(), addrs))
             .collect::<Vec<_>>())

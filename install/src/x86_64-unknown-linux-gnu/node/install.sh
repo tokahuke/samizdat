@@ -16,7 +16,7 @@ if [ "$(expr substr $(uname -s) 1 5)" != "Linux" ]; then
 fi
 
 # Set preifx and a temporary work directory:
-urlprefix=http://proxy.hubfederation.com/get-samizdat/$VERSION/x86_64-unknown-linux-gnu/node
+urlprefix=http://proxy.hubfederation.com/~get-samizdat/$VERSION/x86_64-unknown-linux-gnu/node
 tmpdir=/tmp/samizdat-install-$RANDOM
 mkdir -p $tmpdir && cd $tmpdir
 

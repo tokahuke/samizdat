@@ -2,7 +2,7 @@ class Samizdat < Formula
     desc "Samizdat: your content, available"
     homepage "https://github.com/tokahuke/samizdat"
     version "0.1.0"
-    url "https://proxy.hubfederation.com/get-samizdat/$VERSION/aarch64-apple-darwin/node/samizdat.tar.gz"
+    url "https://proxy.hubfederation.com/~get-samizdat/$VERSION/aarch64-apple-darwin/node/samizdat.tar.gz"
     revision $REVISION_COUNT
     # sha256 "$SHA256SUM"
     license "AGPLv3"

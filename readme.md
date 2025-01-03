@@ -6,7 +6,7 @@
 ## Website
 
 Samizdat is pulling itself by its bootstraps!
-https://proxy.hubfederation.com/samizdat
+https://proxy.hubfederation.com/~samizdat
 
 ## Donate
 

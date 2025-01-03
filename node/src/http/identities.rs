@@ -68,7 +68,7 @@ pub fn api() -> Router {
 
     Router::new()
         .route(
-            "/:identity/*name",
+            "/~:identity/*name",
             get(
                 |Path(IdentityPath { identity, name }): Path<IdentityPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -87,7 +87,7 @@ pub fn api() -> Router {
             .layer(security_scope!(AccessRight::Public)),
         )
         .route(
-            "/:identity/",
+            "/~:identity/",
             get(
                 |Path(identity): Path<String>, SamizdatTimeout(timeout): SamizdatTimeout| {
                     async move {
@@ -99,7 +99,7 @@ pub fn api() -> Router {
             .layer(security_scope!(AccessRight::Public)),
         )
         .route(
-            "/:identity",
+            "/~:identity",
             get(|Path(identity): Path<String>| async move {
                 Redirect::permanent(&format!("{identity}/"))
             }),
