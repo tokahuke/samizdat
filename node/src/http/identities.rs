@@ -101,7 +101,7 @@ pub fn api() -> Router {
         .route(
             "/~:identity",
             get(|Path(identity): Path<String>| async move {
-                Redirect::permanent(&format!("{identity}/"))
+                Redirect::permanent(&format!("~{identity}/"))
             }),
         )
 }
