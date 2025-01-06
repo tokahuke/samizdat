@@ -27,6 +27,11 @@ pub struct Cli {
     #[structopt(long)]
     #[serde(default)]
     pub port: Option<u16>,
+    /// The port on which to serve the HTTP-to-HTTPS redirector. This defaults to 80 (only
+    /// applicable if HTTPS is set).
+    #[structopt(long)]
+    #[serde(default)]
+    pub http_port: Option<u16>,
     /// The name of the domain that this proxy will serve (only applicable if HTTPS is
     /// set).
     #[structopt(long)]

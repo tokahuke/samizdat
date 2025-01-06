@@ -25,6 +25,7 @@ async fn main() -> Result<(), anyhow::Error> {
             &cli().acme_directory,
             &format!("{}/acme", cli().data),
             (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
+            cli().http_port.unwrap_or(80),
             crate::http::api(),
         )
         .await?
