@@ -70,7 +70,7 @@ fn redirect_to_https(domain: &str, addr: SocketAddr) -> axum::Router {
 
     axum::Router::new()
         .route(
-            "/*path",
+            "/{*path}",
             any(|Path(path): Path<String>| async move {
                 Redirect::permanent(&format!(
                     "{}{path}",
