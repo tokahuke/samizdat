@@ -44,7 +44,7 @@ pub fn api() -> Router {
         )
         .route(
             // Triggers a manual refresh on a subscription.
-            "/:key/refresh",
+            "/{key}/refresh",
             get(|Path(public_key): Path<String>| {
                 async move {
                     let public_key: Key = public_key.parse()?;
@@ -63,7 +63,7 @@ pub fn api() -> Router {
         )
         .route(
             // Removes a subscription.
-            "/:key",
+            "/{key}",
             delete(|Path(public_key): Path<String>| {
                 async move {
                     let public_key: Key = public_key.parse()?;
@@ -78,7 +78,7 @@ pub fn api() -> Router {
         )
         .route(
             // Gets information associates with a series owner
-            "/:key",
+            "/{key}",
             get(|Path(public_key): Path<String>| {
                 async move {
                     let public_key: Key = public_key.parse()?;

@@ -382,11 +382,11 @@ impl SubscriptionCommand {
 
 #[derive(Clone, Debug, StructOpt)]
 pub enum IdentityCommand {
-    /// Sets the endpoint for connecting to the provider for the Ethereum blockchain.
+    /// Sets the endpoint for connecting to the provider for the Polygon blockchain.
     SetEndpoint { endpoint: String },
-    /// Gets the endpoint for connection to the provider for the Ethereum blockchain.
+    /// Gets the endpoint for connection to the provider for the Polygon blockchain.
     GetEndpoint {},
-    /// Creates a new association in the smart contact in the Ethereum blockchain.
+    /// Creates a new association in the smart contact in the Polygon blockchain.
     Create {
         /// The human readable name to be associated.
         identity: String,
@@ -395,11 +395,11 @@ pub enum IdentityCommand {
         /// The time-to-leave in seconds (time in cache) of this rule.
         #[structopt(long, default_value = "3600")]
         ttl: u64,
-        /// Use custom endpoint to the Ethereum blockchain.
+        /// Use custom endpoint to the Polygon blockchain.
         #[structopt(long)]
         endpoint: Option<String>,
     },
-    /// Updatess and existing association in the smart contact in the Ethereum
+    /// Updatess and existing association in the smart contact in the Polygon
     /// blockchain.
     Update {
         /// The human readable name to be associated.
@@ -409,7 +409,7 @@ pub enum IdentityCommand {
         /// The time-to-leave in seconds (time in cache) of this rule.
         #[structopt(long, default_value = "3600")]
         ttl: u64,
-        /// Use custom endpoint to the Ethereum blockchain.
+        /// Use custom endpoint to the Polygon blockchain.
         #[structopt(long)]
         endpoint: Option<String>,
     },
@@ -417,7 +417,7 @@ pub enum IdentityCommand {
     Get {
         /// The identity to be resolved.
         identity: String,
-        /// Use custom endpoint to the Ethereum blockchain.
+        /// Use custom endpoint to the Polygon blockchain.
         #[structopt(long)]
         endpoint: Option<String>,
     },

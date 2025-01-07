@@ -23,8 +23,9 @@ const PROXY_HEADERS: &[&str] = &[
 
 pub fn api() -> axum::Router {
     Router::new()
-        .route("/*path", get(proxy))
+        .route("/{*path}", get(proxy))
         .route("/", get(proxy))
+        .layer(tower::ServiceBuilder::new().layer(tower_http::trace::TraceLayer::new_for_http()))
 }
 
 pub async fn proxy(original_uri: OriginalUri) -> Response<Body> {
@@ -65,7 +66,7 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
     let response = CLIENT.get(translated).send().await?;
 
     let response = match response.status().as_u16() {
-        status @ 300..=399 => http::Response::builder()
+        status @ 300..=399 => axum::response::Response::builder()
             .status(status)
             .header(
                 "Location",
@@ -81,7 +82,7 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
                 .get("Content-Type")
                 .cloned()
                 .unwrap_or_else(|| "text/plain".parse().expect("is valid header"));
-            let mut response_builder = http::Response::builder()
+            let mut response_builder = axum::response::Response::builder()
                 .status(status)
                 .header("Content-Type", content_type.clone());
 

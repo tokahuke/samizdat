@@ -19,7 +19,7 @@ use super::ApiResponse;
 pub fn api() -> Router {
     Router::new()
         .route(
-            "/*tail",
+            "/{*tail}",
             axum::routing::get(get)
                 .layer(security_scope!(AccessRight::Public))
                 .put(put)

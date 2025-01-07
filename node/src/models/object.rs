@@ -459,7 +459,7 @@ impl ObjectRef {
     ) {
         // Do not insert if object already exists. This will overwrite information!
         if ObjectRef::new(hash).exists(tx).unwrap_or(false) {
-            tracing::warn!("Object {hash} already exists in the database; skipping creation");
+            tracing::info!("Object {hash} already exists in the database; skipping creation");
             return;
         }
         Table::Objects.put(tx, hash, []);
@@ -535,7 +535,12 @@ impl ObjectRef {
         };
         let statistics = ObjectStatistics::new(content_size, Duration::from_secs(0));
 
-        tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
+        tracing::info!(
+            "New object {hash} of type {} and size {:.3}kB",
+            metadata.header.content_type,
+            metadata.content_size as f64 / 1_000.0,
+        );
+        tracing::debug!("Object {hash} metadata is {:#?}", metadata);
 
         writable_tx(|tx| {
             ObjectRef::create_object_with(tx, hash, &metadata, &statistics, bookmark);

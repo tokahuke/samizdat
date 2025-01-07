@@ -35,7 +35,7 @@ pub fn api() -> Router {
         .route(
             // Gets the content of a collection item using the series public key. This will give the
             // best-effort latest version for this item.
-            "/:series_key/*name",
+            "/{series_key}/{*name}",
             get(
                 |Path(SeriesPath { series_key, name }): Path<SeriesPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -52,7 +52,7 @@ pub fn api() -> Router {
         .route(
             // Gets the content of a collection item using the series public key. This will give the
             // best-effort latest version for this item.
-            "/:series_key/",
+            "/{series_key}/",
             get(
                 |Path(SeriesPath { series_key, .. }): Path<SeriesPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -68,7 +68,7 @@ pub fn api() -> Router {
         .route(
             // Gets the content of a collection item using the series public key. This will give the
             // best-effort latest version for this item.
-            "/:series_key",
+            "/{series_key}",
             get(
                 |Path(SeriesPath { series_key, .. }): Path<SeriesPath>| async move {
                     Redirect::permanent(&format!("{series_key}/"))

@@ -9,13 +9,20 @@ use cli::cli;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
     cli::init_cli()?;
+    samizdat_common::logger::init();
+
+    tracing::info!("Starting SAMIZDAT proxy in folder {:?}", cli().data);
 
     http::validate_node_is_up().await?;
 
     // Run server:
     if cli().https {
+        tracing::info!(
+            "Proxy mode is HTTPS for domain {} in port {}",
+            cli().domain()?,
+            cli().port.unwrap_or(443)
+        );
         samizdat_common::rustls::crypto::ring::default_provider()
             .install_default()
             .expect("failed to install crypto provider `ring`");
@@ -30,7 +37,7 @@ async fn main() -> Result<(), anyhow::Error> {
         )
         .await?
     } else {
-        // Start server:
+        tracing::info!("Proxy mode is HTTP in port {}", cli().port.unwrap_or(8080));
         axum::serve(
             tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(8080)))
                 .await?,

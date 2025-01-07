@@ -5,6 +5,12 @@
 
     {{ head|safe }}
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&family=Space+Mono:wght@700&display=swap"
+      rel="stylesheet"
+    >
 		<style id="{{ rand }}-style">
       /* CSS style context isolation */
       #{{ rand }}-proxy-overlay {
@@ -19,7 +25,7 @@
         position: fixed;
         top: 0;
         left: 0;
-        z-index: 1024;
+        z-index: 2147483646;
         width: 100vw;
 				height: 100vh;
         background-color: rgba(0, 0, 0, 0.5);
@@ -42,9 +48,26 @@
         background-color: rgba(255, 255, 255, 1.0);
         
         border-radius: 12px;
-        padding: 48px 24px;
+        padding: 36px 36px;
 
         width: 480px;
+
+        font-family: "Poppins", serif;
+        font-weight: 400;
+        font-style: normal;
+      }
+
+      #{{ rand }}-modal h3 {
+        font-family: "Space Mono", serif;
+        font-weight: 700;
+        font-style: normal;
+        text-align: center;
+        margin-bottom: 24px;
+      }
+
+      #{{ rand }}-modal em {
+        font-weight: 700;
+        font-style: normal;
       }
 
       #{{ rand }}-modal-footer {
@@ -87,9 +110,15 @@
 
     <div id="{{ rand }}-proxy-overlay" class="{{ rand }}-hidden">
       <div id="{{ rand }}-modal">
-        <h3>Support the <mark>Samizdat</mark> System</h3>
+        <h3>
+          <div style="margin-bottom: 12px">
+          <svg xmlns="http://www.w3.org/2000/svg" enable-background="new 0 0 24 24" height="32px" viewBox="0 0 24 24" width="32px" fill="#ee0302"><g><rect fill="none" height="24" width="24" x="0"/><path d="M12,8.89L12.94,12h2.82l-2.27,1.62l0.93,3.01L12,14.79l-2.42,1.84l0.93-3.01L8.24,12h2.82L12,8.89 M12,2l-2.42,8H2 l6.17,4.41L5.83,22L12,17.31L18.18,22l-2.35-7.59L22,10h-7.58L12,2L12,2z"/></g></svg>
+          </div>
+
+          Support SAMIZDAT
+        </h3>
         <p>You are currently using a <em>proxy</em> to view pages served with Samizdat. Download
-          Samizdat for free the full experience.</p>
+          Samizdat for free for the full experience.</p>
         <p>Help us all to support the system!</p>
         <div id="{{ rand }}-modal-footer">
           <a
@@ -124,7 +153,7 @@
           localStorage.setItem(storageKey, pageCount + 1);
         }
 
-        if (pageCount % 10 == 0) {
+        if (pageCount % {{ show_modal_every }} == 0) {
           document.getElementById("{{ rand }}-proxy-overlay").classList.remove("{{ rand }}-hidden");
         }
       })();

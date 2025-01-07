@@ -68,8 +68,7 @@ impl IntoResponse for SamizdatTimeoutRejection {
 
 struct SamizdatTimeout(Duration);
 
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for SamizdatTimeout {
+impl<S: Send + Sync> FromRequestParts<S> for SamizdatTimeout {
     type Rejection = SamizdatTimeoutRejection;
     async fn from_request_parts(
         parts: &mut Parts,
@@ -91,8 +90,7 @@ impl<S> FromRequestParts<S> for SamizdatTimeout {
 
 struct ContentType(String);
 
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for ContentType {
+impl<S: Send + Sync> FromRequestParts<S> for ContentType {
     type Rejection = Infallible;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<ContentType, Self::Rejection> {
         Ok(parts
@@ -208,7 +206,8 @@ pub async fn serve() -> Result<(), crate::Error> {
         .layer(
             tower::ServiceBuilder::new()
                 .layer(axum::middleware::from_fn(deny_outside_requests))
-                .layer(axum::middleware::from_fn(redirect_request)),
+                .layer(axum::middleware::from_fn(redirect_request))
+                .layer(tower_http::trace::TraceLayer::new_for_http()),
         );
 
     axum::serve(

@@ -44,7 +44,7 @@ async fn main() -> Result<(), crate::Error> {
     init_cli()?;
 
     // Init logger:
-    tracing_subscriber::fmt().init();
+    samizdat_common::logger::init();
 
     tracing::info!(
         "Starting SAMIZDAT node in folder {:?}",

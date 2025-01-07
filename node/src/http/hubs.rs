@@ -60,14 +60,14 @@ fn hub() -> Router {
         )
         .route(
             // Lists a single hubs.
-            "/:hub",
+            "/{hub}",
             get(|Path(hub): Path<String>| {
                 async move { readonly_tx(|tx| Hub::get(tx, &hub)) }.map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::ManageHubs)),
         )
         .route(
-            "/:hub",
+            "/{hub}",
             delete(|Path(hub): Path<String>| {
                 async move {
                     let existed = if let Some(hub) = readonly_tx(|tx| Hub::get(tx, &hub))? {

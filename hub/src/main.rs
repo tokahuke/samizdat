@@ -27,12 +27,12 @@ fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
 
 #[tokio::main]
 async fn main() -> Result<(), crate::Error> {
-    // Init logger:
-    tracing_subscriber::fmt().init();
-
     // Init resources:
     cli::init_cli()?;
+    samizdat_common::logger::init();
     db::init_db::<crate::db::Table>(&cli().data)?;
+
+    tracing::info!("Starting SAMIZDAT hub in folder {:?}", cli().data);
 
     // Resolve hubs:
     let mut hubs = vec![];

@@ -76,7 +76,7 @@ pub fn api() -> Router {
         )
         .route(
             // Gets information associates with a series owner
-            "/:series_owner_name",
+            "/{series_owner_name}",
             get(|Path(series_owner_name): Path<String>| {
                 async move {
                     let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
@@ -88,7 +88,7 @@ pub fn api() -> Router {
         )
         .route(
             // Removes a series owner
-            "/:series_owner_name",
+            "/{series_owner_name}",
             delete(|Path(series_owner_name): Path<String>| {
                 async move {
                     let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
@@ -109,7 +109,7 @@ pub fn api() -> Router {
         )
         .route(
             // Pushes a new collection to the series owner, creating a new edition.
-            "/:series_owner_name/editions",
+            "/{series_owner_name}/editions",
             post(
                 |Path(series_owner_name): Path<String>, Json(request): Json<PostEditionRequest>| {
                     async move {

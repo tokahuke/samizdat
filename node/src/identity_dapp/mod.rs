@@ -27,7 +27,7 @@ pub fn init_identity_provider() -> Result<(), crate::Error> {
     }) {
         provider
     } else {
-        tracing::warn!(
+        tracing::info!(
             "Ethereum provider endpoint not set. Using default: {}",
             blockchain::DEFAULT_PROVIDER_ENDPOINT
         );

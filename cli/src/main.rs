@@ -20,7 +20,7 @@ pub use manifest::{Manifest, PrivateManifest};
 async fn main() {
     let outcome: Result<(), anyhow::Error> = try {
         if cli::cli().verbose {
-            tracing_subscriber::fmt().init();
+            samizdat_common::logger::init();
         }
 
         access_token::init_port()?;

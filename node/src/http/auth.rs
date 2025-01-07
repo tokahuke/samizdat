@@ -33,7 +33,7 @@ pub fn api() -> Router {
 /// context.
 fn get_auth() -> Router {
     Router::new().route(
-        "/*tail",
+        "/{*tail}",
         get(|Path(tail): Path<String>| {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
@@ -116,7 +116,7 @@ fn patch_auth() -> Router {
     }
 
     Router::new().route(
-        "/*tail",
+        "/{*tail}",
         patch(|Path(tail): Path<String>, Json(request): Json<Request>| {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
@@ -150,7 +150,7 @@ fn patch_auth() -> Router {
 /// Revokes all access rights for a given entity.
 fn delete_auth() -> Router {
     Router::new().route(
-        "/*tail",
+        "/{*tail}",
         delete(|Path(tail): Path<String>| {
             async move {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
@@ -240,8 +240,7 @@ fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScop
 
 pub struct SecurityScope(pub Entity);
 
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for SecurityScope {
+impl<S: Send + Sync> FromRequestParts<S> for SecurityScope {
     type Rejection = SecurityScopeRejection;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
         let Some(referer) = referer_from_parts(parts)? else {

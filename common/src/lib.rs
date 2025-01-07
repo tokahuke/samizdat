@@ -13,6 +13,7 @@ pub mod pow;
 pub mod quic;
 pub mod rpc;
 pub mod transport;
+pub mod logger;
 
 mod error;
 mod hash;

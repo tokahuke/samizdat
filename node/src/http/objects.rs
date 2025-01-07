@@ -55,7 +55,7 @@ fn object() -> Router {
 
     Router::new()
         .route(
-            "/:hash",
+            "/{hash}",
             get(
                 |Path(ObjectPath { hash }): Path<ObjectPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -96,14 +96,14 @@ fn object() -> Router {
             ),
         )
         .route(
-            "/:hash",
+            "/{hash}",
             delete(|Path(ObjectPath { hash }): Path<ObjectPath>| {
                 async move { ObjectRef::new(hash).drop_if_exists() }.map(ApiResponse)
             })
             .layer(security_scope!(AccessRight::ManageObjects)),
         )
         .route(
-            "/:hash/reissue",
+            "/{hash}/reissue",
             post(
                 |Path(ObjectPath { hash }): Path<ObjectPath>,
                  Query(query): Query<PostReissueQuery>| {
@@ -130,7 +130,7 @@ fn object_bookmark() -> Router {
         .route(
             // Bookmarks an object. This will prevent the object from being automatically removed
             // by the vacuum daemon.
-            "/:hash/bookmark",
+            "/{hash}/bookmark",
             post(|Path(hash): Path<Hash>| {
                 async move {
                     writable_tx(|tx| {
@@ -148,7 +148,7 @@ fn object_bookmark() -> Router {
             // # Warning
             //
             // By now, this returns `200 OK` even if the object does not exist.
-            "/:hash/bookmark",
+            "/{hash}/bookmark",
             get(|Path(hash): Path<Hash>| {
                 async move {
                     readonly_tx(|tx| {
@@ -163,7 +163,7 @@ fn object_bookmark() -> Router {
         )
         .route(
             // Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
-            "/:hash/bookmark",
+            "/{hash}/bookmark",
             delete(|Path(hash): Path<Hash>| {
                 async move {
                     writable_tx(|tx| {
@@ -185,7 +185,7 @@ fn object_stats() -> Router {
             // # Warning
             //
             // By now, this returns `200 OK` even if the object does not exist.
-            "/:hash/reference-count",
+            "/{hash}/reference-count",
             get(|Path(hash): Path<Hash>| {
                 async move {
                     readonly_tx(|tx| {
@@ -199,7 +199,7 @@ fn object_stats() -> Router {
             .layer(security_scope!(AccessRight::GetObjectStats)),
         )
         .route(
-            "/:hash/stats",
+            "/{hash}/stats",
             get(|Path(hash): Path<Hash>| {
                 async move { readonly_tx(|tx| ObjectRef::new(hash).statistics(tx)) }
                     .map(ApiResponse)
@@ -207,7 +207,7 @@ fn object_stats() -> Router {
             .layer(security_scope!(AccessRight::GetObjectStats)),
         )
         .route(
-            "/:hash/stats/byte-usefulness",
+            "/{hash}/stats/byte-usefulness",
             get(|Path(hash): Path<Hash>| {
                 async move {
                     readonly_tx(|tx| {

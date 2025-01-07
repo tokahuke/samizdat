@@ -3,12 +3,14 @@ use std::sync::LazyLock;
 use askama::Template;
 use scraper::{Html, Selector};
 
+use crate::cli;
+
 static SELECT_HEAD: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("head").expect("valid selector"));
 static SELECT_BODY: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("body").expect("valid selector"));
 
-const SAMIZDAT_BLOG_PATH: &str = "/_series/fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc/install/";
+const SAMIZDAT_BLOG_PATH: &str = "/~samizdat/install/";
 
 #[derive(Template)]
 #[template(path = "proxied-page.html.jinja")]
@@ -17,6 +19,7 @@ struct ProxyedPage {
     body: String,
     rand: String,
     download_link: &'static str,
+    show_modal_every: u16,
 }
 
 pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> hyper::body::Bytes {
@@ -39,6 +42,7 @@ pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> hyper::body
         body,
         rand,
         download_link: SAMIZDAT_BLOG_PATH,
+        show_modal_every: cli().show_modal_every,
     }
     .render()
     .expect("can always render proxied page")

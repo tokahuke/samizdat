@@ -11,6 +11,11 @@ from time import sleep
 from json import JSONEncoder
 
 
+def log[T](x: T) -> T:
+    print(x)
+    return x
+
+
 def wrapped_default(self, obj):
     return getattr(obj.__class__, "__json__", wrapped_default.default)(obj)
 
@@ -86,14 +91,16 @@ class Node:
         ]
 
     def connect_to_hub(self, hub: Hub) -> list[str]:
-        return [
-            f"target/{folder()}/samizdat",
-            f"--data=data/{self.node_id}",
-            "hub",
-            "new",
-            hub.address(),
-            "EnsureIpv6",
-        ]
+        return log(
+            [
+                f"target/{folder()}/samizdat",
+                f"--data=data/{self.node_id}",
+                "hub",
+                "new",
+                hub.address(),
+                "EnsureIpv6",
+            ]
+        )
 
 
 @dataclass
@@ -104,7 +111,7 @@ class Hub:
         return self.hub_id
 
     def direct_port(self) -> int:
-        return PORT_BROKER.port_for(f"{self.hub_id}-direct")
+        return PORT_BROKER.port_for(f"{self.hub_id}")
 
     def http_port(self) -> int:
         return PORT_BROKER.port_for(f"{self.hub_id}-http")

@@ -81,7 +81,11 @@ pub async fn serve() -> Result<(), crate::Error> {
     let server = Router::new()
         .route("/", get(|| async { Html(include_str!("../index.html")) }))
         .merge(api())
-        .layer(axum::middleware::from_fn(deny_outside_requests));
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(deny_outside_requests))
+                .layer(tower_http::trace::TraceLayer::new_for_http()),
+        );
 
     axum::serve(
         tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, cli().http_port)).await?,

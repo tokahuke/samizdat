@@ -46,6 +46,10 @@ pub struct Cli {
     #[structopt(long, default_value = "https://acme-v02.api.letsencrypt.org/directory")]
     #[serde_inline_default("https://acme-v02.api.letsencrypt.org/directory".to_string())]
     pub acme_directory: String,
+    /// The number of pages between which to show the "Get Samizdat!" modal.
+    #[structopt(long, default_value = "10")]
+    #[serde_inline_default(10)]
+    pub show_modal_every: u16,
 }
 
 impl Cli {

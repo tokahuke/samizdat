@@ -80,7 +80,7 @@ fn collection() -> Router {
         )
         .route(
             // Gets the contents of a collection item.
-            "/:hash/*name",
+            "/{hash}/{*name}",
             get(
                 |Path(ItemPath { hash, name }): Path<ItemPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -98,7 +98,7 @@ fn collection() -> Router {
         )
         .route(
             // Gets the contents of a collection item.
-            "/:hash/",
+            "/{hash}/",
             get(
                 |Path(CollectionPath { hash }): Path<CollectionPath>,
                  SamizdatTimeout(timeout): SamizdatTimeout| {
@@ -115,7 +115,7 @@ fn collection() -> Router {
             .layer(security_scope!(AccessRight::Public)),
         )
         .route(
-            "/:hash",
+            "/{hash}",
             get(
                 |Path(CollectionPath { hash }): Path<CollectionPath>| async move {
                     Redirect::permanent(&format!("{hash}/"))

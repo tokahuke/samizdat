@@ -288,7 +288,8 @@ impl CollectionItem {
         );
         Table::CollectionItemLocators.put(tx, locator.path(), locator.hash());
 
-        tracing::info!("Inserting item {}: {:#?}", locator, self);
+        tracing::info!("Inserting item {}", locator);
+        tracing::debug!("Item {locator} is {:#?}", self);
     }
 }
 
