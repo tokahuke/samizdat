@@ -15,7 +15,7 @@ async fn wait() {
 }
 
 /// Prompts the user for input with a given prompt string.
-/// 
+///
 /// # Returns
 /// The user's input as a String with trailing whitespace removed.
 fn read(prompt: &str) -> String {
@@ -31,10 +31,10 @@ fn read(prompt: &str) -> String {
 }
 
 /// Prompts for and validates a wallet private key.
-/// 
+///
 /// # Returns
 /// A configured LocalWallet instance for the Polygon network.
-/// 
+///
 /// # Errors
 /// Returns an error if the private key is invalid or cannot be parsed.
 fn get_wallet() -> Result<LocalWallet, anyhow::Error> {
@@ -48,7 +48,7 @@ fn get_wallet() -> Result<LocalWallet, anyhow::Error> {
 }
 
 /// Creates a configured Etherscan client instance.
-/// 
+///
 /// # Returns
 /// A configured etherscan::Client ready for blockchain interactions.
 fn get_etherscan() -> etherscan::Client {
@@ -63,7 +63,7 @@ fn get_etherscan() -> etherscan::Client {
 }
 
 /// Creates a Provider instance for interacting with the blockchain.
-/// 
+///
 /// # Arguments
 /// * `endpoint` - Optional RPC endpoint URL. If None, uses the default Polygon provider.
 async fn client(endpoint: Option<String>) -> Result<Provider<Http>, anyhow::Error> {
@@ -76,7 +76,7 @@ async fn client(endpoint: Option<String>) -> Result<Provider<Http>, anyhow::Erro
 }
 
 /// Creates a SignerMiddleware instance for authenticated blockchain interactions.
-/// 
+///
 /// # Arguments
 /// * `endpoint` - Optional RPC endpoint URL
 /// * `wallet` - The LocalWallet instance for transaction signing
@@ -88,7 +88,7 @@ async fn signing_client(
 }
 
 /// Creates a Contract instance for the Samizdat Identity Manager.
-/// 
+///
 /// # Arguments
 /// * `rpc_client` - The SignerMiddleware instance for authenticated interactions
 async fn get_manager_contract(
@@ -107,7 +107,7 @@ async fn get_manager_contract(
 }
 
 /// Creates a Contract instance for the Samizdat Storage contract.
-/// 
+///
 /// # Arguments
 /// * `endpoint` - Optional RPC endpoint URL
 async fn get_storage_contract(
@@ -134,13 +134,13 @@ async fn get_storage_contract(
 }
 
 /// Creates a new identity registration on the blockchain.
-/// 
+///
 /// # Arguments
 /// * `identity` - The identity string to register
 /// * `entity` - The entity string to associate with the identity
 /// * `ttl` - Time-to-live value for the registration
 /// * `endpoint` - Optional RPC endpoint URL
-/// 
+///
 /// # Errors
 /// Returns an error if the transaction fails or is rejected by the contract.
 pub async fn create(
@@ -216,13 +216,13 @@ pub async fn create(
 }
 
 /// Updates an existing identity registration on the blockchain.
-/// 
+///
 /// # Arguments
 /// * `identity` - The identity string to update
 /// * `entity` - The new entity string to associate with the identity
 /// * `ttl` - New time-to-live value for the registration
 /// * `endpoint` - Optional RPC endpoint URL
-/// 
+///
 /// # Errors
 /// Returns an error if the transaction fails or is rejected by the contract.
 pub async fn update(
@@ -283,14 +283,14 @@ pub async fn update(
 }
 
 /// Retrieves the entity associated with an identity from the blockchain.
-/// 
+///
 /// # Arguments
 /// * `identity` - The identity string to look up
 /// * `endpoint` - Optional RPC endpoint URL
-/// 
+///
 /// # Returns
 /// The entity string associated with the identity.
-/// 
+///
 /// # Errors
 /// Returns an error if the identity doesn't exist or the contract call fails.
 pub async fn get(identity: String, endpoint: Option<String>) -> Result<String, anyhow::Error> {

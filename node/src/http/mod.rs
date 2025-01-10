@@ -55,6 +55,7 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
+/// Represents a timeout value extracted from the X-Samizdat-Timeout header.
 struct SamizdatTimeoutRejection(ParseIntError);
 
 impl IntoResponse for SamizdatTimeoutRejection {
@@ -66,6 +67,7 @@ impl IntoResponse for SamizdatTimeoutRejection {
     }
 }
 
+/// Represents a parsed timeout duration from the X-Samizdat-Timeout header.
 struct SamizdatTimeout(Duration);
 
 impl<S: Send + Sync> FromRequestParts<S> for SamizdatTimeout {
@@ -88,6 +90,7 @@ impl<S: Send + Sync> FromRequestParts<S> for SamizdatTimeout {
     }
 }
 
+/// Represents the Content-Type header value for requests.
 struct ContentType(String);
 
 impl<S: Send + Sync> FromRequestParts<S> for ContentType {
@@ -164,7 +167,10 @@ fn api() -> Router {
         .nest("/_vacuum", vacuum())
 }
 
-/// Triggers a manual vacuum round.
+/// Creates a router for vacuum-related endpoints.
+///
+/// Provides endpoints for triggering manual vacuum operations and
+/// flushing all data.
 fn vacuum() -> Router {
     Router::new()
         .route(
@@ -183,6 +189,16 @@ fn vacuum() -> Router {
         )
 }
 
+/// Middleware function to restrict access to only local connections.
+///
+/// # Arguments
+/// * `addr` - Socket address information of the incoming connection
+/// * `request` - The incoming HTTP request
+/// * `next` - The next middleware in the chain
+///
+/// # Returns
+/// Returns a 403 Forbidden response for non-loopback addresses, otherwise
+/// continues the middleware chain.
 async fn deny_outside_requests(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request,

@@ -4,8 +4,8 @@ use tabled::Tabled;
 
 use samizdat_common::Key;
 
-use crate::api;
 use super::show_table;
+use crate::api;
 
 /// Creates a new subscription to a series.
 ///

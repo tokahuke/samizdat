@@ -247,7 +247,7 @@ impl Command {
 }
 
 /// Hub management commands for controlling hub connections.
-/// 
+///
 /// These commands allow creating, listing, and removing hub connections that
 /// the node uses to communicate with the Samizdat network.
 #[derive(Clone, Debug, StructOpt)]
@@ -282,7 +282,7 @@ impl HubCommand {
 }
 
 /// Connection management commands for monitoring active hub connections.
-/// 
+///
 /// These commands provide visibility into the current hub connections
 /// maintained by the node.
 #[derive(Clone, Debug, StructOpt)]
@@ -315,7 +315,7 @@ impl PeerCommand {
 }
 
 /// Collection management commands for handling content collections.
-/// 
+///
 /// These commands provide functionality to view and manage collections of
 /// content within the Samizdat system.
 #[derive(Clone, Debug, StructOpt)]
@@ -336,7 +336,7 @@ impl CollectionCommand {
 }
 
 /// Series management commands for handling content series.
-/// 
+///
 /// These commands provide functionality to create, remove, and manage series,
 /// which are sequences of related content editions in Samizdat.
 #[derive(Clone, Debug, StructOpt)]
@@ -403,7 +403,7 @@ impl SeriesCommand {
 }
 
 /// Edition management commands for handling content editions.
-/// 
+///
 /// These commands allow viewing and managing editions, which are specific
 /// versions of content within a series.
 #[derive(Clone, Debug, StructOpt)]
@@ -421,7 +421,7 @@ impl EditionCommand {
 }
 
 /// Subscription management commands for handling content subscriptions.
-/// 
+///
 /// These commands enable users to subscribe to series, manage their subscriptions,
 /// and control content synchronization from the network.
 #[derive(Clone, Debug, StructOpt)]
@@ -465,7 +465,7 @@ impl SubscriptionCommand {
 }
 
 /// Identity management commands for blockchain-based identity operations.
-/// 
+///
 /// These commands provide functionality to manage identities on the blockchain,
 /// including creating and updating identity associations and managing blockchain
 /// endpoints.
@@ -541,7 +541,7 @@ impl IdentityCommand {
 }
 
 /// Authentication management commands for controlling access rights.
-/// 
+///
 /// These commands allow managing access control through granting and revoking
 /// rights to different Web application scopes.
 #[derive(Clone, Debug, StructOpt)]

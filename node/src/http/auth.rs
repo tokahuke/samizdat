@@ -211,6 +211,14 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
     Ok(entity)
 }
 
+/// Extracts the Referer URL from a request.
+///
+/// # Arguments
+/// * `request` - The HTTP request to extract from
+///
+/// # Returns
+/// Ok(Some(Url)) if Referer exists and is valid, Ok(None) if no Referer header present,
+/// or Err(SecurityScopeRejection::UrlParseError) if the Referer header value is invalid
 fn referer_from_request(request: &Request) -> Result<Option<Url>, SecurityScopeRejection> {
     let Some(header) = request.headers().get("referer") else {
         return Ok(None);
@@ -220,7 +228,14 @@ fn referer_from_request(request: &Request) -> Result<Option<Url>, SecurityScopeR
         .map(Some)
         .map_err(SecurityScopeRejection::UrlParseError)
 }
-
+/// Extracts the Referer URL from request parts.
+///
+/// # Arguments
+/// * `parts` - The HTTP request parts containing headers
+///
+/// # Returns
+/// Ok(Some(Url)) if Referer exists and is valid, Ok(None) if no Referer header present,
+/// or Err(SecurityScopeRejection) if the Referer header value is invalid UTF-8 or malformed URL
 fn referer_from_parts(parts: &Parts) -> Result<Option<Url>, SecurityScopeRejection> {
     let Some(header) = parts.headers.get("referer") else {
         return Ok(None);
@@ -231,6 +246,15 @@ fn referer_from_parts(parts: &Parts) -> Result<Option<Url>, SecurityScopeRejecti
         .map_err(SecurityScopeRejection::UrlParseError)
 }
 
+/// Extracts the entity from a request's Referer header.
+///
+/// # Arguments
+/// * `request` - The HTTP request to extract from
+///
+/// # Returns
+/// Ok(Some(Entity)) if entity was found and validated, Ok(None) if no Referer header present,
+/// or Err(SecurityScopeRejection) if the Referer is invalid, has a bad origin, or doesn't
+/// correspond to an entity
 fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScopeRejection> {
     let Some(referer) = referer_from_request(request)? else {
         return Ok(None);
@@ -238,6 +262,7 @@ fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScop
     entity_from_referrer(&referer).map(Some)
 }
 
+/// Represents the security scope of a request, containing the associated entity.
 pub struct SecurityScope(pub Entity);
 
 impl<S: Send + Sync> FromRequestParts<S> for SecurityScope {
@@ -250,7 +275,7 @@ impl<S: Send + Sync> FromRequestParts<S> for SecurityScope {
     }
 }
 
-/// Rejection for when a page (in a local browser) is trying to interact with the node.
+/// Rejection types for security scope authentication failures.
 pub enum SecurityScopeRejection {
     /// Referer header not sent.
     MissingReferer,
@@ -301,8 +326,11 @@ impl IntoResponse for SecurityScopeRejection {
     }
 }
 
+/// Rejection types for authentication failures.
 pub enum AuthenticationRejection {
+    /// Authorization header is missing.
     MissingAuthorization,
+    /// The provided authentication token is invalid.
     BadToken,
 }
 
@@ -323,6 +351,21 @@ impl IntoResponse for AuthenticationRejection {
     }
 }
 
+/// Combines multiple authentication rejection types into a single response.
+///
+/// This function handles cases where both security scope and authorization checks fail,
+/// prioritizing certain rejection types over others to provide the most relevant error
+/// response to the client.
+///
+/// # Arguments
+/// * `security_scope_rejection` - The security scope rejection
+/// * `authorization_rejection` - The authorization rejection
+///
+/// # Returns
+/// A Response with appropriate status code and error message based on the rejection types:
+/// - Returns the security scope rejection if authorization is just missing
+/// - Returns the authorization rejection if security scope is just missing
+/// - Returns a 400 Bad Request if both checks actively failed
 fn merge_rejections(
     security_scope_rejection: SecurityScopeRejection,
     authorization_rejection: AuthenticationRejection,
@@ -367,8 +410,16 @@ fn do_authenticate_authorization(request: &Request) -> Result<(), Authentication
     }
 }
 
-/// Middelware that authenticates a call using the `Referer` header to extract the entity
-/// and checking if the entity has any of the required rights.
+/// Authenticates a request using both security scope and authorization methods.
+///
+/// # Arguments
+/// * `required_rights` - Array of access rights required for the operation
+/// * `request` - The incoming HTTP request
+/// * `next` - The next middleware in the chain
+///
+/// # Returns
+/// Returns a rejection response if authentication fails, otherwise continues the
+/// middleware chain.
 pub async fn authenticate_security_scope<const N: usize>(
     required_rights: [AccessRight; N],
     request: Request,
@@ -397,6 +448,14 @@ macro_rules! security_scope {
     };
 }
 
+/// Performs security scope authentication for a request.
+///
+/// # Arguments
+/// * `required_rights` - Array of access rights required for the operation
+/// * `request` - The incoming HTTP request
+///
+/// # Returns
+/// Ok(()) if authentication succeeds, otherwise a SecurityScopeRejection
 fn do_authenticate_security_scope<const N: usize>(
     required_rights: [AccessRight; N],
     request: &Request,
@@ -461,22 +520,25 @@ fn do_authenticate_trusted_context(request: &Request) -> Result<(), SecurityScop
     }
 }
 
-/// Renders the registration page, where web applications can ask the user for special
-/// access rights to the local Samizdat node.
+/// Template for the registration page.
 #[derive(askama::Template)]
 #[template(path = "register.html")]
 struct RegisterTemplate<'a> {
+    /// The entity requesting registration
     entity: &'a Entity,
+    /// The rights being requested
     rights: &'a [AccessRight],
+}
+
+/// Query parameters for rights registration.
+#[derive(Deserialize)]
+struct RightsQuery {
+    /// The access rights being requested
+    right: Vec<AccessRight>,
 }
 
 /// Gets the registration page.
 fn get_register() -> Router {
-    #[derive(Deserialize)]
-    struct RightsQuery {
-        right: Vec<AccessRight>,
-    }
-
     Router::new().route(
         "/_register",
         get(

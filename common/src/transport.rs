@@ -1,3 +1,9 @@
+//! Transport module for handling QUIC-based communication in Samizdat.
+//!
+//! This module provides transport implementations for serializing and deserializing data
+//! over QUIC streams using bincode encoding. It includes a custom codec implementation
+//! and utilities for creating transports with configurable message size limits.
+
 use futures::future;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
