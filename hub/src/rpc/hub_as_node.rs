@@ -6,6 +6,7 @@ use futures::future::Either;
 use futures::prelude::*;
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tarpc::client::NewClient;
@@ -81,15 +82,14 @@ impl Node for HubAsNodeServer {
         let candidate_channel: ChannelId = rand::random::<u32>().into();
 
         tokio::spawn(async move {
-            let candidates = candidates_for_resolution(
+            let mut candidates = pin!(candidates_for_resolution(
                 ctx,
                 self.partner,
                 Resolution::clone(&resolution),
                 self.candidate_channels.clone(),
-            );
-            let mut pinned = Box::pin(candidates);
+            ));
 
-            while let Some(candidate) = pinned.next().await {
+            while let Some(candidate) = candidates.next().await {
                 let outcome = self
                     .client
                     .recv_candidate(ctx, candidate_channel, candidate)

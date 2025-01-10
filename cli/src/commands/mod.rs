@@ -1,3 +1,5 @@
+//! Command implementations for the Samizdat CLI.
+
 pub mod auth;
 pub mod collection;
 pub mod connection;
@@ -30,6 +32,7 @@ use crate::html::proxy_page;
 use crate::util::MARKER;
 use crate::{Manifest, PrivateManifest};
 
+/// Displays a table of data using markdown formatting.
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     println!(
         "{}",
@@ -37,6 +40,10 @@ fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
     )
 }
 
+/// Uploads content to Samizdat from a file or stdin.
+///
+/// # Panics
+/// Panics if the path is "-" (stdin) and stdin cannot be locked.
 pub async fn upload(
     path: &Path,
     content_type: String,
@@ -56,6 +63,10 @@ pub async fn upload(
     Ok(())
 }
 
+/// Downloads content from Samizdat and writes it to stdout.
+///
+/// # Panics
+/// Panics if stdout cannot be locked for writing.
 pub async fn download(hash: String, timeout: u64) -> Result<(), anyhow::Error> {
     let stdout = std::io::stdout();
     api::get_object(&hash, timeout, move |chunk| {
@@ -65,6 +76,9 @@ pub async fn download(hash: String, timeout: u64) -> Result<(), anyhow::Error> {
     .await
 }
 
+/// Initializes a new Samizdat project in the current directory.
+///
+/// Creates both the Manifest.toml and .Samizdat.priv files with generated keys.
 pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
     let pwd = env::current_dir()?;
     let name = name.unwrap_or_else(|| {
@@ -91,6 +105,9 @@ pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Imports an existing project's private key or creates a new one.
+///
+/// If a private key is provided, it will be used. Otherwise, a new key will be generated.
 pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
     let manifest = Manifest::find_opt()
         .context("failed to find `Samizdat.toml`")?
@@ -140,6 +157,9 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Commits the current state of the project as an edition.
+///
+/// Builds the project (unless skipped), uploads all files, and creates a new edition.
 pub async fn commit(
     ttl: &Option<String>,
     skip_build: bool,
@@ -280,6 +300,10 @@ pub async fn commit(
     Ok(())
 }
 
+/// Watches the project directory for changes and automatically commits new editions.
+///
+/// Provides live reload functionality through a WebSocket connection when changes are
+/// detected.
 pub async fn watch(
     ttl: &Option<String>,
     no_browser: bool,

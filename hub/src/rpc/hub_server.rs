@@ -3,6 +3,7 @@
 use futures::prelude::*;
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
+use std::pin::pin;
 use std::sync::Arc;
 use tarpc::context;
 use tokio::sync::{Mutex, Semaphore};
@@ -126,15 +127,14 @@ impl Hub for HubServer {
             let candidate_channels = server.0.candidate_channels.clone();
             tokio::spawn(async move {
                 // TODO: maybe wait some millis to make sure query response has arrived?
-                let candidates = candidates_for_resolution(
+                let mut candidates = pin!(candidates_for_resolution(
                     ctx,
                     client_addr,
                     resolution,
                     candidate_channels.clone(),
-                );
-                let mut pinned = Box::pin(candidates);
+                ));
 
-                while let Some(candidate) = pinned.next().await {
+                while let Some(candidate) = candidates.next().await {
                     let socket_addr = candidate.socket_addr;
                     let outcome = node
                         .client

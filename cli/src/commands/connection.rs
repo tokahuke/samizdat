@@ -1,16 +1,22 @@
+//! Connection command implementations for the Samizdat CLI.
+//!
+
 use tabled::Tabled;
 
-use crate::api::{self};
-
 use super::show_table;
+use crate::api;
 
+/// Lists all active network connections.
 pub async fn ls() -> Result<(), anyhow::Error> {
     let response = api::get_all_connections().await?;
 
     #[derive(Tabled)]
     struct Row {
+        /// Name of the connection
         name: String,
+        /// Current connection status
         status: String,
+        /// Network address
         addr: String,
     }
 

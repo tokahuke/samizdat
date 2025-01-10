@@ -1,5 +1,7 @@
-//! A process to keep the size of the database under control and to purge junk
-//! that is not used anymore.
+//! A process to keep the size of the database under control and to purge junk.
+//!
+//! This module implements database maintenance operations that run periodically to manage
+//! storage size and remove rarely accessed data.
 
 use ordered_float::NotNan;
 use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, WritableTx};
@@ -29,6 +31,10 @@ pub enum VacuumStatus {
 }
 
 /// Run a vacuum round in the database.
+///
+/// This function performs two sequential cleanup operations:
+/// 1. Removes least-useful content if total storage exceeds configured maximum
+/// 2. Performs garbage collection of orphaned chunks and dangling items
 pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // STEP 1: make up space if needed, deleting rarely used stuff:
 
@@ -132,6 +138,10 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
 }
 
 /// Runs vacuum tasks forever.
+///
+/// This daemon runs periodic vacuum operations with adaptive timing based on previous
+/// execution durations. It ensures the vacuum process doesn't consume too much system
+/// resources while maintaining database health.
 pub async fn run_vacuum_daemon() {
     const TIMING_BUFFER_SIZE: usize = 7;
     const VACUUM_TIMESHARE: f64 = 0.05;
@@ -184,7 +194,10 @@ pub async fn run_vacuum_daemon() {
     }
 }
 
-/// Flushes the whole local cash.
+/// Flushes the whole local cache down the drain!
+///
+/// Removes all objects from the local cache, forcing them to be re-fetched when needed.
+/// This operation is performed one object at a time to avoid long-running transactions.
 pub fn flush_all() {
     let mut all_objects = vec![];
 
@@ -205,6 +218,10 @@ pub fn flush_all() {
 }
 
 /// Fixes chunk reference count.
+///
+/// Recalculates and updates the reference count for all chunks based on their usage in
+/// objects. This helps maintain database integrity by ensuring accurate tracking of chunk
+/// usage.
 pub fn fix_chunk_ref_count(tx: &mut WritableTx) -> Result<(), crate::Error> {
     let mut ref_counts = BTreeMap::new();
 
@@ -225,10 +242,11 @@ pub fn fix_chunk_ref_count(tx: &mut WritableTx) -> Result<(), crate::Error> {
     Ok(())
 }
 
-/// Drop chunks not associated with any object, i.e., those where the reference count has
-/// dropped to zero.
+/// Drop chunks not associated with any object.
 ///
-/// # Note:
+/// Removes chunks whose reference count has dropped to zero, cleaning up orphaned data.
+///
+/// # Note
 ///
 /// Only call this function in a __blocking__ context. If `async` is needed, refactor!
 fn drop_orphan_chunks() -> Result<usize, crate::Error> {
@@ -266,6 +284,9 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
 }
 
 /// Drop items that don't point to anything anymore.
+///
+/// Removes collection items whose referenced objects no longer exist, cleaning up dangling
+/// references from the database.
 fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 

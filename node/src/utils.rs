@@ -1,17 +1,22 @@
 //! General utilities which don't fit anywhere else.
+//!
+//! This module provides utility functions and types for common operations across this crate,
+//! including chunk-based iteration over collections and socket address manipulation.
 
 use std::{collections::VecDeque, net::SocketAddr};
 
-/// An adaptor that splits the elements of another into vectors of a given size
-/// (except the last). This is a "try-iterator" implementation.
+/// An adaptor that splits the elements of another iterator into vectors of a given size.
+///
+/// This is a "try-iterator" implementation that handles Result types, collecting elements
+/// into chunks until either the chunk size is reached or an error occurs.
 pub struct Chunks<I> {
     /// The adapted iterator
     it: I,
-    /// The size of the chunks.
+    /// The size of the chunks to be produced
     size: usize,
-    /// Whether an error has occurred.
+    /// Whether an error has occurred during iteration
     is_error: bool,
-    /// Whether the iterator is done iterating.
+    /// Whether the iterator has completed
     is_done: bool,
 }
 
@@ -58,12 +63,15 @@ impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
 //     }
 // }
 
-/// Makes a socket address use the canonical IP form: if an IPv6 represents a tunneled
-/// IPv4, then the IP will be turned into tits IPv4 address.
+/// Makes a socket address use the canonical IP form.
+///
+/// If an IPv6 address represents a tunneled IPv4 address, it will be converted to its IPv4
+/// form while preserving the port number.
 pub fn socket_to_canonical(socket_addr: SocketAddr) -> SocketAddr {
     (socket_addr.ip().to_canonical(), socket_addr.port()).into()
 }
 
+/// Removes and returns up to `size` elements from the front of a VecDeque.
 pub fn pop_front_chunk<T>(deque: &mut VecDeque<T>, size: usize) -> Vec<T> {
     let mut chunk = Vec::with_capacity(size);
     while let Some(item) = deque.pop_front() {
@@ -72,6 +80,7 @@ pub fn pop_front_chunk<T>(deque: &mut VecDeque<T>, size: usize) -> Vec<T> {
     chunk
 }
 
+/// Adds multiple elements to the front of a VecDeque.
 pub fn push_front_chunk<T>(deque: &mut VecDeque<T>, chunk: Vec<T>) {
     for item in chunk {
         deque.push_front(item);

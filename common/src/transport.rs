@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use tarpc::tokio_serde::{Deserializer, Serializer};
 
+/// A codec implementation for bincode serialization/deserialization in TARPC transports.
 struct BincodeCodec;
 
 impl<T: Serialize> Serializer<T> for BincodeCodec {
@@ -25,6 +26,12 @@ impl<T: for<'a> Deserialize<'a>> Deserializer<T> for BincodeCodec {
     }
 }
 
+/// Creates a new transport using bincode serialization over QUIC streams.
+///
+/// # Arguments
+/// * `send` - The QUIC send stream
+/// * `recv` - The QUIC receive stream
+/// * `max_size` - Maximum size of a single message
 pub fn bincode_transport<S, R>(
     send: quinn::SendStream,
     recv: quinn::RecvStream,
@@ -42,6 +49,11 @@ where
     )
 }
 
+/// Opens a new bidirectional transport using bincode serialization.
+///
+/// # Arguments
+/// * `connection` - The QUIC connection to use
+/// * `max_size` - Maximum size of a single message
 pub async fn open_bincode_transport<S, R>(
     connection: quinn::Connection,
     max_size: usize,
@@ -54,6 +66,11 @@ where
     Ok(bincode_transport(send, recv, max_size))
 }
 
+/// Accepts a new bidirectional transport using bincode serialization.
+///
+/// # Arguments
+/// * `connection` - The QUIC connection to accept from
+/// * `max_size` - Maximum size of a single message
 pub async fn accept_bincode_transport<S, R>(
     connection: quinn::Connection,
     max_size: usize,
@@ -66,10 +83,20 @@ where
     Ok(bincode_transport(send, recv, max_size))
 }
 
+/// Size of the hello message used in channel handshakes
 const HELLO_SIZE: usize = 1;
+
+/// Hello message for direct channels
 const DIRECT_CHANNEL_HELLO: [u8; HELLO_SIZE] = *b"d";
+
+/// Hello message for reverse channels
 const REVERSE_CHANNEL_HELLO: [u8; HELLO_SIZE] = *b"r";
 
+/// Opens a direct channel transport using bincode serialization.
+///
+/// # Arguments
+/// * `connection` - The QUIC connection to use
+/// * `max_size` - Maximum size of a single message
 pub async fn open_direct_bincode_transport<S, R>(
     connection: quinn::Connection,
     max_size: usize,
@@ -87,6 +114,11 @@ where
     Ok(bincode_transport(send, recv, max_size))
 }
 
+/// Opens a reverse channel transport using bincode serialization.
+///
+/// # Arguments
+/// * `connection` - The QUIC connection to use
+/// * `max_size` - Maximum size of a single message
 pub async fn open_reverse_bincode_transport<S, R>(
     connection: quinn::Connection,
     max_size: usize,
@@ -104,6 +136,11 @@ where
     Ok(bincode_transport(send, recv, max_size))
 }
 
+/// Accepts both direct and reverse channel transports using bincode serialization.
+///
+/// # Arguments
+/// * `connection` - The QUIC connection to accept from
+/// * `max_size` - Maximum size of a single message
 pub async fn accept_bincode_transports<S1, R1, S2, R2>(
     connection: quinn::Connection,
     max_size: usize,

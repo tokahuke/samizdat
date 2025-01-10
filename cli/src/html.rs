@@ -1,15 +1,37 @@
-use lazy_static::lazy_static;
+//! HTML content processing and transformation for serving pages in development mode.
+//!
+//! This module handles HTML file modifications for the CLI, including path proxying and
+//! automatic page refresh functionality. It processes HTML files to adjust internal links
+//! and inject refresh-triggering JavaScript when needed.
+
 use regex::Regex;
 use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::path::Path;
 
-lazy_static! {
-    static ref MATCH_HTML: Regex = Regex::new(r#"\.html?$"#).expect("valid regex");
-    static ref FIND_HREF: Regex = Regex::new(r#"href\s*=\s*('|")/"#).expect("valid regex");
-    static ref FIND_FOOT: Regex = Regex::new(r#"</body>"#).expect("valid regex");
-}
+use std::sync::LazyLock;
 
+/// Regular expression to match HTML file extensions.
+static MATCH_HTML: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\.html?$"#).expect("valid regex"));
+
+/// Regular expression to match href attributes that are relative paths.
+static FIND_HREF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"href\s*=\s*('|")/"#).expect("valid regex"));
+
+/// Regular expression to match the closing body tag.
+static FIND_FOOT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"</body>"#).expect("valid regex"));
+
+/// Processes an HTML page, adjusting paths and optionally adding refresh functionality.
+///
+/// # Arguments
+/// * `path` - The file path to process
+/// * `raw` - The raw content of the file
+/// * `refresh_server_addr` - Optional WebSocket server address for refresh functionality
+///
+/// # Returns
+/// The processed content, either modified or unchanged if not an HTML file
 pub fn proxy_page(
     path: impl AsRef<Path>,
     raw: &'_ [u8],

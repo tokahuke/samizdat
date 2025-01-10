@@ -223,11 +223,11 @@ impl ObjectMessage {
         let content_stream =
             receiver
                 .recv_many_owned(MAX_STREAM_SIZE)
-                .and_then(move |mut compressed_chunk| {
-                    // Decrypt and decompress:
-                    cipher.decrypt(&mut compressed_chunk);
+                .map(move |compressed_chunk| {
+                    compressed_chunk.and_then(|mut compressed_chunk| {
+                        // Decrypt and decompress:
+                        cipher.decrypt(&mut compressed_chunk);
 
-                    async move {
                         // Decompress chunk:
                         let mut chunk = Vec::with_capacity(CHUNK_SIZE);
                         Decompressor::new(Cursor::new(compressed_chunk), 4096)
@@ -244,7 +244,7 @@ impl ObjectMessage {
                             )
                             .into())
                         }
-                    }
+                    })
                 });
 
         // Build content from stream (this limits content size to the advertised amount)

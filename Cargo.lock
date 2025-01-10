@@ -4300,7 +4300,6 @@ dependencies = [
  "futures",
  "humantime",
  "humantime-serde",
- "lazy_static",
  "mime_guess",
  "notify",
  "regex",

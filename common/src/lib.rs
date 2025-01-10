@@ -1,3 +1,5 @@
+//! Common utilities and types used across the Samizdat project.
+
 #![feature(ip)]
 
 pub extern crate quinn;
@@ -9,18 +11,16 @@ pub mod cipher;
 pub mod db;
 pub mod heap_entry;
 pub mod keyed_channel;
-pub mod pow;
+pub mod logger;
 pub mod quic;
 pub mod rpc;
 pub mod transport;
-pub mod logger;
 
 mod error;
 mod hash;
 mod patricia_map;
 mod pki;
 mod riddles;
-
 pub use error::Error;
 pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
@@ -30,8 +30,8 @@ pub use riddles::{Hint, MessageRiddle, Riddle};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-/// Creates a cryptographically safe pseudo-random number generatros using [`getrandom`] to
-/// generate the seed.
+/// Creates a cryptographically safe pseudo-random number generator using [`getrandom`] to
+/// generate the seed from the operating system's random number generator.
 pub fn csprng() -> ChaChaRng {
     let mut seed = [0; 8];
     getrandom::getrandom(&mut seed).expect("getrandom failed");

@@ -1,7 +1,14 @@
+//! Access token and port management for the Samizdat HTTP API.
+
 use crate::cli::cli;
 use std::fs;
 use std::sync::OnceLock;
 
+/// Access token used for authenticating requests to the Samizdat HTTP API.
+///
+/// The token is loaded from a file in the local filesystem and cached in memory. Its
+/// main purpose is to _only allow_ applications that have access to the local
+/// filesystem to be able to access the node.
 static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// Retrieves the access token. Must be called after initialization.
@@ -20,6 +27,8 @@ fn init_access_token() -> Result<String, anyhow::Error> {
     Ok(fs::read_to_string(path)?.trim().to_owned())
 }
 
+/// Port number used by the Samizdat HTTP API. The port is loaded from a file in the local
+/// filesystem and cached in memory.
 static PORT: OnceLock<u16> = OnceLock::new();
 
 /// Retrieves the HTTP server port. Must be called after initialization.

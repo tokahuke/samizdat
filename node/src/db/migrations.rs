@@ -5,6 +5,7 @@ use samizdat_common::db::{Migration, WritableTx};
 
 use super::Table;
 
+/// Base migration that serves as the starting point for the migration chain
 #[derive(Debug)]
 pub struct BaseMigration;
 
@@ -18,6 +19,7 @@ impl Migration<Table> for BaseMigration {
     }
 }
 
+/// Migration to create and initialize the chunk reference counting system
 #[derive(Debug)]
 struct CreateChunkRefCount;
 

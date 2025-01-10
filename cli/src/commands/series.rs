@@ -1,11 +1,23 @@
+//! Series command implementations for the Samizdat CLI.
+
 use tabled::Tabled;
 
 use samizdat_common::{Key, PrivateKey};
 
+use super::show_table;
 use crate::api::{self, Keypair};
 
-use super::show_table;
-
+/// Creates a new series with the specified parameters.
+///
+/// # Arguments
+/// * `series_name` - Name of the series to create
+/// * `is_draft` - Whether this is a draft series. Draft series are not published to the
+/// network.
+/// * `public_key` - Optional public key for the series
+/// * `private_key` - Optional private key for the series
+///
+/// # Panics
+/// Panics if only one of public_key or private_key is provided without the other
 pub async fn new(
     series_name: String,
     is_draft: bool,
@@ -35,6 +47,10 @@ pub async fn new(
     Ok(())
 }
 
+/// Removes a series.
+///
+/// # Arguments
+/// * `series_name` - Name of the series to remove
 pub async fn rm(series_name: String) -> Result<(), anyhow::Error> {
     let removed = api::delete_series_owner(&series_name).await?;
 
@@ -45,24 +61,36 @@ pub async fn rm(series_name: String) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Shows information about a specific series.
+///
+/// # Arguments
+/// * `series_name` - Name of the series to show
 pub async fn show(series_name: String) -> Result<(), anyhow::Error> {
     api::get_series_owner(&series_name).await?;
     Ok(())
 }
 
+/// Lists series owners, either all or for a specific series.
+///
+/// # Arguments
+/// * `series_owner_name` - Optional name of the series owner to list
 pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> {
-    pub async fn ls_series(_series_owner_name: String) -> Result<(), anyhow::Error> {
+    async fn ls_series(_series_owner_name: String) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub async fn ls_all() -> Result<(), anyhow::Error> {
+    async fn ls_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_series_owners().await?;
 
         #[derive(Tabled)]
         struct Row {
+            /// Name of the series owner
             name: String,
+            /// Public key of the series
             public_key: Key,
+            /// Private key of the series
             private_key: PrivateKey,
+            /// Default time-to-live duration
             default_ttl: String,
         }
 
@@ -88,16 +116,21 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
     }
 }
 
+/// Lists cached series information, either all or for a specific series.
+///
+/// # Arguments
+/// * `series_name` - Optional name of the series to list cached information for
 pub async fn ls_cached(series_name: Option<String>) -> Result<(), anyhow::Error> {
-    pub async fn ls_cached_series(_series_name: String) -> Result<(), anyhow::Error> {
+    async fn ls_cached_series(_series_name: String) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub async fn ls_cached_all() -> Result<(), anyhow::Error> {
+    async fn ls_cached_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_series().await?;
 
         #[derive(Tabled)]
         struct Row {
+            /// Public key of the series
             public_key: Key,
         }
 

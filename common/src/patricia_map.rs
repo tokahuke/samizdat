@@ -22,7 +22,9 @@ fn bits(hash: &'_ Hash) -> impl '_ + DoubleEndedIterator<Item = Side> {
 /// The side of the binary tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
+    /// Left side of the binary tree (represented as 1)
     Left = 1,
+    /// Right side of the binary tree (represented as 0)
     Right = 0,
 }
 
@@ -36,9 +38,13 @@ impl Side {
     }
 }
 
+/// Represents the status when following a path in the Patricia tree
 enum FollowStatus {
+    /// Split occurred at the given side and position
     Split(Side, u8),
+    /// Continue following the node in the given direction
     FollowNode(Side),
+    /// Found a leaf node
     FoundLeaf,
 }
 
@@ -477,14 +483,17 @@ impl PatriciaProof {
 
 /// An iterator over the entries in a Patricia tree.
 pub struct Iter<'a> {
+    /// Stack of nodes representing the current path in the tree
     stack: Vec<&'a Node>,
+    /// Stack of choices (Left/Right) made at each level
     choice_stack: Vec<Side>,
+    /// Whether the iterator is currently backtracking
     is_backtracking: bool,
 }
 
 impl Iter<'_> {
-    /// This function is used to walk the iterator over tree. It tries to find a sibling
-    /// for the current node and, if none is found, backtracks to the previous level.
+    /// Attempts to find a sibling for the current node and backtracks if none is found.
+    /// This function is used to walk the iterator over the tree.
     fn sibling_or_backtrack(&mut self) {
         let _top = self.stack.pop();
 

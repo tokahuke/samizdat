@@ -1,15 +1,20 @@
+//! API client implementation for interacting with the Samizdat node.
+//!
+//! This module provides the core functionality for making HTTP requests to a Samizdat node,
+//! including error handling, authentication, and basic request/response processing. It also
+//! provides strongly-typed functions for buiilding API calls.
+
 mod calls;
 
 pub use calls::*;
 
 use anyhow::Context;
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-
-//use samizdat_common::Hash;
+use std::sync::LazyLock;
 
 use crate::access_token::access_token;
 
+/// Error response from the API.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiError(pub String);
 
@@ -19,10 +24,10 @@ impl From<ApiError> for anyhow::Error {
     }
 }
 
-lazy_static! {
-    static ref CLIENT: reqwest::Client = reqwest::Client::new();
-}
+/// HTTP client used for making requests to the Samizdat node.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| reqwest::Client::new());
 
+/// Validates that the Samizdat node is running and accessible.
 pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
     let response = CLIENT.get(format!("{}/", crate::server()?)).send().await;
 
@@ -43,6 +48,11 @@ pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Makes a GET request to the specified route.
+///
+/// # Type Parameters
+/// * `R` - Type of the route
+/// * `Q` - Type of the response
 async fn get<R, Q>(route: R) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
@@ -73,6 +83,12 @@ where
     Ok(content?)
 }
 
+/// Makes a POST request to the specified route with the given payload.
+///
+/// # Type Parameters
+/// * `R` - Type of the route
+/// * `P` - Type of the payload
+/// * `Q` - Type of the response
 async fn post<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
@@ -105,6 +121,12 @@ where
     Ok(content?)
 }
 
+/// Makes a PUT request to the specified route with the given payload.
+///
+/// # Type Parameters
+/// * `R` - Type of the route
+/// * `P` - Type of the payload
+/// * `Q` - Type of the response
 async fn put<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
@@ -137,6 +159,12 @@ where
     Ok(content?)
 }
 
+/// Makes a PATCH request to the specified route with the given payload.
+///
+/// # Type Parameters
+/// * `R` - Type of the route
+/// * `P` - Type of the payload
+/// * `Q` - Type of the response
 async fn patch<R, P, Q>(route: R, payload: P) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,
@@ -169,6 +197,11 @@ where
     Ok(content?)
 }
 
+/// Makes a DELETE request to the specified route.
+///
+/// # Type Parameters
+/// * `R` - Type of the route
+/// * `Q` - Type of the response
 async fn delete<R, Q>(route: R) -> Result<Q, anyhow::Error>
 where
     R: AsRef<str>,

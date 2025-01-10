@@ -4,6 +4,7 @@ mod messages;
 
 use std::collections::VecDeque;
 use std::io::{Cursor, Read};
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -127,7 +128,7 @@ impl ValidatedCandidate {
             .send(&self.sender, &self.transfer_cipher)
             .await?;
 
-        let mut incoming = Box::pin(self.receiver.recv_many(MAX_STREAM_SIZE).take(chunks.len()));
+        let mut incoming = pin!(self.receiver.recv_many(MAX_STREAM_SIZE).take(chunks.len()));
 
         while let Some(maybe_chunk) = tokio::time::timeout(CHUNK_TIMEOUT, incoming.next())
             .await

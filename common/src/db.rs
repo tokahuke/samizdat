@@ -33,8 +33,12 @@ fn db<'a>() -> &'a Database {
 
 #[derive(Debug)]
 struct Database {
+    /// The LMDB environment handle
     environment: lmdb::Environment,
+    /// Collection of database table handles
     tables: Vec<lmdb::Database>,
+    /// Type identifier for the table type used to initialize the database. This is used
+    /// only to check for consistent use of table t
     table_type: TypeId,
 }
 
@@ -67,12 +71,17 @@ impl Database {
     }
 }
 
+/// A writable transaction handle for the database.
 pub struct WritableTx<'tx>(lmdb::RwTransaction<'tx>);
 
+/// A read-only transaction handle for the database.
 pub struct ReadonlyTx<'tx>(lmdb::RoTransaction<'tx>);
 
+/// Defines common functionality for transaction handles.
 pub trait TxHandle {
+    /// The underlying LMDB transaction type.
     type TxType: Transaction;
+    /// Returns a reference to the underlying transaction.
     fn get_tx(&self) -> &Self::TxType;
 }
 
@@ -90,6 +99,7 @@ impl<'tx> TxHandle for ReadonlyTx<'tx> {
     }
 }
 
+/// Executes a function within a writable transaction context.
 #[inline]
 pub fn writable_tx<F, T>(f: F) -> Result<T, crate::Error>
 where
@@ -146,6 +156,7 @@ where
     })
 }
 
+/// Executes a function within a read-only transaction context.
 #[inline]
 pub fn readonly_tx<F, T>(f: F) -> T
 where
@@ -200,9 +211,13 @@ where
     })
 }
 
+/// Defines the interface for database tables.
 pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
+    /// The table containing migration records.
     const MIGRATIONS: Self;
+    /// Returns the base migration for this table type.
     fn base_migration() -> Box<dyn Migration<Self>>;
+    /// Returns the numeric discriminant for this table variant.
     fn discriminant(self) -> usize;
 
     #[inline]
@@ -303,12 +318,15 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
     }
 }
 
+/// A range-based iterator over table entries.
 pub struct TableRange<T, R>
 where
     T: Table,
     R: for<'a> RangeBounds<&'a [u8]>,
 {
+    /// The table to iterate over
     table: T,
+    /// The range bounds for iteration
     range: R,
 }
 
@@ -408,12 +426,15 @@ where
     }
 }
 
+/// A prefix-based iterator over table entries.
 pub struct TablePrefix<T, P>
 where
     T: Table,
     P: AsRef<[u8]>,
 {
+    /// The table to iterate over
     table: T,
+    /// The prefix to filter entries by
     prefix: P,
 }
 

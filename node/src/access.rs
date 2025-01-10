@@ -1,4 +1,14 @@
 //! Access rights infrastructure for the node.
+//!
+//! This module implements two complementary access control systems:
+//!
+//! 1. Access tokens: A filesystem-based authentication system for local applications. Each
+//!    node generates a unique token stored in a local file, which must be included in API
+//!    requests from applications running on the same machine.
+//!
+//! 2. Access rights: A permission system for web applications running in browsers. It defines
+//!    different levels of access (from public access to management capabilities) that can be
+//!    granted to web-based clients, ensuring fine-grained control over API operations.
 
 use serde_derive::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -66,7 +76,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     Ok(())
 }
 
-/// Access rights that can be granted to web applications.
+/// Represents the access rights that can be granted to web applications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum AccessRight {
@@ -100,8 +110,9 @@ impl PartialOrd for AccessRight {
     }
 }
 
-/// A name of an entity inside the Samizdat network. An entity can be an object, a
-/// collection item, a series item, etc...
+/// A name of an entity inside the Samizdat network.
+///
+/// An entity can be an object, a collection item, a series item, etc...
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
     /// The type of the entity.
@@ -117,7 +128,8 @@ impl Display for Entity {
 }
 
 impl Entity {
-    /// Transforms an URL path into an entity, if possible.
+    /// Creates an Entity from a URL path string.
+    /// Returns None if the path cannot be parsed into a valid entity.
     pub fn from_path(path: &str) -> Option<Entity> {
         let mut split = path.split('/');
         let mut r#type = split.next()?;

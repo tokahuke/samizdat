@@ -1,29 +1,38 @@
+//! Command-line interface module for the Samizdat application.
+//!
+//! This module provides the command-line argument parsing and execution logic for all
+//! Samizdat commands.
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use structopt::StructOpt;
 
 use crate::{api::EditionKind, commands};
 
+/// Global CLI instance for the application
 static CLI: OnceLock<Cli> = OnceLock::new();
 
+/// Initializes the CLI by parsing command line arguments
 pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
-
     tracing::debug!("Arguments from command line: {:#?}", cli);
-
     cli
 }
 
+/// Returns a reference to the global CLI instance
 pub fn cli<'a>() -> &'a Cli {
     CLI.get_or_init(init_cli)
 }
 
+/// Returns the server URL for the local Samizdat node
 pub fn server() -> Result<String, anyhow::Error> {
     Ok(format!("http://localhost:{}", crate::access_token::port()?))
 }
 
+/// Main CLI configuration structure containing global options and subcommands
 #[derive(Clone, Debug, StructOpt)]
 pub struct Cli {
+    /// Path to the Samizdat data directory
     #[structopt(
         long,
         short,
@@ -31,74 +40,86 @@ pub struct Cli {
         default_value = "/var/lib/samizdat/node"
     )]
     pub data: PathBuf,
+
+    /// Enable verbose logging
     #[structopt(long, short = "v", env = "SAMIZDAT_VERBOSE")]
     pub verbose: bool,
-    // DEPRECATED
-    // #[structopt(long, short, env = "SAMIZDAT_PORT", default_value = "4510")]
-    // pub port: u16,
+
+    /// The command to execute
     #[structopt(subcommand)]
     pub command: Command,
 }
 
+/// Available CLI commands for Samizdat
 #[derive(Clone, Debug, StructOpt)]
 pub enum Command {
-    /// Tests if the server is up.
+    /// Tests if the server is up
     Up,
-    /// Starts a new collection in this folder.
+
+    /// Starts a new project in this folder
     Init {
+        /// Optional name for the project
         #[structopt(long)]
         name: Option<String>,
     },
-    /// Imports a series from a `Samizdat.toml` in the current directory.
+
+    /// Imports a series from a `Samizdat.toml` in the current directory
     Import {
-        /// The private key of the series.
+        /// The private key of the series. If not provided, it will attempt to get the
+        /// value from the privave manifest `.Samizdat.priv`
+        ///
         #[structopt(long)]
         private_key: Option<String>,
     },
-    /// Creates a new version (collection) of the content in this folder.
+
+    /// Creates a new version (collection) of the content in this folder
     Commit {
-        /// Set a custom time-to-leave for this commit.
+        /// Set a custom time-to-leave for this commit
         #[structopt(long)]
         ttl: Option<String>,
-        /// Skip the build and go straight for the action!
+        /// Skip the build and go straight for the action
         #[structopt(long)]
         skip_build: bool,
-        /// Make this a release (for real) commit.
+        /// Make this a release ("for realz") commit
         #[structopt(long)]
         release: bool,
-        /// Whether to announce this new edition to he network or to keep quiet.
+        /// Whether to announce this new edition to the network
         #[structopt(long)]
         no_announce: bool,
-        /// The kind of the commited edition. Either `base` (the default) or `layer`. Choosing
-        /// base will override all the data while layer allows files not present in an edition
-        /// to be found in previous editions.
+        /// The kind of the commited edition.
+        ///
+        /// Either `base` (the default) or `layer`. Choosing base will override all th
+        /// data while layer allows files not present in an edition to be found in
+        /// previous editions.
         #[structopt(long, default_value = "base")]
         kind: EditionKind,
     },
     /// Watches the current directory for changes, rebuilding and committing at
-    /// every change.
+    /// every change
     Watch {
-        /// Set a custom time-to-leave for the commits.
+        /// Set a custom time-to-leave for the commits
         #[structopt(long)]
         ttl: Option<String>,
-        /// Suppresses opening web browser on first commit.
+        /// Suppresses opening web browser on first commit
         #[structopt(long)]
         no_browser: bool,
-        /// The kind of the commited edition. Either `base` (the default) or `layer`. Choosing
-        /// base will override all the data while layer allows files not present in an edition
-        /// to be found in previous editions.
+        /// The kind of the commited edition.
+        ///
+        /// Either `base` (the default) or `layer`. Choosing base will override all th
+        /// data while layer allows files not present in an edition to be found in
+        /// previous editions.
         #[structopt(long, default_value = "base")]
         kind: EditionKind,
     },
-    /// Uploads a single file as an object. Use "-" to upload from stdin.
+    /// Uploads a single file as an object. Use "-" to upload from stdin
     Upload {
-        /// The content-type of this file. Will be guessed if unspecified.
+        /// The content-type of this file. Will be guessed if unspecified
         #[structopt(long)]
         content_type: Option<String>,
         /// Don't bookmark this object. This makes is eligible for automatic deletion.
         #[structopt(long)]
         no_bookmark: bool,
-        /// Sets this object as drafts. Drafts are not public to the network.
+        /// Sets this object as drafts. Drafts are not public to the network
         #[structopt(long)]
         draft: bool,
         // The file to upload. Alternatively, use "-" to upload from stdin.
@@ -106,7 +127,9 @@ pub enum Command {
     },
     /// Downloads an object from the samizdat network.
     Download {
+        /// Hash of the object to download
         hash: String,
+        /// Timeout for the resolution of the query in seconds
         #[structopt(long, default_value = "10")]
         timeout: u64,
     },
@@ -223,14 +246,24 @@ impl Command {
     }
 }
 
+/// Hub management commands for controlling hub connections.
+/// 
+/// These commands allow creating, listing, and removing hub connections that
+/// the node uses to communicate with the Samizdat network.
 #[derive(Clone, Debug, StructOpt)]
 pub enum HubCommand {
+    /// Creates a new hub connection
     New {
+        /// Hub address
         address: String,
+        /// Resolution mode
         resolution_mode: String,
     },
+    /// Lists all hub connections
     Ls,
+    /// Removes a hub connection
     Rm {
+        /// Hub address to remove
         address: String,
     },
 }
@@ -248,8 +281,13 @@ impl HubCommand {
     }
 }
 
+/// Connection management commands for monitoring active hub connections.
+/// 
+/// These commands provide visibility into the current hub connections
+/// maintained by the node.
 #[derive(Clone, Debug, StructOpt)]
 pub enum ConnectionCommand {
+    /// Lists all active connections
     Ls,
 }
 
@@ -261,8 +299,10 @@ impl ConnectionCommand {
     }
 }
 
+/// Peer management commands for interacting with network peers.
 #[derive(Clone, Debug, StructOpt)]
 pub enum PeerCommand {
+    /// Lists all known peers
     Ls,
 }
 
@@ -274,10 +314,17 @@ impl PeerCommand {
     }
 }
 
+/// Collection management commands for handling content collections.
+/// 
+/// These commands provide functionality to view and manage collections of
+/// content within the Samizdat system.
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {
-    /// Shows details on a particular collection.
-    Ls { collection: String },
+    /// Shows details on a particular collection
+    Ls {
+        /// Collection identifier
+        collection: String,
+    },
 }
 
 impl CollectionCommand {
@@ -288,26 +335,46 @@ impl CollectionCommand {
     }
 }
 
+/// Series management commands for handling content series.
+/// 
+/// These commands provide functionality to create, remove, and manage series,
+/// which are sequences of related content editions in Samizdat.
 #[derive(Clone, Debug, StructOpt)]
 pub enum SeriesCommand {
-    /// Creates a new locally owned series.
+    /// Creates a new locally owned series
     New {
+        /// Name of the series owner
         series_owner_name: String,
+        /// Whether the series is a draft
         #[structopt(long)]
         is_draft: bool,
+        /// Optional public key
         #[structopt(long)]
         public_key: Option<String>,
+        /// Optional private key
         #[structopt(long)]
         private_key: Option<String>,
     },
-    /// Removes an existing locally owned series.
-    Rm { series_owner_name: String },
-    /// Shows details on a particular locally owned series.
-    Show { series_owner_name: String },
-    /// Lists all locally owned series.
-    Ls { series_owner_name: Option<String> },
-    /// Lists all known public keys the node has seen, be they locally owned or not.
-    LsCached { series_name: Option<String> },
+    /// Removes an existing locally owned series
+    Rm {
+        /// Name of the series owner
+        series_owner_name: String,
+    },
+    /// Shows details on a particular locally owned series
+    Show {
+        /// Name of the series owner
+        series_owner_name: String,
+    },
+    /// Lists all locally owned series
+    Ls {
+        /// Optional series owner name filter
+        series_owner_name: Option<String>,
+    },
+    /// Lists all known public keys
+    LsCached {
+        /// Optional series name filter
+        series_name: Option<String>,
+    },
 }
 
 impl SeriesCommand {
@@ -335,6 +402,10 @@ impl SeriesCommand {
     }
 }
 
+/// Edition management commands for handling content editions.
+/// 
+/// These commands allow viewing and managing editions, which are specific
+/// versions of content within a series.
 #[derive(Clone, Debug, StructOpt)]
 pub enum EditionCommand {
     /// Lists all known editions or all known editions for a given series public key, if supplied.
@@ -349,19 +420,32 @@ impl EditionCommand {
     }
 }
 
+/// Subscription management commands for handling content subscriptions.
+/// 
+/// These commands enable users to subscribe to series, manage their subscriptions,
+/// and control content synchronization from the network.
 #[derive(Clone, Debug, StructOpt)]
 pub enum SubscriptionCommand {
-    /// Subscribe to a series. This tells the node to listen to announcements
-    /// and to _actively_ keep in sync with the series.
-    New { public_key: String },
-    /// Trigger a manual refresh on this subscription, without waiting from a nudge from the network.
-    Refresh { public_key: String },
-    /// Removes an existing subscription.
-    Rm { public_key: String },
-    // /// Shows details on a particular subscription.
-    // Show { public_key: String },
-    /// Lists all subscriptions.
-    Ls { public_key: Option<String> },
+    /// Subscribe to a series
+    New {
+        /// Public key of the series
+        public_key: String,
+    },
+    /// Trigger a manual refresh
+    Refresh {
+        /// Public key of the series
+        public_key: String,
+    },
+    /// Removes an existing subscription, without waiting from a nudge from the network.
+    Rm {
+        /// Public key of the series
+        public_key: String,
+    },
+    /// Lists all subscriptions
+    Ls {
+        /// Optional public key filter
+        public_key: Option<String>,
+    },
 }
 
 impl SubscriptionCommand {
@@ -380,44 +464,51 @@ impl SubscriptionCommand {
     }
 }
 
+/// Identity management commands for blockchain-based identity operations.
+/// 
+/// These commands provide functionality to manage identities on the blockchain,
+/// including creating and updating identity associations and managing blockchain
+/// endpoints.
 #[derive(Clone, Debug, StructOpt)]
 pub enum IdentityCommand {
-    /// Sets the endpoint for connecting to the provider for the Polygon blockchain.
-    SetEndpoint { endpoint: String },
-    /// Gets the endpoint for connection to the provider for the Polygon blockchain.
+    /// Sets the Polygon blockchain provider endpoint
+    SetEndpoint {
+        /// Provider endpoint URL
+        endpoint: String,
+    },
+    /// Gets the current Polygon blockchain provider endpoint
     GetEndpoint {},
     /// Creates a new association in the smart contact in the Polygon blockchain.
     Create {
-        /// The human readable name to be associated.
+        /// Human readable identity name
         identity: String,
         /// The **public** the identity will refer to.
         entity: String,
         /// The time-to-leave in seconds (time in cache) of this rule.
         #[structopt(long, default_value = "3600")]
         ttl: u64,
-        /// Use custom endpoint to the Polygon blockchain.
+        /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
     },
-    /// Updatess and existing association in the smart contact in the Polygon
-    /// blockchain.
+    /// Updates an existing blockchain identity association
     Update {
-        /// The human readable name to be associated.
+        /// Human readable identity name
         identity: String,
-        /// The new **public** the identity will refer to.
+        /// New public key to associate
         entity: String,
-        /// The time-to-leave in seconds (time in cache) of this rule.
+        /// Cache time-to-live in seconds
         #[structopt(long, default_value = "3600")]
         ttl: u64,
-        /// Use custom endpoint to the Polygon blockchain.
+        /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
     },
-    /// Gets the current key associated with a given identity.
+    /// Gets the current key for an identity
     Get {
-        /// The identity to be resolved.
+        /// Identity to resolve
         identity: String,
-        /// Use custom endpoint to the Polygon blockchain.
+        /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
     },
@@ -449,17 +540,25 @@ impl IdentityCommand {
     }
 }
 
+/// Authentication management commands for controlling access rights.
+/// 
+/// These commands allow managing access control through granting and revoking
+/// rights to different Web application scopes.
 #[derive(Clone, Debug, StructOpt)]
 pub enum AuthCommand {
-    /// Grats access rights to a given scope.
+    /// Grants access rights to a scope
     Grant {
+        /// Scope identifier
         scope: String,
         /// Comma-separated list of rights to grant.
         access_rights: Vec<String>,
     },
-    /// Revokes _all_ rights from a given scope.
-    Revoke { scope: String },
-    /// Lists all the current rights granted to each entity.
+    /// Revokes all rights from a scope
+    Revoke {
+        /// Scope identifier
+        scope: String,
+    },
+    /// Lists all current rights granted to an entity
     Ls {},
 }
 

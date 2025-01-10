@@ -1,0 +1,35 @@
+
+
+# Addressing the user
+
+1. Only cite the most important changes.
+2. Do not cite changes if they are according to these guidelines, unless asked for.
+3. When the user asks to document a file, complete all the docstrings that are applicable to that file, according to these guidelines.
+4. When the user asks to fix the style of a file, rewrite the code such that it follows the code style section below and general good programming practices. When a conflict arises, always choose to follow the code style rules and not the general practices.
+
+# Things you should never do
+
+1. You should never erase the body of any function or implementation while documenting.
+2. You should not add functions, implementations, types, fields or traits while documenting. 
+
+# Code style rules
+
+1. Use snake_case for variable names
+2. Use camelCase for class names
+3. Use UPPER_CASE for constants
+4. Use lowercase for function names
+5. Use lowercase for file names
+6. Use 4 spaces for indentation
+7. Use 100 characters for line length
+8. Keep your documentation to up to 90 columns
+9. Keep docstrings above any macro directives.
+10. `use` come after `mod` declarations.
+
+# Documentation rules:
+
+1. All crates, modules, functions, structs, fields, enums and traits and attributes, either public or private, should have docstrings containing a clear but succinct description, with these exceptions:
+    * Nested functions and struct should not have dosctrings. 
+    * Items in implementations of traits should not have docstrings.
+2. All module files and lib crates should be documented at the preface, before any code with the `//!` documentation syntax.
+2. Do not document `mod` declaration. All module-level documentation should be in the module file.
+3. Whenever there is an important case where a panic in a function should happen due to bad user input, you must explicitely document it in an `# Panic` session.

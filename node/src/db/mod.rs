@@ -97,6 +97,15 @@ impl MergeOperation {
         }
     }
 
+    /// Does the merge operation dance for one operand.
+    pub fn eval_on_zero(self) -> i16 {
+        match self {
+            MergeOperation::Increment(inc) => inc,
+            MergeOperation::Set(set) => set,
+        }
+    }
+
+    /// Creates a function that merges the operation with an existing value.
     pub fn merger(self) -> impl Fn(Option<&[u8]>) -> Vec<u8> {
         move |maybe_value: Option<&[u8]>| {
             let Some(serialized_value) = maybe_value else {
@@ -107,14 +116,6 @@ impl MergeOperation {
             let new = old.associative(self);
 
             bincode::serialize(&new).expect("can serialize")
-        }
-    }
-
-    /// Does the merge operation dance for one operand.
-    pub fn eval_on_zero(self) -> i16 {
-        match self {
-            MergeOperation::Increment(inc) => inc,
-            MergeOperation::Set(set) => set,
         }
     }
 }

@@ -1,9 +1,11 @@
-//! A helper `struct` to be used in conjunction with [`std::collections::BinaryHeap`] in
+//! A helper `struct` to be used in conjunction with [`BinaryHeap`] in
 //! order to make it behave like a map.
 
 use std::cmp;
+#[cfg(doc)]
+use std::collections::BinaryHeap;
 
-/// A helper `struct` to be used in conjunction with [`std::collections::BinaryHeap`] in
+/// A helper `struct` to be used in conjunction with [`BinaryHeap`] in
 /// order to make it behave like a map.
 ///
 /// The ordering of the [`HeapEntry`] is the same as the ordering of `P`.
@@ -16,6 +18,8 @@ pub struct HeapEntry<P, T> {
 }
 
 impl<P: Ord, T> HeapEntry<P, T> {
+    /// Compares two heap entries based on their priorities.
+    /// Used internally for implementing ordering traits.
     fn ord(&self, other: &Self) -> cmp::Ordering {
         self.priority.cmp(&other.priority)
     }

@@ -1,3 +1,6 @@
+//! Provides functionality for interacting with the smart contracts that store the
+//! identities for Samizdat.
+
 use chrono::{Duration, Utc};
 use ethers::abi::Abi;
 use ethers::prelude::*;
@@ -14,11 +17,16 @@ use samizdat_common::{
 
 use crate::{db::Table, models::SeriesRef};
 
+/// A cache mapping identity strings to Identity instances, used to avoid redundant
+/// blockchain queries.
 pub static IDENTITY_CACHE: LazyLock<RwLock<BTreeMap<String, Arc<Identity>>>> =
     LazyLock::new(RwLock::default);
 
+/// The global identity provider instance used for blockchain interactions.
 static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 
+/// Initializes the identity provider with an endpoint from the database or uses the
+/// default endpoint.
 pub fn init_identity_provider() -> Result<(), crate::Error> {
     let provider = if let Some(provider) = readonly_tx(|tx| {
         Table::Global.get(tx, "ethereum_provider_endpoint", |endpoint| {
@@ -39,17 +47,28 @@ pub fn init_identity_provider() -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Returns a reference to the initialized identity provider.
+///
+/// # Panics
+///
+/// Panics if the identity provider has not been initialized.
 pub fn identity_provider<'a>() -> &'a IdentityProvider {
     IDENTITY_PROVIDER
         .get()
         .expect("identity provider not initialized")
 }
 
+/// Represents an identity stored on the blockchain, containing entity information and
+///  validity period.
 #[derive(Debug)]
 pub struct Identity {
+    /// The entity (usually a series reference) associated with this identity
     entity: String,
+    /// The unique identifier for this identity
     identity: String,
+    /// Time-to-live in seconds
     ttl: u64,
+    /// Timestamp when this identity information becomes invalid
     valid_until: chrono::DateTime<Utc>,
 }
 
@@ -60,17 +79,21 @@ impl Identity {
         self.ttl == 0
     }
 
+    /// Attempts to parse the entity string as a SeriesRef.
     pub fn series(&self) -> Result<SeriesRef, crate::Error> {
         self.entity.parse::<SeriesRef>()
     }
 }
 
+/// Provides functionality to interact with identity-related smart contracts on the
+/// blockchain.
 pub struct IdentityProvider {
+    /// Contract instance for the contract that stores identities
     storage_contract: RwLock<Contract<Provider<Http>>>,
-    // manager_contract: Contract<Provider<Http>>,
 }
 
 impl IdentityProvider {
+    /// Creates a new IdentityProvider instance connected to the specified endpoint.
     pub fn new(endpoint: &str) -> IdentityProvider {
         let rpc_client = Arc::new(
             Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"),
@@ -90,6 +113,7 @@ impl IdentityProvider {
         }
     }
 
+    /// Updates the provider to use a new endpoint and saves it to the database.
     pub async fn set_endpoint(&self, new_endpoint: &str) {
         let rpc_client = Arc::new(
             Provider::<Http>::try_from(new_endpoint).expect("could not instantiate HTTP Provider"),
@@ -114,6 +138,7 @@ impl IdentityProvider {
         *self.storage_contract.write().await = storage_contract;
     }
 
+    /// Retrieves identity information from the blockchain.
     pub async fn get(&self, identity: &str) -> Result<Identity, crate::Error> {
         let (entity, _owner, ttl, _data) = self
             .storage_contract
@@ -132,6 +157,8 @@ impl IdentityProvider {
         })
     }
 
+    /// Retrieves identity information, using a cache to avoid redundant blockchain queries.
+    /// Returns `None` if the identity doesn't exist.
     pub async fn get_cached(&self, identity: &str) -> Result<Option<Arc<Identity>>, crate::Error> {
         if let Some(identity) = IDENTITY_CACHE.read().await.get(identity) {
             tracing::debug!("Found cached identity");

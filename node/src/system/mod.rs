@@ -229,17 +229,17 @@ impl HubConnection {
                 // transport will make sure no naughty people are involved.
                 let channel_addr = ChannelAddr::new(candidate.socket_addr, channel_id);
                 tracing::info!("Got candidate {channel_addr} for channel {candidate_channel}");
-                Box::pin(async move {
+                async move {
                     channel_manager::expect(channel_addr)
                         .await
                         .map_err(|err| {
                             tracing::warn!("Hole punching with {channel_addr} failed: {err}")
                         })
                         .ok()
-                })
+                }
             })
             .buffer_unordered(cli().concurrent_candidates)
-            .filter_map(|done| Box::pin(async move { done }));
+            .filter_map(|done| future::ready(done));
 
         let outcome = match kind {
             QueryKind::Object => {

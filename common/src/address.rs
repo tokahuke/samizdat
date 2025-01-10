@@ -1,4 +1,7 @@
-//! Definitions for addresses relevant to Samizdat.
+//! Provides address-related types and functionality for the Samizdat network.
+//!
+//! This module contains definitions for channel addresses, socket addresses, and IP address
+//! resolution modes used in peer-to-peer communication.
 
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
@@ -40,7 +43,7 @@ impl fmt::Display for ChannelId {
 pub struct ChannelAddr {
     /// The socket address for this channel address.
     peer_addr: SocketAddr,
-    /// The channel id for this channel address.
+    /// The specific channel identifier within the connection.
     channel_id: ChannelId,
 }
 
@@ -85,7 +88,10 @@ impl ChannelAddr {
     }
 }
 
-/// The way addresses are resolved from DNS.
+/// Specifies how DNS resolution should handle IPv4 and IPv6 addresses.
+///
+/// Controls the preference and filtering of IP address types when resolving hostnames,
+/// allowing for explicit version requirements or flexible fallback behavior.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AddrResolutionMode {
     /// Only use IPv6 addresses and ignore IPv4 entries.

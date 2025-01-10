@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-/// "I am Spartacus!"
+/// Default server name used for all QUIC connections ("I am Spartacus!")
 const DEFAULT_SERVER_NAME: &str = "spartacus";
 
 /// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
@@ -71,8 +71,11 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
     }
 }
 
+/// Global flag to ensure crypto provider is installed only once
 static CRYPTO_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
 
+/// Installs the default crypto provider for Samizdat. Ensures that the crypto provider
+/// is installed only once
 fn install_crypto_provider() {
     if CRYPTO_PROVIDER_INSTALLED.get().is_none() {
         rustls::crypto::ring::default_provider()
@@ -83,6 +86,9 @@ fn install_crypto_provider() {
 }
 
 /// Creates a default transport configuration for QUIC.
+///
+/// # Arguments
+/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
 fn transport_config(keep_alive: bool) -> TransportConfig {
     const IDLE_TIMEOUT_MS: u32 = 10_000;
 
@@ -99,6 +105,9 @@ fn transport_config(keep_alive: bool) -> TransportConfig {
 }
 
 /// Creates a default client configuration for QUIC.
+///
+/// # Arguments
+/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
 fn client_config(keep_alive: bool) -> ClientConfig {
     install_crypto_provider();
 
@@ -113,7 +122,7 @@ fn client_config(keep_alive: bool) -> ClientConfig {
     client_config
 }
 
-/// Creates a default server configuration for QUIC.
+/// Creates a default server configuration for QUIC with a self-signed certificate.
 fn server_config() -> ServerConfig {
     install_crypto_provider();
 
@@ -136,7 +145,12 @@ pub fn new_default(bind_addr: SocketAddr) -> Endpoint {
     endpoint
 }
 
-/// Connects to a remote host using an [`Endpoint`].
+/// Connects to a remote host using an existing QUIC endpoint.
+///
+/// # Arguments
+/// * `endpoint` - The local QUIC endpoint to use for the connection
+/// * `remote_addr` - The remote address to connect to
+/// * `keep_alive` -  Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
 pub async fn connect(
     endpoint: &Endpoint,
     remote_addr: SocketAddr,

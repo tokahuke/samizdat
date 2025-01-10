@@ -1,3 +1,5 @@
+//! Identity management module for the Samizdat CLI.
+
 use std::{io::Write, sync::Arc};
 
 use anyhow::Context;
@@ -7,11 +9,15 @@ use samizdat_common::blockchain;
 
 use crate::util::MARKER;
 
-// A waiting period to make the provider not throttle us.
+/// Introduces a delay between blockchain operations to prevent provider throttling.
 async fn wait() {
     tokio::time::sleep(blockchain::THROTTLE_LIMIT).await;
 }
 
+/// Prompts the user for input with a given prompt string.
+/// 
+/// # Returns
+/// The user's input as a String with trailing whitespace removed.
 fn read(prompt: &str) -> String {
     print!("{MARKER} {prompt}: ");
     std::io::stdout().lock().flush().expect("Failed to flush");
@@ -24,16 +30,27 @@ fn read(prompt: &str) -> String {
     response.trim_end().to_owned()
 }
 
+/// Prompts for and validates a wallet private key.
+/// 
+/// # Returns
+/// A configured LocalWallet instance for the Polygon network.
+/// 
+/// # Errors
+/// Returns an error if the private key is invalid or cannot be parsed.
 fn get_wallet() -> Result<LocalWallet, anyhow::Error> {
     let wallet = rpassword::prompt_password(format!("{MARKER} Insert private key: "))?
         .parse::<LocalWallet>()
-        .context("Bad ethereum private key")?
+        .context("Bad polygon private key")?
         .with_chain_id(blockchain::BLOCKCHAIN_ID);
     println!();
 
     Ok(wallet)
 }
 
+/// Creates a configured Etherscan client instance.
+/// 
+/// # Returns
+/// A configured etherscan::Client ready for blockchain interactions.
 fn get_etherscan() -> etherscan::Client {
     etherscan::Client::builder()
         .with_url(blockchain::ETHERSCAN_ENDPOINT)
@@ -45,15 +62,24 @@ fn get_etherscan() -> etherscan::Client {
         .expect("Failed to build etherscan client")
 }
 
+/// Creates a Provider instance for interacting with the blockchain.
+/// 
+/// # Arguments
+/// * `endpoint` - Optional RPC endpoint URL. If None, uses the default Polygon provider.
 async fn client(endpoint: Option<String>) -> Result<Provider<Http>, anyhow::Error> {
     let endpoint = if let Some(url) = endpoint {
         url
     } else {
-        crate::api::get_ethereum_provider().await?.endpoint
+        crate::api::get_polygon_provider().await?.endpoint
     };
     Ok(Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"))
 }
 
+/// Creates a SignerMiddleware instance for authenticated blockchain interactions.
+/// 
+/// # Arguments
+/// * `endpoint` - Optional RPC endpoint URL
+/// * `wallet` - The LocalWallet instance for transaction signing
 async fn signing_client(
     endpoint: Option<String>,
     wallet: LocalWallet,
@@ -61,6 +87,10 @@ async fn signing_client(
     Ok(SignerMiddleware::new(client(endpoint).await?, wallet))
 }
 
+/// Creates a Contract instance for the Samizdat Identity Manager.
+/// 
+/// # Arguments
+/// * `rpc_client` - The SignerMiddleware instance for authenticated interactions
 async fn get_manager_contract(
     rpc_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
 ) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, anyhow::Error> {
@@ -76,13 +106,17 @@ async fn get_manager_contract(
     ))
 }
 
+/// Creates a Contract instance for the Samizdat Storage contract.
+/// 
+/// # Arguments
+/// * `endpoint` - Optional RPC endpoint URL
 async fn get_storage_contract(
     endpoint: Option<String>,
 ) -> Result<Contract<Provider<Http>>, anyhow::Error> {
     let endpoint = if let Some(url) = endpoint {
         url
     } else {
-        crate::api::get_ethereum_provider().await?.endpoint
+        crate::api::get_polygon_provider().await?.endpoint
     };
     let rpc_client = Arc::new(
         Provider::<Http>::try_from(endpoint).expect("could not instantiate HTTP Provider"),
@@ -99,6 +133,16 @@ async fn get_storage_contract(
     ))
 }
 
+/// Creates a new identity registration on the blockchain.
+/// 
+/// # Arguments
+/// * `identity` - The identity string to register
+/// * `entity` - The entity string to associate with the identity
+/// * `ttl` - Time-to-live value for the registration
+/// * `endpoint` - Optional RPC endpoint URL
+/// 
+/// # Errors
+/// Returns an error if the transaction fails or is rejected by the contract.
 pub async fn create(
     identity: String,
     entity: String,
@@ -157,7 +201,7 @@ pub async fn create(
     let pending_tx = register
         .send()
         .await
-        .context("Sending `registerWithTtl` transaction to Ethereum")?;
+        .context("Sending `registerWithTtl` transaction to Polygon")?;
     let tx_hash = pending_tx.tx_hash();
     pending_tx
         .await
@@ -171,6 +215,16 @@ pub async fn create(
     Ok(())
 }
 
+/// Updates an existing identity registration on the blockchain.
+/// 
+/// # Arguments
+/// * `identity` - The identity string to update
+/// * `entity` - The new entity string to associate with the identity
+/// * `ttl` - New time-to-live value for the registration
+/// * `endpoint` - Optional RPC endpoint URL
+/// 
+/// # Errors
+/// Returns an error if the transaction fails or is rejected by the contract.
 pub async fn update(
     identity: String,
     entity: String,
@@ -214,7 +268,7 @@ pub async fn update(
     let pending_tx = register
         .send()
         .await
-        .context("Sending `register` transaction to Ethereum")?;
+        .context("Sending `register` transaction to Polygon")?;
     let tx_hash = pending_tx.tx_hash();
     pending_tx
         .await
@@ -228,6 +282,17 @@ pub async fn update(
     Ok(())
 }
 
+/// Retrieves the entity associated with an identity from the blockchain.
+/// 
+/// # Arguments
+/// * `identity` - The identity string to look up
+/// * `endpoint` - Optional RPC endpoint URL
+/// 
+/// # Returns
+/// The entity string associated with the identity.
+/// 
+/// # Errors
+/// Returns an error if the identity doesn't exist or the contract call fails.
 pub async fn get(identity: String, endpoint: Option<String>) -> Result<String, anyhow::Error> {
     let storage_contract = get_storage_contract(endpoint).await?;
     let (entity, _owner, _ttl, _data) = storage_contract

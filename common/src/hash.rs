@@ -148,7 +148,8 @@ impl Hash {
 /// [`crate::PatriciaMap`] implementation.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
-    /// The binary tree. Each item of the vector corresponds to a level of a tree.
+    /// The binary tree structure where each vector represents a level of the tree,
+    /// ordered from root to leaves
     tree: Vec<Vec<Hash>>,
 }
 
@@ -235,9 +236,9 @@ impl MerkleTree {
 /// An inclusion proof for a given position in a Merkle tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InclusionProof {
-    /// The completing hashes in the Merkle tree.
+    /// The completing hashes in the Merkle tree path
     pub path: Box<[Hash]>,
-    /// The claimed index in the Merkle tree.
+    /// The claimed index position in the Merkle tree
     pub index: usize,
 }
 
