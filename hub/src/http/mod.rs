@@ -8,11 +8,20 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures::{FutureExt, StreamExt};
-use serde_derive::Deserialize;
-use std::net::{Ipv6Addr, SocketAddr};
+use serde_derive::{Deserialize, Serialize};
+use serde_inline_default::serde_inline_default;
+use std::collections::BTreeSet;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+
+use samizdat_common::db::readonly_tx;
 
 use crate::cli::cli;
-use crate::rpc::node_sampler::QuerySampler;
+use crate::models::CandidateLog;
+use crate::models::ConnectionLog;
+use crate::models::QueryLog;
+use crate::models::StatisticsLog;
+use crate::models::{Id, Indexable};
+use crate::rpc::node_sampler::{QuerySampler, StatisticsType};
 use crate::rpc::ROOM;
 
 /// Mapping of Samizdat errors into HTTP status codes.
@@ -102,6 +111,10 @@ fn api() -> Router {
         .nest("/connected-ips", connected_ips())
         .nest("/resolution-order", resolution_order())
         .nest("/blacklisted-ips", blacklisted_ips::api())
+        .nest("/connection-logs", connection_logs())
+        .nest("/candidate-logs", candidate_logs())
+        .nest("/statistics-logs", statistics_logs())
+        .nest("/query-logs", query_logs())
 }
 
 /// Returns all the currently connected IPs to this hub.
@@ -145,5 +158,210 @@ fn resolution_order() -> Router {
             }
             .map(ApiResponse)
         }),
+    )
+}
+
+/// Gets the connection information for a range of IDs.
+fn connection_logs() -> Router {
+    #[serde_inline_default]
+    #[derive(Deserialize)]
+    struct QueryParameters {
+        #[serde_inline_default(Id::MIN)]
+        start: Id,
+        #[serde_inline_default(Id::MAX)]
+        end: Id,
+        #[serde_inline_default(usize::MAX)]
+        limit: usize,
+    }
+
+    #[derive(Serialize)]
+    struct ConnectionLogResponse {
+        logs: Vec<ConnectionLog>,
+    }
+
+    Router::new().route(
+        "/",
+        get(
+            |Query(QueryParameters { start, end, limit }): Query<QueryParameters>| {
+                tokio::task::spawn_blocking(move || {
+                    readonly_tx(|tx| {
+                        let mut logs = vec![];
+
+                        ConnectionLog::range(start, end).for_each(tx, |_, serialized| {
+                            if logs.len() >= limit {
+                                return Some(());
+                            }
+
+                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
+
+                            None
+                        });
+
+                        Ok(ConnectionLogResponse { logs })
+                    })
+                })
+                .map(|outcome| outcome.expect("blocking task panicked"))
+                .map(ApiResponse)
+            },
+        ),
+    )
+}
+
+/// Gets the query logs for a range of IDs.
+fn query_logs() -> Router {
+    #[serde_inline_default]
+    #[derive(Deserialize)]
+    struct QueryParameters {
+        #[serde_inline_default(Id::MIN)]
+        start: Id,
+        #[serde_inline_default(Id::MAX)]
+        end: Id,
+        #[serde_inline_default(usize::MAX)]
+        limit: usize,
+    }
+
+    #[derive(Serialize)]
+    struct QueryLogsResponse {
+        logs: Vec<QueryLog>,
+    }
+
+    Router::new().route(
+        "/",
+        get(
+            |Query(QueryParameters { start, end, limit }): Query<QueryParameters>| {
+                tokio::task::spawn_blocking(move || {
+                    readonly_tx(|tx| {
+                        let mut logs = vec![];
+
+                        QueryLog::range(start, end).for_each(tx, |_, serialized| {
+                            if logs.len() >= limit {
+                                return Some(());
+                            }
+
+                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
+                            None
+                        });
+
+                        Ok(QueryLogsResponse { logs })
+                    })
+                })
+                .map(|outcome| outcome.expect("blocking task panicked"))
+                .map(ApiResponse)
+            },
+        ),
+    )
+}
+
+/// Gets the candidate logs for a range of IDs.
+fn candidate_logs() -> Router {
+    #[serde_inline_default]
+    #[derive(Deserialize)]
+    struct QueryParameters {
+        #[serde_inline_default(Id::MIN)]
+        start: Id,
+        #[serde_inline_default(Id::MAX)]
+        end: Id,
+        #[serde_inline_default(usize::MAX)]
+        limit: usize,
+    }
+
+    #[derive(Serialize)]
+    struct CandidateLogsResponse {
+        logs: Vec<CandidateLog>,
+    }
+
+    Router::new().route(
+        "/",
+        get(
+            |Query(QueryParameters { start, end, limit }): Query<QueryParameters>| {
+                tokio::task::spawn_blocking(move || {
+                    readonly_tx(|tx| {
+                        let mut logs = vec![];
+
+                        CandidateLog::range(start, end).for_each(tx, |_, serialized| {
+                            if logs.len() >= limit {
+                                return Some(());
+                            }
+
+                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
+                            None
+                        });
+
+                        Ok(CandidateLogsResponse { logs })
+                    })
+                })
+                .map(|outcome| outcome.expect("blocking task panicked"))
+                .map(ApiResponse)
+            },
+        ),
+    )
+}
+
+/// Gets the statistic logs for a range of IDs.
+fn statistics_logs() -> Router {
+    #[serde_inline_default]
+    #[derive(Deserialize)]
+    struct QueryParameters {
+        #[serde_inline_default(Id::MIN)]
+        start: Id,
+        #[serde_inline_default(Id::MAX)]
+        end: Id,
+        #[serde_inline_default(usize::MAX)]
+        limit: usize,
+        #[serde(default)]
+        statistics_type: Option<StatisticsType>,
+        #[serde(default)]
+        peers: Vec<IpAddr>,
+    }
+
+    #[derive(Serialize)]
+    struct StatisticsLogsResponse {
+        logs: Vec<StatisticsLog>,
+    }
+
+    Router::new().route(
+        "/",
+        get(
+            |Query(QueryParameters {
+                 start,
+                 end,
+                 limit,
+                 statistics_type,
+                 peers,
+             }): Query<QueryParameters>| {
+                tokio::task::spawn_blocking(move || {
+                    let peers = peers.into_iter().collect::<BTreeSet<_>>();
+                    readonly_tx(|tx| {
+                        let mut logs = vec![];
+
+                        StatisticsLog::range(start, end).for_each(tx, |_, serialized| {
+                            if logs.len() >= limit {
+                                return Some(());
+                            }
+
+                            let log: StatisticsLog =
+                                bincode::deserialize(serialized).expect("can deserialize");
+
+                            if let Some(statistics_type) = statistics_type {
+                                if statistics_type != log.statistics().statistics_type {
+                                    return None;
+                                }
+                            }
+
+                            if !peers.is_empty() && !peers.contains(&log.statistics().peer_ip) {
+                                return None;
+                            }
+
+                            logs.push(log);
+                            None
+                        });
+
+                        Ok(StatisticsLogsResponse { logs })
+                    })
+                })
+                .map(|outcome| outcome.expect("blocking task panicked"))
+                .map(ApiResponse)
+            },
+        ),
     )
 }

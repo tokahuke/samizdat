@@ -116,7 +116,7 @@ impl SeriesOwner {
     /// Gets all series owners in this node.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesOwner>, crate::Error> {
         Table::SeriesOwners
-            .range(..)
+            .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 
@@ -262,14 +262,16 @@ impl SeriesRef {
     /// Whether there is a local "series owner" for this series.
     pub fn is_locally_owned<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         // TODO: make this not a SeqScan, perhaps?
-        let outcome = Table::SeriesOwners.range(..).for_each(tx, |_, owner| {
-            let owner: SeriesOwner = bincode::deserialize(owner).expect("can deserialize");
-            if self.public_key.as_ref() == &owner.keypair.verifying_key() {
-                Some(true)
-            } else {
-                None
-            }
-        });
+        let outcome = Table::SeriesOwners
+            .range::<_, [u8; 0]>(..)
+            .for_each(tx, |_, owner| {
+                let owner: SeriesOwner = bincode::deserialize(owner).expect("can deserialize");
+                if self.public_key.as_ref() == &owner.keypair.verifying_key() {
+                    Some(true)
+                } else {
+                    None
+                }
+            });
 
         Ok(outcome.unwrap_or(false))
     }
@@ -368,7 +370,7 @@ impl SeriesRef {
     /// Gets all the series references in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesRef>, crate::Error> {
         Table::Series
-            .range(..)
+            .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 }
@@ -562,7 +564,7 @@ impl Edition {
     /// Gets all the editions currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Edition>, crate::Error> {
         Table::Editions
-            .range(..)
+            .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 }

@@ -30,7 +30,7 @@ pub enum QueryKind {
 }
 
 /// A query of a given information.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Query {
     /// The riddles the resolver can use to find the content hash.
     pub content_riddles: Vec<Riddle>,
@@ -44,7 +44,7 @@ pub struct Query {
 }
 
 /// A response to a given query, given by a node to a hub.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QueryResponse {
     /// Hub experienced internal error (please report bug!)
     InternalError,

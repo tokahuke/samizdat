@@ -48,21 +48,28 @@ pub async fn rm(public_key: String) -> Result<(), anyhow::Error> {
 /// # Arguments
 /// * `public_key` - Optional public key of the series to list subscriptions for
 pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
-    async fn list_subscription(_public_key: String) -> Result<(), anyhow::Error> {
-        todo!()
+    #[derive(Tabled)]
+    struct Row {
+        /// Public key of the subscribed series
+        public_key: Key,
+        /// Type of subscription
+        kind: String,
+    }
+
+    async fn list_subscription(public_key: String) -> Result<(), anyhow::Error> {
+        let subscription = api::get_subscription(&public_key).await?;
+
+        show_table(vec![Row {
+            public_key: subscription.public_key,
+            kind: subscription.kind,
+        }]);
+
+        Ok(())
     }
 
     /// Lists all subscriptions.
     async fn list_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_subscriptions().await?;
-
-        #[derive(Tabled)]
-        struct Row {
-            /// Public key of the subscribed series
-            public_key: Key,
-            /// Type of subscription
-            kind: String,
-        }
 
         show_table(
             response

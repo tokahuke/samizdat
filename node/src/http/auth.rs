@@ -88,7 +88,7 @@ fn get_auths() -> Router {
             async move {
                 let all_auths = readonly_tx(|tx| {
                     Table::AccessRights
-                        .range(..)
+                        .range::<_, [u8; 0]>(..)
                         .collect::<_, Result<Vec<_>, crate::Error>, _, _>(tx, |key, value| {
                             let entity: Entity = bincode::deserialize(key)?;
                             let granted_rights: Vec<AccessRight> = bincode::deserialize(value)?;

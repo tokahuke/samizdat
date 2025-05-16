@@ -46,6 +46,9 @@ pub enum Error {
     /// A timeout has occurred.
     #[error("timeout")]
     Timeout,
+    /// Object not found
+    #[error("Object not found")]
+    ObjectNotFound,
 }
 
 impl From<RpcError> for Error {

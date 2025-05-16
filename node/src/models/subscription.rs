@@ -135,7 +135,7 @@ impl SubscriptionRef {
     /// Gets all subscriptions currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Subscription>, crate::Error> {
         Table::Subscriptions
-            .range(..)
+            .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 

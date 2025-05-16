@@ -122,6 +122,7 @@ class Hub:
     def report_config(self) -> dict:
         return {
             "address": self.address(),
+            "http-port": self.http_port(),
         }
 
     def command(self, hubs: list[Hub]) -> list[str]:

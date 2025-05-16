@@ -1,24 +1,31 @@
 //! Implements the RPC server part of the Hub API.
 
 use futures::prelude::*;
-use samizdat_common::keyed_channel::KeyedChannel;
 use std::net::SocketAddr;
 use std::pin::pin;
 use std::sync::Arc;
+use std::time::Instant;
 use tarpc::context;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 
 use samizdat_common::address::{ChannelAddr, ChannelId};
+use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 
 use crate::cli::cli;
+use crate::models::CandidateLog;
+use crate::models::ConnectionLog;
+use crate::models::QueryLog;
+use crate::models::{Id, Indexable};
 use crate::rpc::ROOM;
 
 use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
 
 /// The Hub server side of a client-server RPC connection.
 struct HubServerInner {
+    /// Id of this particular connection.
+    connection_id: Id,
     /// Limits the number of simultaneous queries a node can make.
     call_semaphore: Semaphore,
     /// Limits the frequency of queries a node can make.
@@ -40,6 +47,7 @@ impl HubServer {
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         HubServer(Arc::new(HubServerInner {
+            connection_id: ConnectionLog::new(addr).insert(),
             call_semaphore: Semaphore::new(cli().max_queries_per_node),
             call_throttle: Mutex::new(interval(Duration::from_secs_f64(
                 1. / cli().max_query_rate_per_node,
@@ -70,6 +78,98 @@ impl HubServer {
         drop(permit);
         outcome
     }
+
+    async fn do_query(
+        &self,
+        ctx: context::Context,
+        query: &Query,
+        query_log_id: Id,
+    ) -> QueryResponse {
+        let client_addr = self.0.addr;
+
+        // Create a channel address from peer address:
+        let channel_id = rand::random::<u32>().into();
+        let channel_addr = ChannelAddr::new(self.0.addr, channel_id);
+
+        // Se if you are not being replayed:
+        if !REPLAY_RESISTANCE.lock().await.check(query) {
+            return QueryResponse::Replayed;
+        }
+
+        // If query is empty, nothing to be done:
+        if query.content_riddles.is_empty() {
+            tracing::debug!("query riddle empty");
+            return QueryResponse::EmptyQuery;
+        }
+
+        // Now, prepare resolution request:
+        let location_message_riddle = query.location_riddle.riddle_for(channel_addr);
+        let resolution = Resolution {
+            content_riddles: query.content_riddles.clone(),
+            location_message_riddle,
+            validation_nonces: vec![],
+            hint: query.hint.clone(),
+            kind: query.kind,
+        };
+
+        // And then create a candidate channel to forward candidate peers:
+        let candidate_channel: ChannelId = rand::random::<u32>().into();
+
+        // Get the node for the client address:
+        let Some(node) = ROOM.get(client_addr).await else {
+            return QueryResponse::NoReverseConnection;
+        };
+
+        // Forward all candidate peers:
+        let candidate_channels = self.0.candidate_channels.clone();
+        tokio::spawn(async move {
+            // TODO: maybe wait some millis to make sure query response has arrived?
+            let mut candidates = pin!(candidates_for_resolution(
+                ctx,
+                client_addr,
+                resolution,
+                candidate_channels.clone(),
+            ));
+
+            while let Some(candidate) = candidates.next().await {
+                // Need to get socket address now because it will be moved:
+                let socket_addr = candidate.socket_addr;
+
+                // Insert the candidate log for the first time (no outcome yet):
+                let mut candidate_log = CandidateLog::new(query_log_id, candidate.clone());
+                candidate_log.insert();
+
+                // Forward the candidate:
+                let start = Instant::now();
+                let outcome = node
+                    .client
+                    .recv_candidate(ctx, candidate_channel, candidate)
+                    .await;
+
+                // Update the candidate log with the outcome:
+                candidate_log.update_with_outcome(
+                    outcome.as_ref().map(|_| ()).map_err(|e| e.to_string()),
+                    start.elapsed(),
+                );
+                candidate_log.insert();
+
+                // Log the outcome:
+                if let Err(err) = outcome {
+                    tracing::warn!(
+                        "Error sending candidate {socket_addr} to {}: {err}",
+                        node.addr
+                    );
+                }
+            }
+        });
+
+        tracing::debug!("query done");
+
+        QueryResponse::Resolved {
+            candidate_channel,
+            channel_id,
+        }
+    }
 }
 
 impl Hub for HubServer {
@@ -85,77 +185,22 @@ impl Hub for HubServer {
     }
 
     async fn query(self, ctx: context::Context, query: Query) -> QueryResponse {
-        let client_addr = self.0.addr;
         self.throttle(move |server| async move {
             tracing::debug!("got {:?}", query);
 
-            // Create a channel address from peer address:
-            let channel_id = rand::random::<u32>().into();
-            let channel_addr = ChannelAddr::new(server.0.addr, channel_id);
+            // Insert the query log for the first time (no response yet):
+            let mut query_log = QueryLog::new(server.0.connection_id, query.clone());
+            query_log.insert();
 
-            // Se if you are not being replayed:
-            if !REPLAY_RESISTANCE.lock().await.check(&query) {
-                return QueryResponse::Replayed;
-            }
+            // Do the query:
+            let start = Instant::now();
+            let response = server.do_query(ctx, &query, query_log.id()).await;
 
-            // If query is empty, nothing to be done:
-            if query.content_riddles.is_empty() {
-                tracing::debug!("query riddle empty");
-                return QueryResponse::EmptyQuery;
-            }
+            // Update the query log with the response:
+            query_log.update_with_response(response.clone(), start.elapsed());
+            query_log.insert();
 
-            // Now, prepare resolution request:
-            let location_message_riddle = query.location_riddle.riddle_for(channel_addr);
-            let resolution = Resolution {
-                content_riddles: query.content_riddles,
-                location_message_riddle,
-                validation_nonces: vec![],
-                hint: query.hint,
-                kind: query.kind,
-            };
-
-            // And then create a candidate channel to forward candidate peers:
-            let candidate_channel: ChannelId = rand::random::<u32>().into();
-
-            let node = if let Some(node) = ROOM.get(client_addr).await {
-                node
-            } else {
-                return QueryResponse::NoReverseConnection;
-            };
-
-            // Forward all candidate peers:
-            let candidate_channels = server.0.candidate_channels.clone();
-            tokio::spawn(async move {
-                // TODO: maybe wait some millis to make sure query response has arrived?
-                let mut candidates = pin!(candidates_for_resolution(
-                    ctx,
-                    client_addr,
-                    resolution,
-                    candidate_channels.clone(),
-                ));
-
-                while let Some(candidate) = candidates.next().await {
-                    let socket_addr = candidate.socket_addr;
-                    let outcome = node
-                        .client
-                        .recv_candidate(ctx, candidate_channel, candidate)
-                        .await;
-
-                    if let Err(err) = outcome {
-                        tracing::warn!(
-                            "Error sending candidate {socket_addr} to {}: {err}",
-                            node.addr
-                        );
-                    }
-                }
-            });
-
-            tracing::debug!("query done");
-
-            QueryResponse::Resolved {
-                candidate_channel,
-                channel_id,
-            }
+            response
         })
         .await
     }

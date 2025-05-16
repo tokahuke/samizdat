@@ -371,10 +371,7 @@ pub enum SeriesCommand {
         series_owner_name: Option<String>,
     },
     /// Lists all known public keys
-    LsCached {
-        /// Optional series name filter
-        series_name: Option<String>,
-    },
+    LsCached {},
 }
 
 impl SeriesCommand {
@@ -395,9 +392,7 @@ impl SeriesCommand {
             SeriesCommand::Ls { series_owner_name } => {
                 commands::series::ls(series_owner_name).await
             }
-            SeriesCommand::LsCached { series_name } => {
-                commands::series::ls_cached(series_name).await
-            }
+            SeriesCommand::LsCached {} => commands::series::ls_cached().await,
         }
     }
 }

@@ -4357,7 +4357,6 @@ dependencies = [
  "chrono",
  "futures",
  "http 1.2.0",
- "lazy_static",
  "rand",
  "rand_distr",
  "samizdat-common",
@@ -4365,6 +4364,7 @@ dependencies = [
  "serde-inline-default",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "structopt",
  "strum",
  "strum_macros",
@@ -4380,6 +4380,7 @@ dependencies = [
 name = "samizdat-node"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm-siv",
  "askama",
  "axum",
  "axum-extra",

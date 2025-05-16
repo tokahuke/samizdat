@@ -7,25 +7,25 @@ mod hub_server;
 mod room;
 
 use futures::prelude::*;
-use lazy_static::lazy_static;
+use node_sampler::StatisticsType;
 use samizdat_common::db::readonly_tx;
 use samizdat_common::keyed_channel::KeyedChannel;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tarpc::context;
 use tarpc::server::{self, Channel};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{interval, Interval, MissedTickBehavior};
 
-use samizdat_common::{quinn, rpc::*, transport};
-// use samizdat_common::BincodeOverQuic;
 use samizdat_common::{quic, Riddle};
+use samizdat_common::{quinn, rpc::*, transport};
 
 use crate::cli::cli;
-use crate::models::blacklisted_ip::BlacklistedIp;
+use crate::models::BlacklistedIp;
 use crate::replay_resistance::ReplayResistance;
 use crate::utils;
 
@@ -38,12 +38,12 @@ use self::room::Room;
 /// small. A such, this may change in the future to a bigger value.
 const MAX_LENGTH: usize = 2_048;
 
-lazy_static! {
-    /// The main pool of nodes.
-    pub static ref ROOM: Room = Room::new();
-    /// The replay resistance that tracks nonces that are being sent to the server.
-    pub static ref REPLAY_RESISTANCE: Mutex<ReplayResistance> = Mutex::new(ReplayResistance::new());
-}
+/// The main pool of nodes.
+pub static ROOM: LazyLock<Room> = LazyLock::new(Room::new);
+
+/// The replay resistance that tracks nonces that are being sent to the server.
+pub static REPLAY_RESISTANCE: LazyLock<Mutex<ReplayResistance>> =
+    LazyLock::new(|| Mutex::new(ReplayResistance::new()));
 
 /// Represents a connection to a Samizdat node.
 #[derive(Debug)]
@@ -69,8 +69,8 @@ impl Node {
         call_throttle.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Node {
-            query_statistics: Statistics::default(),
-            edition_statistics: Statistics::default(),
+            query_statistics: Statistics::new(StatisticsType::Query, addr.ip()),
+            edition_statistics: Statistics::new(StatisticsType::Edition, addr.ip()),
             client,
             addr,
             call_semaphore: Semaphore::new(config.max_queries),

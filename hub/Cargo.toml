@@ -19,7 +19,6 @@ tokio = { version = "1.42.0", features = [
 ] }
 futures = "0.3.25"
 tarpc = { version = "0.35.0", features = ["tokio1", "serde-transport", "tcp"] }
-lazy_static = "1.4.0"
 serde_derive = "1.0.152"
 serde = { version = "1.0.152", features = ["rc"] }
 samizdat-common = { path = "../common" }
@@ -37,3 +36,4 @@ serde-inline-default = "0.2.3"
 tower-http = { version = "0.6.2", features = ["trace"] }
 tower = "0.5.2"
 strum = "0.26.3"
+serde_with = "3.12.0"

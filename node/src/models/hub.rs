@@ -40,7 +40,7 @@ impl Hub {
     /// Lists all hubs currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Hub>, crate::Error> {
         Table::Hubs
-            .range(..)
+            .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
     }
 

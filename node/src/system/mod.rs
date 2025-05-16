@@ -239,7 +239,7 @@ impl HubConnection {
                 }
             })
             .buffer_unordered(cli().concurrent_candidates)
-            .filter_map(|done| future::ready(done));
+            .filter_map(future::ready);
 
         let outcome = match kind {
             QueryKind::Object => {

@@ -37,16 +37,19 @@ impl ReplayResistance {
                 let mut nonces_to_drop = vec![];
 
                 readonly_tx(|tx| {
-                    Table::RecentNonces.range(..).for_each(tx, |key, value| {
-                        let then =
-                            i64::from_be_bytes(value.try_into().expect("bad timestamp from db"));
-                        if now - then > 2 * TOLERATED_AGE {
-                            // Errors here are leaky, but not a security risk.
-                            nonces_to_drop.push(key.to_vec());
-                        }
+                    Table::RecentNonces
+                        .range::<_, [u8; 0]>(..)
+                        .for_each(tx, |key, value| {
+                            let then = i64::from_be_bytes(
+                                value.try_into().expect("bad timestamp from db"),
+                            );
+                            if now - then > 2 * TOLERATED_AGE {
+                                // Errors here are leaky, but not a security risk.
+                                nonces_to_drop.push(key.to_vec());
+                            }
 
-                        None as Option<()>
-                    })
+                            None as Option<()>
+                        })
                 });
 
                 writable_tx(|tx| {

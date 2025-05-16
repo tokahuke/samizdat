@@ -33,9 +33,11 @@ impl BlacklistedIp {
     }
 
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Vec<BlacklistedIp> {
-        Table::BlacklistedIps.range(..).collect(tx, |_, value| {
-            bincode::deserialize(value).expect("can deserialize")
-        })
+        Table::BlacklistedIps
+            .range::<_, [u8; 0]>(..)
+            .collect(tx, |_, value| {
+                bincode::deserialize(value).expect("can deserialize")
+            })
     }
 
     pub fn insert(&self, tx: &mut WritableTx) {

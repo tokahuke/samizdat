@@ -37,7 +37,7 @@ pub async fn serve(
         }
     });
 
-    let mut http_addrs = addr.clone();
+    let mut http_addrs = addr;
     http_addrs.set_port(http_port);
     let http_listener = TcpListener::bind(http_addrs).await?;
 

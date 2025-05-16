@@ -94,7 +94,7 @@ pub async fn get_all_peers() -> Result<Vec<GetPeerResponse>, anyhow::Error> {
 /// * `content_type` - The MIME type of the content being posted
 /// * `bookmark` - Whether to bookmark this object so that it is not vacumed. away.
 /// * `is_draft` - Whether this object is a draft version. Drafts are not exposed to the
-/// network
+///    network
 ///
 /// # Returns
 /// The hash of the posted object as a string
@@ -203,58 +203,49 @@ pub struct PostSeriesOwnerResponse {
     pub default_ttl: Duration,
 }
 
-/// Response containing series information.
-#[derive(Deserialize)]
-pub struct GetSeriesResponse {
-    /// Public key of the series
-    pub public_key: Key,
-}
-
-/// Retrieves all series.
-pub async fn get_all_series() -> Result<Vec<GetSeriesResponse>, anyhow::Error> {
-    get("/_series").await
-}
-
-/// Response containing edition information.
-#[derive(Deserialize)]
-pub struct GetEditionResponse {
-    /// Signed edition content
-    pub signed: Signed<EditionContent>,
-    /// Public key of the series
-    pub public_key: Key,
-    /// Whether this is a draft edition
-    #[serde(default)]
-    pub is_draft: bool,
-}
-
-/// Retrieves all editions.
-pub async fn get_all_editions() -> Result<Vec<GetEditionResponse>, anyhow::Error> {
-    get("/_editions").await
-}
-
-/// Response containing series owner information.
 type GetSeriesOwnerResponse = PostSeriesOwnerResponse;
 
-/// Creates a new series owner.
 pub async fn post_series_owner(
     request: PostSeriesOwnerRequest<'_>,
 ) -> Result<PostSeriesOwnerResponse, anyhow::Error> {
     post("/_series-owners", request).await
 }
 
-/// Removes a series owner.
 pub async fn delete_series_owner(series_name: &str) -> Result<bool, anyhow::Error> {
     delete(format!("/_series-owners/{series_name}")).await
 }
 
-/// Retrieves a specific series owner.
 pub async fn get_series_owner(series_name: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
     get(format!("/_series-owners/{series_name}")).await
 }
 
-/// Retrieves all series owners.
 pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyhow::Error> {
     get("/_series-owners").await
+}
+
+// Series:
+
+#[derive(Deserialize)]
+pub struct GetSeriesResponse {
+    pub public_key: Key,
+}
+
+pub async fn get_all_series() -> Result<Vec<GetSeriesResponse>, anyhow::Error> {
+    get("/_series").await
+}
+
+// Editions:
+
+#[derive(Deserialize)]
+pub struct GetEditionResponse {
+    pub signed: Signed<EditionContent>,
+    pub public_key: Key,
+    #[serde(default)]
+    pub is_draft: bool,
+}
+
+pub async fn get_all_editions() -> Result<Vec<GetEditionResponse>, anyhow::Error> {
+    get("/_editions").await
 }
 
 // Auth:
@@ -360,6 +351,11 @@ pub async fn delete_subscription(public_key: &str) -> Result<bool, anyhow::Error
 /// Retrieves all active subscriptions.
 pub async fn get_all_subscriptions() -> Result<Vec<GetSubscriptionResponse>, anyhow::Error> {
     get("/_subscriptions").await
+}
+
+/// Retrieves a specific subscription.
+pub async fn get_subscription(public_key: &str) -> Result<GetSubscriptionResponse, anyhow::Error> {
+    get(&format!("/_subscriptions/{public_key}")).await
 }
 
 // Editions:

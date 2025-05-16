@@ -18,6 +18,14 @@ pub enum Table {
     RecentNonces,
     /// Blacklisted IP addresses
     BlacklistedIps,
+    /// Connection info
+    ConnectionLog,
+    /// Query logs
+    QueryLog,
+    /// Candidate logs
+    CandidateLog,
+    /// Statistics logs
+    StatisticsLog,
 }
 
 impl samizdat_common::db::Table for Table {

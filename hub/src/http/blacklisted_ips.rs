@@ -8,7 +8,7 @@ use futures::FutureExt;
 use samizdat_common::db::{readonly_tx, writable_tx};
 use serde_derive::Deserialize;
 
-use crate::{http::ApiResponse, models::blacklisted_ip::BlacklistedIp};
+use crate::{http::ApiResponse, models::BlacklistedIp};
 
 pub fn api() -> Router {
     #[derive(Debug, Deserialize)]

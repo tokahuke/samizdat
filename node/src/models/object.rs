@@ -2,9 +2,12 @@
 //! hash. Objects are powered by Merkle trees to allow torrent-like download and better
 //! storage of similar content.
 
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv, Nonce,
+};
 use chrono::{DateTime, TimeZone, Utc};
 use futures::prelude::*;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use serde_derive::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,6 +16,7 @@ use std::time::Duration;
 use std::{collections::BTreeMap, convert::TryInto};
 use tokio::sync::mpsc;
 
+use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
 use samizdat_common::{Hash, Hint, MerkleTree, Riddle};
 
 use crate::db::{MergeOperation, Table};
@@ -836,7 +840,35 @@ impl ObjectRef {
     /// contents of this object to be shared with third parties, without the risk of leaking
     /// either the content or the hash of this object.
     pub fn self_seal(&self) -> Result<ObjectRef, crate::Error> {
-        todo!()
+        // Get the content bytes
+        let content = match self.content()? {
+            Some(bytes) => bytes,
+            None => return Err(crate::Error::ObjectNotFound),
+        };
+
+        // Create a new object header
+        let is_draft = readonly_tx(|tx| self.is_draft(tx))?;
+        let header = ObjectHeader::new("application/octet-stream".into(), is_draft)?;
+
+        // Get the object's hash bytes to use as encryption key
+        let cipher = Aes256GcmSiv::new_from_slice(self.hash()).map_err(|_| "Invalid key length")?;
+
+        // Generate a random 96-bit (12-byte) nonce
+        let nonce_bytes: [u8; 12] = rand::random();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        // Encrypt the content
+        let encrypted = cipher
+            .encrypt(nonce, content.as_ref())
+            .map_err(|e| e.to_string())?;
+
+        // Prepend nonce to encrypted data
+        let mut sealed_content = Vec::with_capacity(nonce_bytes.len() + encrypted.len());
+        sealed_content.extend_from_slice(&nonce_bytes);
+        sealed_content.extend(encrypted);
+
+        // Create a new object with the encrypted content
+        ObjectRef::build(header, false, sealed_content.into_iter().map(Ok))
     }
 }
 

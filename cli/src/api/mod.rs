@@ -25,7 +25,7 @@ impl From<ApiError> for anyhow::Error {
 }
 
 /// HTTP client used for making requests to the Samizdat node.
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| reqwest::Client::new());
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 /// Validates that the Samizdat node is running and accessible.
 pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {

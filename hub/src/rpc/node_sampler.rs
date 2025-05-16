@@ -3,20 +3,24 @@
 //! be vastly improved upon in the future.
 
 use rand::distributions::Distribution;
+use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BinaryHeap};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use samizdat_common::heap_entry::HeapEntry;
 
+use crate::models::StatisticsLog;
+use crate::models::{Id, Indexable};
+
 use super::Node;
 
 /// An observer of Normal random variables, which is slowly able to infer its parameters
 ///  (vis. mean and standard deviation).
-#[derive(Debug, Clone)]
-struct Normal {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Normal {
     /// The number of observations.
     n: usize,
     /// The sum of all observations.
@@ -55,9 +59,20 @@ impl Normal {
     }
 }
 
+/// The type of statistics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum StatisticsType {
+    Query,
+    Edition,
+}
+
 /// The statistics of how well and how fast a node can answer queries.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StatisticsInner {
+    /// The peer address of the node.
+    peer_ip: IpAddr,
+    /// The type of statistics.
+    statistics_type: StatisticsType,
     /// The number of requests sent.
     requests: f64,
     /// The number of successful queries (i.e., ones that yielded a valid result).
@@ -66,22 +81,22 @@ struct StatisticsInner {
     latency_success_log: Normal,
 }
 
-impl Default for StatisticsInner {
-    fn default() -> Self {
-        // Ten pseudo-observations: 1 success and 9 failures.
-        StatisticsInner {
-            requests: 10.0,
-            successes: 1.0,
-            latency_success_log: Normal::default(),
-        }
-    }
-}
-
 /// The statistics of how well and how fast a node can answer queries.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Statistics(Arc<RwLock<StatisticsInner>>);
 
 impl Statistics {
+    pub fn new(statistics_type: StatisticsType, peer_ip: IpAddr) -> Self {
+        Statistics(Arc::new(RwLock::new(StatisticsInner {
+            peer_ip,
+            statistics_type,
+            // Ten pseudo-observations: 1 success and 9 failures.
+            requests: 10.0,
+            successes: 1.0,
+            latency_success_log: Normal::default(),
+        })))
+    }
+
     /// Samples a reasonable guess of how well the node being observed can minimize
     /// _inverse_ latency. In this model, not being able to answer a query yields `0.0`
     /// inverse latency, which is akin to infinite latency. The idea of _sampling_ a
@@ -121,8 +136,29 @@ impl Statistics {
         success_prob / sample_latency
     }
 
+    /// Creates a snapshot of the current statistics.
+    fn snapshot(&self) -> StatisticsSnapshot {
+        let lock = self.0.read().expect("poisoned");
+        StatisticsSnapshot {
+            peer_ip: lock.peer_ip,
+            statistics_type: lock.statistics_type,
+            requests: lock.requests,
+            successes: lock.successes,
+            latency_success_log: lock.latency_success_log.clone(),
+        }
+    }
+
+    /// Logs the current statistics snapshot to the database.
+    fn log(&self) {
+        let snapshot = self.snapshot();
+        StatisticsLog::new(Id::generate(), snapshot).insert();
+    }
+
     /// Marks the beginning of a new request.
     fn start_request(&self) {
+        // Has to be done before aquiring lock to avoid deadlocks:
+        self.log();
+
         let mut lock = self.0.write().expect("poisoned");
         lock.requests += 1.0;
     }
@@ -133,6 +169,11 @@ impl Statistics {
         lock.successes += 1.0;
         lock.latency_success_log
             .observe((latency.as_millis() as f64).max(1.0).ln());
+
+        drop(lock);
+
+        // Has to be done after freeing lock to avoid deadlocks:
+        self.log();
     }
 
     /// Starts an "experiment", which is a representation of the ongoing act of sending
@@ -144,6 +185,16 @@ impl Statistics {
             start: Instant::now(),
         }
     }
+}
+
+/// A snapshot of the statistics of a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatisticsSnapshot {
+    pub peer_ip: IpAddr,
+    pub statistics_type: StatisticsType,
+    pub requests: f64,
+    pub successes: f64,
+    pub latency_success_log: Normal,
 }
 
 /// A representation of the ongoing act of sending a request and waiting for the final

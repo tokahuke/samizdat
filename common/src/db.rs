@@ -298,11 +298,16 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
 
     #[inline]
     #[must_use]
-    fn range<R>(self, range: R) -> TableRange<Self, R>
+    fn range<R, K>(self, range: R) -> TableRange<Self, R, K>
     where
-        R: for<'a> RangeBounds<&'a [u8]>,
+        K: AsRef<[u8]>,
+        R: RangeBounds<K>,
     {
-        TableRange { table: self, range }
+        TableRange {
+            table: self,
+            range,
+            _key: std::marker::PhantomData,
+        }
     }
 
     #[inline]
@@ -319,21 +324,24 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
 }
 
 /// A range-based iterator over table entries.
-pub struct TableRange<T, R>
+pub struct TableRange<T, R, K>
 where
     T: Table,
-    R: for<'a> RangeBounds<&'a [u8]>,
+    K: AsRef<[u8]>,
+    R: RangeBounds<K>,
 {
     /// The table to iterate over
     table: T,
     /// The range bounds for iteration
     range: R,
+    _key: std::marker::PhantomData<K>,
 }
 
-impl<T, R> TableRange<T, R>
+impl<T, R, K> TableRange<T, R, K>
 where
     T: Table,
-    R: for<'a> RangeBounds<&'a [u8]>,
+    K: AsRef<[u8]>,
+    R: RangeBounds<K>,
 {
     pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Option<U>
     where
@@ -355,7 +363,7 @@ where
                 for item in iter {
                     let (key, value) = item.expect("unable to advance cursor");
 
-                    if key > *end {
+                    if key > end.as_ref() {
                         break;
                     }
 
@@ -368,7 +376,7 @@ where
                 for item in iter {
                     let (key, value) = item.expect("unable to advance cursor");
 
-                    if key >= *end {
+                    if key >= end.as_ref() {
                         break;
                     }
 
@@ -410,12 +418,12 @@ where
         match self.range.end_bound() {
             Bound::Included(end) => C::from_iter(
                 iter.map(|item| item.expect("unable to advance cursor"))
-                    .take_while(|(key, _)| key <= end)
+                    .take_while(|(key, _)| *key <= end.as_ref())
                     .map(|(key, value)| map(key, value)),
             ),
             Bound::Excluded(end) => C::from_iter(
                 iter.map(|item| item.expect("unable to advance cursor"))
-                    .take_while(|(key, _)| key < end)
+                    .take_while(|(key, _)| *key < end.as_ref())
                     .map(|(key, value)| map(key, value)),
             ),
             Bound::Unbounded => C::from_iter(
