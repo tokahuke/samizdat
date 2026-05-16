@@ -48,14 +48,12 @@ pub fn api() -> Router {
                 async move {
                     Ok(GetEthereumProviderResponse {
                         endpoint: readonly_tx(|tx| {
-                            Table::Global
-                                .get(tx, "ethereum_provider_endpoint", |e| {
-                                    String::from_utf8_lossy(e).into_owned()
-                                })
-                                .unwrap_or_else(|| {
-                                    samizdat_common::blockchain::DEFAULT_PROVIDER_ENDPOINT
-                                        .to_owned()
-                                })
+                            Table::Global.get(tx, "ethereum_provider_endpoint", |e| {
+                                Ok(String::from_utf8_lossy(e).into_owned())
+                            })
+                        })?
+                        .unwrap_or_else(|| {
+                            samizdat_common::blockchain::DEFAULT_PROVIDER_ENDPOINT.to_owned()
                         }),
                     })
                 }

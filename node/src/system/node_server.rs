@@ -204,7 +204,7 @@ impl Node for NodeServer {
         let maybe_response = if let Some(series) =
             readonly_tx(|tx| SeriesRef::find(tx, &latest.key_riddle, &latest.hint)).transpose()
         {
-            match series.map(|s| readonly_tx(|tx| s.get_last_edition(tx))) {
+            match series.and_then(|s| readonly_tx(|tx| s.get_last_edition(tx))) {
                 Ok(None) => None,
                 // Do not publish draft editions in non-draft series!
                 Ok(Some(latest)) if latest.is_draft() => None,
@@ -266,6 +266,20 @@ impl Node for NodeServer {
 
                     if !edition.is_valid() {
                         tracing::warn!("an invalid edition was announced: {:?}", edition);
+                        return Ok(());
+                    }
+
+                    // Bind the announced edition to the subscription that matched the
+                    // riddle. AEAD authenticates the cipher key (= HKDF of
+                    // subscription.public_key.hash()), but `edition.public_key` itself is
+                    // NOT part of the signed payload; so without this check a hub could
+                    // wrap a B-signed edition under an A-targeted announcement and have
+                    // the node advance and fetch inventory for an unrelated series B.
+                    if edition.public_key() != &subscription.public_key {
+                        tracing::warn!(
+                            "announced edition's public key does not match the matching \
+                             subscription's public key; rejecting"
+                        );
                         return Ok(());
                     }
 

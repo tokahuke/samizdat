@@ -32,7 +32,19 @@ pub async fn serve(
             match state.next().await {
                 Some(Ok(ok)) => tracing::info!("acme event: {:?}", ok),
                 Some(Err(err)) => tracing::error!("acme error: {:?}", err),
-                None => break,
+                None => {
+                    // The acme state stream returning `None` means cert renewal
+                    // has stopped. The server stays up serving with the
+                    // (eventually expired) certificate; without this loud log
+                    // the failure is silent until clients start getting
+                    // CERT_HAS_EXPIRED errors.
+                    tracing::error!(
+                        "ACME state stream ended; certificate renewal has STOPPED. \
+                         The proxy will keep serving with the current cert until it \
+                         expires. Restart the proxy to restore renewal."
+                    );
+                    break;
+                }
             }
         }
     });

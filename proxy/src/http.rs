@@ -50,15 +50,21 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 
 pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, anyhow::Error> {
     // Get entity and content hash from page path.
+    //
+    // `uri.path()` from axum always starts with `/`, so `split('/').next()` is
+    // always `Some("")`; the previous version had an `.expect()` and a
+    // `todo!()` arm for impossible cases. Re-shape as concrete matches that
+    // return a clean 400 if a future routing change ever feeds us an
+    // unexpected path, rather than panicking the request thread.
     let path = uri.path();
     let mut split = path.split('/');
-    split.next().expect("always starts with /, right?");
+    split.next(); // leading empty segment from the `/`
     let (entity, content_hash) = match (split.next(), split.next()) {
-        (None, None) => todo!(),
-        (Some(identity), None) => ("_identity", identity),
+        // Root request, no entity. Treat as the "samizdat home" path.
+        (None, _) | (Some(""), None) => ("_identity", ""),
         (Some(entity), Some(content_hash)) if entity.starts_with('_') => (entity, content_hash),
-        (Some(identity), Some(_)) => ("_identity", identity),
-        (None, Some(_)) => unreachable!(),
+        // Otherwise the first segment is an identity name (no leading `_`).
+        (Some(identity), _) => ("_identity", identity),
     };
 
     // Query node for the web page:
@@ -92,10 +98,13 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
                 }
             }
 
-            // If web page, do your shenanigans:
+            // If web page, do your shenanigans. Compare on `type_`/`subtype`
+            // rather than `==`-against `mime::TEXT_HTML_UTF_8` so that
+            // `text/html; charset=utf-8`, `text/html; charset=US-ASCII`,
+            // `text/html` (no charset) all take the HTML path.
             let mime: Mime = content_type.to_str().unwrap_or_default().parse()?;
 
-            if mime == mime::TEXT_HTML_UTF_8 || mime == mime::TEXT_HTML {
+            if mime.type_() == mime::TEXT && mime.subtype() == mime::HTML {
                 let body = response.bytes().await?;
                 response_builder.body(proxy_page(body.as_ref(), entity, content_hash).into())?
             } else {

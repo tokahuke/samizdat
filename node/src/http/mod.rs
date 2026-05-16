@@ -169,8 +169,13 @@ fn api() -> Router {
 
 /// Creates a router for vacuum-related endpoints.
 ///
-/// Provides endpoints for triggering manual vacuum operations and
-/// flushing all data.
+/// Provides endpoints for triggering manual vacuum operations and flushing all data.
+///
+/// Gated by `authenticate_trusted_context`: either the request comes from the
+/// `/_register` trusted page OR it carries a valid bearer token (the local CLI does the
+/// latter). Without this gate a same-origin malicious page could trigger
+/// `/_vacuum/flush-all` via a simple cross-origin POST (which bypasses CORS preflight
+/// when the Content-Type is `text/plain`) and erase the entire object store.
 fn vacuum() -> Router {
     Router::new()
         .route(
@@ -187,6 +192,7 @@ fn vacuum() -> Router {
                 .map(ApiResponse)
             }),
         )
+        .layer(axum::middleware::from_fn(auth::authenticate_trusted_context))
 }
 
 /// Middleware function to restrict access to only local connections.

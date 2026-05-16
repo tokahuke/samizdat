@@ -410,7 +410,7 @@ impl PatriciaMap {
     }
 
     /// An iterator over the entries in this tree.
-    pub fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter<'_> {
         Iter {
             stack: vec![&self.root],
             choice_stack: vec![],
@@ -454,7 +454,7 @@ impl PatriciaProof {
         if bit_length != 224 {
             tracing::warn!(
                 "proof is the wrong bit length: expected {}, got {}",
-                244,
+                224,
                 bit_length
             );
             return false;

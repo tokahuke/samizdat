@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 use crate::cipher::{OpaqueEncrypted, TransferCipher};
-use crate::Hash;
+use crate::{Hash, HASH_LEN};
 
 /// A message that can be passed around and only decoded by who knows the secret solution
 /// of a riddle.
@@ -126,12 +126,16 @@ pub struct Hint {
 }
 
 impl Hint {
+    /// # Panics
+    ///
+    /// If `length` exceeds [`HASH_LEN`].
     pub fn new(content_hash: Hash, length: usize) -> Hint {
-        assert!(length < 256, "Length has to fit in a byte");
+        assert!(
+            length <= HASH_LEN,
+            "Hint length {length} exceeds HASH_LEN {HASH_LEN}"
+        );
         let mut prefix = Hash::zero();
-        for i in 0..length {
-            prefix.0[i] = content_hash.0[i];
-        }
+        prefix.0[..length].copy_from_slice(&content_hash.0[..length]);
         Hint {
             prefix,
             length: length as u8,
@@ -151,13 +155,52 @@ impl Hint {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     fn test_propose_resolve_message_riddle() {
-//         let hash = Hash::rand();
-//         let content_riddle = Riddle::new(&hash);
+    #[test]
+    fn riddle_resolves_with_correct_hash() {
+        let h = Hash::rand();
+        let r = Riddle::new(&h);
+        assert!(r.resolves(&h));
+        assert!(!r.resolves(&Hash::rand()));
+    }
 
-//     }
-// }
+    #[test]
+    fn message_riddle_round_trips() {
+        let h = Hash::rand();
+        let r = Riddle::new(&h);
+        let mr = r.riddle_for("hello".to_string());
+        let recovered: Option<String> = mr.resolve(&h);
+        assert_eq!(recovered, Some("hello".to_string()));
+    }
+
+    /// Regression test for P2; a message riddle decoded with the wrong hash must return
+    /// `None`, not garbage. Before the fix, decryption silently swallowed AEAD failures
+    /// and bincode could happen to parse intermediate buffer.
+    #[test]
+    fn message_riddle_wrong_secret_returns_none() {
+        let h = Hash::rand();
+        let r = Riddle::new(&h);
+        let mr = r.riddle_for(("answer".to_string(), 42u32));
+        let recovered: Option<(String, u32)> = mr.resolve(&Hash::rand());
+        assert!(recovered.is_none());
+    }
+
+    /// Regression test for P13; `Hint::new(_, HASH_LEN)` must NOT panic out-of-bounds.
+    #[test]
+    fn hint_max_length_does_not_panic() {
+        let h = Hash::rand();
+        let hint = Hint::new(h, HASH_LEN);
+        assert_eq!(hint.len(), HASH_LEN);
+        assert_eq!(hint.prefix(), &h.0[..]);
+    }
+
+    /// Regression test for P13; lengths above the buffer must reject cleanly.
+    #[test]
+    #[should_panic(expected = "exceeds HASH_LEN")]
+    fn hint_oversized_rejected() {
+        let _ = Hint::new(Hash::rand(), HASH_LEN + 1);
+    }
+}

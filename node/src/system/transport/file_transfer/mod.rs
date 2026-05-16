@@ -144,7 +144,7 @@ impl ValidatedCandidate {
             let transfer_cipher = self.transfer_cipher.clone();
             let chunk = tokio::task::spawn_blocking(move || {
                 // Decrypt compressed chunk:
-                transfer_cipher.decrypt(&mut compressed_chunk);
+                transfer_cipher.decrypt(&mut compressed_chunk)?;
 
                 // Decompress chunk:
                 let mut chunk = Vec::with_capacity(MAX_STREAM_SIZE);
@@ -389,7 +389,7 @@ pub async fn send_object(
                                 .bytes()
                                 .collect::<Result<Vec<_>, _>>()
                                 .expect("never error");
-                        transfer_cipher.encrypt(&mut compressed);
+                        transfer_cipher.encrypt(&mut compressed)?;
                         Ok(compressed) as Result<Vec<u8>, crate::Error>
                     })
                     .await
@@ -468,8 +468,18 @@ pub async fn recv_item(
     let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
 
     // Insert item (should already be validated by this point.)
+    //
+    // The item is inserted BEFORE the underlying object is fully downloaded; i.e.,
+    // between this write and the eventual completion of the chunk stream, the item row
+    // points at a non-existent object. This is deliberate (it lets concurrent local
+    // lookups see "in progress" rather than "missing") and is safe because:
+    //   * `resolve_object` always re-checks `object.exists(tx)` before serving; misses
+    //     fall through to the network query path rather than panicking.
+    //   * `vacuum::drop_dangling_items` reaps items that never see their object arrive.
+    //   * `CollectionItem::object()` only returns Err on inclusion-proof failure (a
+    //     structural check), not on object-existence; existence is handled downstream.
     writable_tx(|tx| {
-        item.insert(tx);
+        item.insert(tx)?;
         Ok(())
     })
     .expect("infallible");
@@ -589,7 +599,7 @@ pub async fn send_item(
                                 .bytes()
                                 .collect::<Result<Vec<_>, _>>()
                                 .expect("never error");
-                        transfer_cipher.encrypt(&mut compressed);
+                        transfer_cipher.encrypt(&mut compressed)?;
                         Ok(compressed) as Result<Vec<u8>, crate::Error>
                     })
                     .await

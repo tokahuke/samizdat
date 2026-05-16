@@ -42,8 +42,13 @@ const MAX_LENGTH: usize = 2_048;
 pub static ROOM: LazyLock<Room> = LazyLock::new(Room::new);
 
 /// The replay resistance that tracks nonces that are being sent to the server.
-pub static REPLAY_RESISTANCE: LazyLock<Mutex<ReplayResistance>> =
-    LazyLock::new(|| Mutex::new(ReplayResistance::new()));
+///
+/// `ReplayResistance::check` is `&self` and atomic in the DB layer, so this
+/// `LazyLock<ReplayResistance>` can be shared across all RPC handlers without
+/// serialising them. The previous design wrapped this in a `tokio::sync::Mutex`
+/// and made every replay check the global hub bottleneck.
+pub static REPLAY_RESISTANCE: LazyLock<ReplayResistance> =
+    LazyLock::new(ReplayResistance::new);
 
 /// Represents a connection to a Samizdat node.
 #[derive(Debug)]
@@ -117,6 +122,12 @@ impl Node {
 
 /// Lists candidates that can answer to a given resolution.
 /// TODO: code smell: big function.
+///
+/// The `expect("non-empty resolution")` below is defensive but unreachable: both
+/// callers (`hub_server::do_query` line 100 and `hub_as_node::resolve` line 78)
+/// reject empty `content_riddles` before invoking this function. If a future
+/// caller skips that check, the panic surfaces here rather than silently iterating
+/// over no riddles; rename to `unwrap_or_else` if you ever want a softer failure.
 fn candidates_for_resolution(
     ctx: context::Context,
     client_addr: SocketAddr,
@@ -391,6 +402,15 @@ async fn setup_connection(
     client_addr: SocketAddr,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<(), crate::Error> {
+    // TODO(connection-caps): two gaps here, both related to flooding.
+    // - The permits below are taken AFTER `accept_bincode_transports` has already
+    //   awaited and built two transports. A flood of fresh connections allocates
+    //   transports first and only fails after; move the `try_acquire` ahead of
+    //   the transport setup to make `max_connections` a real cap on allocation.
+    // - There is no per-IP cap. One misbehaving host (or NATed peer presenting
+    //   the same IP via many source ports) can occupy every slot. Add an
+    //   IP-keyed bound (e.g. a `dashmap` of `IpAddr -> usize`) and reject when
+    //   per-IP count exceeds `max_connections_per_ip`.
     let (direct_transport, reverse_transport) =
         transport::accept_bincode_transports(connection, MAX_LENGTH).await?;
 

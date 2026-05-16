@@ -70,16 +70,21 @@ impl Node for HubAsNodeServer {
     ) -> ResolutionResponse {
         tracing::info!("got {:?}", resolution);
 
-        // Se if you are not being replayed:
-        if !REPLAY_RESISTANCE.lock().await.check(&*resolution) {
-            return ResolutionResponse::NotFound;
+        // Se if you are not being replayed; on DB error, fail closed.
+        match REPLAY_RESISTANCE.check(&*resolution) {
+            Ok(true) => {}
+            Ok(false) => return ResolutionResponse::NotFound,
+            Err(err) => {
+                tracing::error!("replay-resistance check failed: {err}");
+                return ResolutionResponse::NotFound;
+            }
         }
 
         if resolution.content_riddles.is_empty() {
             return ResolutionResponse::EmptyResolution;
         }
 
-        let candidate_channel: ChannelId = rand::random::<u32>().into();
+        let candidate_channel: ChannelId = ChannelId::random();
 
         tokio::spawn(async move {
             let mut candidates = pin!(candidates_for_resolution(
@@ -106,6 +111,14 @@ impl Node for HubAsNodeServer {
         ResolutionResponse::Redirect(candidate_channel)
     }
 
+    // TODO(channel-id-binding): same class of bug as the client-facing
+    // `HubServer::recv_candidate`. Any connected partner hub can spray
+    // `recv_candidate` with random `ChannelId`s and inject candidates into the
+    // shared `candidate_channels` map, poisoning downstream client queries.
+    // The proper fix is to bind `channel_id` cryptographically (HMAC over
+    // `(client_addr, peer_id, server_secret)`) so peers can only deliver to
+    // channels they were legitimately assigned to. Tackled in a future pass
+    // alongside the equivalent client-facing path.
     async fn recv_candidate(
         self,
         _: context::Context,
@@ -120,18 +133,28 @@ impl Node for HubAsNodeServer {
         ctx: context::Context,
         request: Arc<EditionRequest>,
     ) -> Vec<EditionResponse> {
-        // Se if you are not being replayed:
-        if !REPLAY_RESISTANCE.lock().await.check(&*request) {
-            return vec![];
+        // Se if you are not being replayed; on DB error, fail closed.
+        match REPLAY_RESISTANCE.check(&*request) {
+            Ok(true) => {}
+            Ok(false) => return vec![],
+            Err(err) => {
+                tracing::error!("replay-resistance check failed: {err}");
+                return vec![];
+            }
         }
 
         edition_for_request(ctx, self.partner, request).await
     }
 
     async fn announce_edition(self, ctx: context::Context, announcement: Arc<EditionAnnouncement>) {
-        // Se if you are not being replayed:
-        if !REPLAY_RESISTANCE.lock().await.check(&*announcement) {
-            return;
+        // Se if you are not being replayed; on DB error, drop the announcement.
+        match REPLAY_RESISTANCE.check(&*announcement) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(err) => {
+                tracing::error!("replay-resistance check failed: {err}");
+                return;
+            }
         }
 
         announce_edition(ctx, self.partner, announcement).await

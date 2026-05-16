@@ -23,24 +23,26 @@ impl BlacklistedIp {
         tx: &Tx,
         address: IpAddr,
     ) -> Result<Option<BlacklistedIp>, crate::Error> {
-        Ok(Table::BlacklistedIps
-            .get(
-                tx,
-                bincode::serialize(&address).expect("can serialize"),
-                |result| bincode::deserialize(result),
-            )
-            .transpose()?)
+        Table::BlacklistedIps.get(
+            tx,
+            bincode::serialize(&address).expect("can serialize"),
+            |result| Ok(bincode::deserialize(result)?),
+        )
     }
 
-    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Vec<BlacklistedIp> {
-        Table::BlacklistedIps
+    pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<BlacklistedIp>, crate::Error> {
+        // One corrupt/legacy row used to crash the HTTP handler. Propagate instead so
+        // the operator gets a 500 with the error message and a deserializable subset
+        // can still be reasoned about.
+        let collected: Result<Vec<BlacklistedIp>, crate::Error> = Table::BlacklistedIps
             .range::<_, [u8; 0]>(..)
             .collect(tx, |_, value| {
-                bincode::deserialize(value).expect("can deserialize")
-            })
+                Ok::<BlacklistedIp, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 
-    pub fn insert(&self, tx: &mut WritableTx) {
+    pub fn insert(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         Table::BlacklistedIps.put(
             tx,
             bincode::serialize(&self.address).expect("can serialize"),

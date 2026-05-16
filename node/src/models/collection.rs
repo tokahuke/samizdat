@@ -17,7 +17,7 @@ use crate::db::Table;
 use super::{ObjectHeader, ObjectRef};
 
 /// The function transforming an arbitrary string into its canonical path form.
-fn normalize(name: &str) -> Cow<str> {
+fn normalize(name: &str) -> Cow<'_, str> {
     if name.ends_with('/') || name.starts_with('/') || name.contains("//") {
         let restructured = name
             .split('/')
@@ -67,7 +67,7 @@ impl Display for ItemPathBuf {
 
 impl ItemPathBuf {
     /// Transforms into a borrowed item path.
-    pub(super) fn as_path(&self) -> ItemPath {
+    pub(super) fn as_path(&self) -> ItemPath<'_> {
         ItemPath(self.0.as_ref().into())
     }
 
@@ -194,8 +194,8 @@ impl Droppable for CollectionItem {
 
         tracing::info!("Removing item {}: {:#?}", locator, self);
 
-        Table::CollectionItemLocators.delete(tx, locator.path());
-        Table::CollectionItems.delete(tx, locator.hash());
+        Table::CollectionItemLocators.delete(tx, locator.path())?;
+        Table::CollectionItems.delete(tx, locator.hash())?;
 
         Ok(())
     }
@@ -234,7 +234,7 @@ impl CollectionItem {
     }
 
     /// Returns the locator of this collection item. The locator works as a URL for items.
-    pub fn locator(&self) -> Locator {
+    pub fn locator(&self) -> Locator<'_> {
         Locator {
             collection: self.collection.clone(),
             name: self.name.as_path(),
@@ -255,41 +255,41 @@ impl CollectionItem {
                     Ok(hash) => hash,
                     Err(err) => {
                         tracing::warn!("{}", err);
-                        return None;
+                        return Ok(None);
                     }
                 };
 
                 if content_riddle.resolves(&hash) {
-                    let item: CollectionItem =
-                        bincode::deserialize(value).expect("can deserialize");
+                    let item: CollectionItem = bincode::deserialize(value)?;
 
                     match item.object().and_then(|o| o.exists(tx)) {
-                        Ok(true) => return Some(Ok(item)),
-                        Ok(false) => return None,
-                        Err(err) => return Some(Err(err)),
+                        Ok(true) => return Ok(Some(item)),
+                        Ok(false) => return Ok(None),
+                        Err(err) => return Err(err),
                     }
                 }
 
-                None
-            })
-            .transpose()?;
+                Ok(None)
+            })?;
 
         Ok(outcome)
     }
 
     /// Inserts this collection item in the database using the supplied [`Tx`].
-    pub fn insert(&self, tx: &mut WritableTx<'_>) {
+    pub fn insert(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let locator = self.collection.locator_for(self.name.as_path());
 
         Table::CollectionItems.put(
             tx,
             locator.hash(),
             bincode::serialize(self).expect("can serialize"),
-        );
-        Table::CollectionItemLocators.put(tx, locator.path(), locator.hash());
+        )?;
+        Table::CollectionItemLocators.put(tx, locator.path(), locator.hash())?;
 
         tracing::info!("Inserting item {}", locator);
         tracing::debug!("Item {locator} is {:#?}", self);
+
+        Ok(())
     }
 }
 
@@ -302,7 +302,7 @@ pub struct CollectionRef {
 
 impl Droppable for CollectionRef {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
-        for name in self.list(tx) {
+        for name in self.list(tx)? {
             if let Some(item) = self.get(tx, name.as_path())? {
                 item.drop_if_exists_with(tx)?;
             }
@@ -356,7 +356,7 @@ impl CollectionRef {
                     is_draft,
                 };
 
-                item.insert(tx);
+                item.insert(tx)?;
             }
 
             Ok(collection)
@@ -385,7 +385,7 @@ impl CollectionRef {
 
     /// Returns an iterator over all the item paths for the current collection that
     /// currently exist in the database.
-    pub fn list<Tx: TxHandle>(&self, tx: &Tx) -> Vec<ItemPathBuf> {
+    pub fn list<Tx: TxHandle>(&self, tx: &Tx) -> Result<Vec<ItemPathBuf>, crate::Error> {
         Table::CollectionItemLocators
             .prefix(self.hash)
             .collect(tx, |key, _| {
@@ -398,14 +398,14 @@ impl CollectionRef {
     pub fn list_objects<'tx, Tx: TxHandle>(
         &'tx self,
         tx: &'tx Tx,
-    ) -> impl 'tx + Iterator<Item = Result<ObjectRef, crate::Error>> {
-        self.list(tx).into_iter().filter_map(move |name| {
+    ) -> Result<impl 'tx + Iterator<Item = Result<ObjectRef, crate::Error>>, crate::Error> {
+        Ok(self.list(tx)?.into_iter().filter_map(move |name| {
             let locator = Locator {
                 collection: self.clone(),
                 name: name.as_path(),
             };
             locator.get_object(tx).transpose()
-        })
+        }))
     }
 }
 
@@ -444,9 +444,7 @@ impl Locator<'_> {
 
     /// Tries to retrieve the corresponding item from the database.
     pub fn get<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<CollectionItem>, crate::Error> {
-        Ok(Table::CollectionItems
-            .get(tx, self.hash(), |item| bincode::deserialize(item))
-            .transpose()?)
+        Table::CollectionItems.get(tx, self.hash(), |item| Ok(bincode::deserialize(item)?))
     }
 
     /// Tries to retrieve the corresponding object from the database.

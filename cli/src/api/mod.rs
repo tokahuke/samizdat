@@ -1,8 +1,16 @@
 //! API client implementation for interacting with the Samizdat node.
 //!
-//! This module provides the core functionality for making HTTP requests to a Samizdat node,
-//! including error handling, authentication, and basic request/response processing. It also
-//! provides strongly-typed functions for buiilding API calls.
+//! Provides the core functionality for making HTTP requests to a Samizdat
+//! node, including error handling, authentication, and basic request/response
+//! processing. Strongly-typed helpers live in `calls`.
+//!
+//! TODO(robustness): response bodies are read into memory with `.text()` and
+//! have no size cap; ANSI escapes in node-supplied strings are printed raw via
+//! `println!`. Both are low-priority today because the trust boundary stops at
+//! the local node (if the node is compromised the CLI is already at risk),
+//! but if the CLI ever talks to a network-attached node, cap response bodies
+//! (`response.bytes_stream().take(MAX)`) and sanitise control characters
+//! before display.
 
 mod calls;
 
@@ -26,6 +34,20 @@ impl From<ApiError> for anyhow::Error {
 
 /// HTTP client used for making requests to the Samizdat node.
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+/// Routes whose response bodies can carry secret material (currently series owner
+/// keypairs, which serialise the private bytes). When logging these responses we
+/// substitute the body with `<redacted>` so that running the CLI with `--verbose`
+/// does not write private keys into any configured `tracing` sink.
+const SENSITIVE_BODY_ROUTES: &[&str] = &["/_series-owners"];
+
+pub(super) fn redact_if_sensitive<'a>(route: &str, body: &'a str) -> &'a str {
+    if SENSITIVE_BODY_ROUTES.iter().any(|p| route.starts_with(p)) {
+        "<redacted: response may contain secret material>"
+    } else {
+        body
+    }
+}
 
 /// Validates that the Samizdat node is running and accessible.
 pub async fn validate_node_is_up() -> Result<(), anyhow::Error> {
@@ -71,7 +93,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    tracing::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} GET {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -109,7 +131,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    tracing::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} POST {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -147,11 +169,11 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    tracing::info!("{} POST {} {}", status, url, text);
+    tracing::info!("{} PUT {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
-            "error deserializing response from POST {}: {text}",
+            "error deserializing response from PUT {}: {text}",
             route.as_ref()
         )
     })?;
@@ -185,7 +207,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response PATCH {}", route.as_ref()))?;
 
-    tracing::info!("{} PATCH {} {}", status, url, text);
+    tracing::info!("{} PATCH {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(
@@ -220,7 +242,7 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    tracing::info!("{} GET {} {}", status, url, text);
+    tracing::info!("{} DELETE {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
 
     let content: Result<Q, ApiError> = serde_json::from_str(&text).with_context(|| {
         format!(

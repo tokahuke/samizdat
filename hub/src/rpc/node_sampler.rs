@@ -224,7 +224,13 @@ pub(super) fn sample(
 
     // Thompson sampling solution to find the most successful peers.
     for (&node_addr, node) in nodes {
-        let priority = (sampler.sample_priority(node) * 1e6) as i64;
+        // Cast to integer priority for `HeapEntry` ordering. A `NaN` from a
+        // degenerate distribution would saturate to 0 and tie the node with
+        // genuinely-failed peers; an `+inf` would saturate to `i64::MAX` and
+        // park it permanently at the front of the queue. Clamp non-finite
+        // values to the worst priority so honest signals always win.
+        let raw = sampler.sample_priority(node) * 1e6;
+        let priority = if raw.is_finite() { raw as i64 } else { i64::MIN };
 
         queue.push(HeapEntry {
             priority,

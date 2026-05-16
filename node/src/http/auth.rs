@@ -11,6 +11,7 @@ use futures::FutureExt;
 use http::request::Parts;
 use samizdat_common::db::{readonly_tx, writable_tx, Table as _};
 use serde_derive::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
 use crate::access::{access_token, AccessRight, Entity};
@@ -39,9 +40,9 @@ fn get_auth() -> Router {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let current: Vec<AccessRight> = readonly_tx(|tx| {
-                    Table::AccessRights.get(tx, serialized, |rights| bincode::deserialize(rights))
-                })
-                .transpose()?
+                    Table::AccessRights
+                        .get(tx, serialized, |rights| Ok(bincode::deserialize(rights)?))
+                })?
                 .unwrap_or_default();
 
                 Ok(current)
@@ -61,9 +62,9 @@ fn get_auth_current() -> Router {
             async move {
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let current: Vec<AccessRight> = readonly_tx(|tx| {
-                    Table::AccessRights.get(tx, serialized, |rights| bincode::deserialize(rights))
-                })
-                .transpose()?
+                    Table::AccessRights
+                        .get(tx, serialized, |rights| Ok(bincode::deserialize(rights)?))
+                })?
                 .unwrap_or_default();
 
                 Ok(current)
@@ -86,18 +87,22 @@ fn get_auths() -> Router {
         "/",
         get(|| {
             async move {
-                let all_auths = readonly_tx(|tx| {
-                    Table::AccessRights
-                        .range::<_, [u8; 0]>(..)
-                        .collect::<_, Result<Vec<_>, crate::Error>, _, _>(tx, |key, value| {
-                            let entity: Entity = bincode::deserialize(key)?;
-                            let granted_rights: Vec<AccessRight> = bincode::deserialize(value)?;
-                            Ok(Response {
-                                entity,
-                                granted_rights,
-                            })
-                        })
-                })?;
+                let all_auths: Vec<Response> = readonly_tx(|tx| {
+                    let collected: Result<Result<Vec<Response>, crate::Error>, crate::Error> =
+                        Table::AccessRights.range::<_, [u8; 0]>(..).collect(
+                            tx,
+                            |key, value| -> Result<Response, crate::Error> {
+                                let entity: Entity = bincode::deserialize(key)?;
+                                let granted_rights: Vec<AccessRight> =
+                                    bincode::deserialize(value)?;
+                                Ok(Response {
+                                    entity,
+                                    granted_rights,
+                                })
+                            },
+                        );
+                    collected
+                })??;
 
                 Ok(all_auths)
             }
@@ -122,9 +127,9 @@ fn patch_auth() -> Router {
                 let entity = Entity::from_path(tail.as_str()).ok_or("not an entity")?;
                 let serialized = bincode::serialize(&entity).expect("can serialize");
                 let mut current: Vec<AccessRight> = readonly_tx(|tx| {
-                    Table::AccessRights.get(tx, &serialized, |rights| bincode::deserialize(rights))
-                })
-                .transpose()?
+                    Table::AccessRights
+                        .get(tx, &serialized, |rights| Ok(bincode::deserialize(rights)?))
+                })?
                 .unwrap_or_default();
 
                 current.extend(request.granted_rights);
@@ -136,7 +141,7 @@ fn patch_auth() -> Router {
                         tx,
                         serialized,
                         bincode::serialize(&current).expect("can serialize"),
-                    );
+                    )?;
 
                     Ok(true)
                 })
@@ -157,7 +162,7 @@ fn delete_auth() -> Router {
 
                 writable_tx(|tx| {
                     Table::AccessRights
-                        .delete(tx, bincode::serialize(&entity).expect("can serialize"));
+                        .delete(tx, bincode::serialize(&entity).expect("can serialize"))?;
                     Ok(())
                 })
                 .expect("infalible");
@@ -403,7 +408,10 @@ fn do_authenticate_authorization(request: &Request) -> Result<(), Authentication
         .trim_start_matches("Bearer ")
         .trim_start_matches("bearer ");
 
-    if token == access_token() {
+    // Constant-time comparison: a plain `==` short-circuits on the first mismatching byte
+    // and turns the access token into a timing oracle exfiltratable byte-by-byte over the
+    // local network or via a hostile browser timing the response.
+    if bool::from(token.as_bytes().ct_eq(access_token().as_bytes())) {
         Ok(())
     } else {
         Err(AuthenticationRejection::BadToken)
@@ -463,18 +471,24 @@ fn do_authenticate_security_scope<const N: usize>(
     // Get entity from request:
     let entity = entity_from_request(request)?;
 
-    // Get rights from db (if possible):
-    let mut granted_rights: Vec<AccessRight> = entity
-        .and_then(|entity| {
-            readonly_tx(|tx| {
-                Table::AccessRights.get(
-                    tx,
-                    bincode::serialize(&entity).expect("can serialize"),
-                    |serialized| bincode::deserialize(serialized).unwrap(),
-                )
-            })
+    // Look up granted rights for this entity, if any. A DB error here MUST NOT silently
+    // degrade to "no rights"; that would let a transient I/O fault block legitimate
+    // access without telling anybody. We fail closed AND surface the error.
+    let mut granted_rights: Vec<AccessRight> = match entity {
+        None => Vec::new(),
+        Some(entity) => readonly_tx(|tx| {
+            Table::AccessRights.get(
+                tx,
+                bincode::serialize(&entity).expect("can serialize"),
+                |serialized| Ok(bincode::deserialize(serialized)?),
+            )
         })
-        .unwrap_or_default();
+        .map_err(|err| {
+            tracing::error!("DB error looking up access rights: {err}");
+            SecurityScopeRejection::InsufficientPrivilege
+        })?
+        .unwrap_or_default(),
+    };
 
     // Public is always granted, unconditionally.
     granted_rights.push(AccessRight::Public);
@@ -492,7 +506,7 @@ fn do_authenticate_security_scope<const N: usize>(
 
 /// Middelware that authenticates a call using the `Referer` header to extract the entity
 /// and checking if the entity is a "trusted context" in the navigation of the site.
-async fn authenticate_trusted_context(request: Request, next: Next) -> Response {
+pub async fn authenticate_trusted_context(request: Request, next: Next) -> Response {
     let security_scope = do_authenticate_trusted_context(&request);
     let authorization = do_authenticate_authorization(&request);
 

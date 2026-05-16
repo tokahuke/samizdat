@@ -87,7 +87,10 @@ static CLI: OnceLock<Cli> = OnceLock::new();
 
 pub fn init_cli() -> Result<(), anyhow::Error> {
     let cli = Cli::from_args().or_read_from_file()?;
-    tracing::info!("Arguments from command line: {:#?}", cli);
+    // Demoted from `info` to `debug`. The `owner` field is the operator's
+    // email (PII), which we should not write into the default log sink on a
+    // public-facing service.
+    tracing::debug!("Arguments from command line: {:#?}", cli);
     CLI.set(cli).ok();
 
     Ok(())

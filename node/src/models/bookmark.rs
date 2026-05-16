@@ -45,12 +45,11 @@ impl Bookmark {
 
     /// Gets the number of times this bookmark was created. This only makes sense for
     /// reference bookmarks, which work like reference counting (i.e, `Rc` and `Arc`).
-    pub fn get_count<Tx: TxHandle>(&self, tx: &Tx) -> Result<i16, crate::Error> {
+    pub fn get_count<Tx: TxHandle>(&self, tx: &Tx) -> Result<i32, crate::Error> {
         let operation: MergeOperation = Table::Bookmarks
             .get(tx, self.key(), |serialized| {
-                bincode::deserialize(serialized)
-            })
-            .transpose()?
+                Ok(bincode::deserialize(serialized)?)
+            })?
             .unwrap_or_default();
 
         Ok(operation.eval_on_zero())
@@ -64,30 +63,31 @@ impl Bookmark {
     /// Creates the bookmark in the database using the supplied [`WriteBatch`]. This will
     /// increase the count of reference bookmarks and set the count of user bookmarks to
     /// one.
-    pub fn mark(&self, tx: &mut WritableTx<'_>) {
+    pub fn mark(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(1),
             BookmarkType::User => MergeOperation::Set(1),
         };
 
-        Table::Bookmarks.map(tx, self.key(), operation.merger());
+        Table::Bookmarks.map(tx, self.key(), operation.merger())
     }
 
     /// Removes the bookmark from the database using the supplied [`WriteBatch`]. This
     /// will decrease the count of reference bookmarks by one (or delete them if the
     /// count goes to zero) and delete user bookmarks.
-    pub fn unmark(&self, tx: &mut WritableTx<'_>) {
+    pub fn unmark(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let operation = match self.ty {
             BookmarkType::Reference => MergeOperation::Increment(-1),
             BookmarkType::User => MergeOperation::Set(0),
         };
 
-        Table::Bookmarks.map(tx, self.key(), operation.merger());
+        Table::Bookmarks.map(tx, self.key(), operation.merger())
     }
 
     /// Deletes the bookmark from the database using the supplied [`Tx`],
     /// _regardless_ of the reference count.
-    pub fn clear(&self, tx: &mut WritableTx<'_>) {
-        Table::Bookmarks.delete(tx, self.key());
+    pub fn clear(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
+        Table::Bookmarks.delete(tx, self.key())?;
+        Ok(())
     }
 }

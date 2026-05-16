@@ -1,4 +1,4 @@
-#![feature(ip, try_blocks, result_flattening)]
+#![feature(try_blocks)]
 
 mod access;
 mod cli;
@@ -55,6 +55,12 @@ async fn main() -> Result<(), crate::Error> {
     init_db::<crate::db::Table>(&cli().data.to_string_lossy())?;
     init_access_token()?;
     init_identity_provider()?;
+
+    // Recover from any chunks left behind by previous crashed imports. Must run BEFORE
+    // any task that calls `ObjectRef::do_import` is spawned; otherwise we'd race a
+    // legitimate in-flight import.
+    crate::vacuum::sweep_crash_leaked_chunks()?;
+
     init_hubs().await?;
 
     // Start vacuum:

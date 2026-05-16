@@ -118,7 +118,7 @@ impl Room {
     }
 
     /// Gets a read handle to the underlying map backing this room.
-    pub async fn raw_participants(&self) -> RwLockReadGuard<BTreeMap<SocketAddr, Arc<Node>>> {
+    pub async fn raw_participants(&self) -> RwLockReadGuard<'_, BTreeMap<SocketAddr, Arc<Node>>> {
         self.participants.read().await
     }
 }

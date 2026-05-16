@@ -10,6 +10,11 @@ use serde_derive::Deserialize;
 
 use crate::{http::ApiResponse, models::BlacklistedIp};
 
+// TODO(hub-admin-auth): these endpoints are reachable by anything on the local
+// host (loopback bind + `deny_outside_requests`). On a multi-tenant host any local
+// process can blacklist arbitrary IPs and there is no DELETE route to undo it.
+// Add an admin bearer-token middleware (env var `SAMIZDAT_HUB_ADMIN_TOKEN` or
+// similar) and a DELETE route before exposing the hub to shared infrastructure.
 pub fn api() -> Router {
     #[derive(Debug, Deserialize)]
     struct PostBlacklistedIPRequest {
@@ -21,7 +26,7 @@ pub fn api() -> Router {
             post(|Json(request): Json<PostBlacklistedIPRequest>| {
                 async move {
                     writable_tx(|tx| {
-                        BlacklistedIp::new(request.address).insert(tx);
+                        BlacklistedIp::new(request.address).insert(tx)?;
                         Ok(())
                     })
                 }
@@ -31,7 +36,7 @@ pub fn api() -> Router {
         .route(
             "/",
             get(|| {
-                async move { Ok(readonly_tx(|tx| BlacklistedIp::get_all(tx))) }.map(ApiResponse)
+                async move { readonly_tx(|tx| BlacklistedIp::get_all(tx)) }.map(ApiResponse)
             }),
         )
 }

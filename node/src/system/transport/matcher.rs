@@ -11,6 +11,12 @@ struct MatcherInner<K: 'static + Ord + Copy + Send + Display, T: 'static + Send>
 }
 
 /// TODO: Matcher needs a limit in order to prevent flooding.
+///
+/// Every call to `expect`/`arrive` `tokio::spawn`s a 10-second sleeping cleanup task.
+/// A noisy peer can drive these via streamed channel ids over a single QUIC connection;
+/// each spawn is cheap individually but unbounded under sustained flooding. If this ever
+/// shows up under load, switch to a single `tokio::time::DelayQueue` shared across the
+/// matcher and bound the map size with backpressure on insert.
 pub struct Matcher<K: 'static + Ord + Copy + Send + Display, T: 'static + Send>(
     Arc<Mutex<MatcherInner<K, T>>>,
 );
@@ -37,10 +43,16 @@ impl<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> Matcher<K, T> 
             Some(item)
         } else {
             let (send, recv) = oneshot::channel();
-            let removed = inner.expecting.insert(addr, send);
-
-            if let Some(removed_send) = removed {
-                assert!(!removed_send.is_closed(), "Double expecting key {}", addr);
+            if let Some(displaced) = inner.expecting.insert(addr, send) {
+                // Two waiters on the same key collided. Don't panic; it's reachable
+                // via random ChannelId allocation (or a malicious peer replaying ids on
+                // the network path). Drop the older waiter; it gets `None` from `.recv`.
+                if !displaced.is_closed() {
+                    tracing::warn!(
+                        "Matcher::expect: displaced an existing waiter for key {addr}; \
+                         older caller will receive None"
+                    );
+                }
             }
 
             drop(inner);
@@ -62,9 +74,14 @@ impl<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> Matcher<K, T> 
         if let Some(send) = inner.expecting.remove(&addr) {
             send.send(item).ok();
         } else {
-            let removed = inner.arrived.insert(addr, item);
-
-            assert!(removed.is_none());
+            if inner.arrived.insert(addr, item).is_some() {
+                // A second item arrived for an already-pending key. Drop the prior one
+                // (now overwritten) rather than panic; this path is reachable from
+                // peer-supplied channel ids.
+                tracing::warn!(
+                    "Matcher::arrive: overwrote an unclaimed prior arrival for key {addr}"
+                );
+            }
 
             drop(inner);
 

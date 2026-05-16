@@ -1,67 +1,9 @@
 //! General utilities which don't fit anywhere else.
 //!
-//! This module provides utility functions and types for common operations across this crate,
-//! including chunk-based iteration over collections and socket address manipulation.
+//! Provides socket-address canonicalisation helpers and small VecDeque adaptors used
+//! by the chunk-based file transfer pipeline.
 
 use std::{collections::VecDeque, net::SocketAddr};
-
-/// An adaptor that splits the elements of another iterator into vectors of a given size.
-///
-/// This is a "try-iterator" implementation that handles Result types, collecting elements
-/// into chunks until either the chunk size is reached or an error occurs.
-pub struct Chunks<I> {
-    /// The adapted iterator
-    it: I,
-    /// The size of the chunks to be produced
-    size: usize,
-    /// Whether an error has occurred during iteration
-    is_error: bool,
-    /// Whether the iterator has completed
-    is_done: bool,
-}
-
-impl<T, I: Iterator<Item = Result<T, crate::Error>>> Iterator for Chunks<I> {
-    type Item = Result<Vec<T>, crate::Error>;
-    fn next(&mut self) -> Option<Result<Vec<T>, crate::Error>> {
-        if self.is_error || self.is_done {
-            return None;
-        }
-
-        let mut chunk = Vec::with_capacity(self.size);
-        for item in &mut self.it {
-            match item {
-                Ok(item) => {
-                    chunk.push(item);
-                    if chunk.len() == self.size {
-                        return Some(Ok(chunk));
-                    }
-                }
-                Err(error) => {
-                    self.is_error = true;
-                    return Some(Err(error));
-                }
-            }
-        }
-
-        self.is_done = true;
-
-        Some(Ok(chunk))
-    }
-}
-
-// /// An adaptor that splits the elements of another into vectors of a given size
-// /// (except the last). This is a "try-iterator" implementation.
-// pub fn chunks<I>(size: usize, it: I) -> Chunks<I>
-// where
-//     I: Iterator<Item = Result<u8, crate::Error>>,
-// {
-//     Chunks {
-//         it,
-//         size,
-//         is_error: false,
-//         is_done: false,
-//     }
-// }
 
 /// Makes a socket address use the canonical IP form.
 ///

@@ -134,7 +134,7 @@ fn object_bookmark() -> Router {
             post(|Path(hash): Path<Hash>| {
                 async move {
                     writable_tx(|tx| {
-                        ObjectRef::new(hash).bookmark(BookmarkType::User).mark(tx);
+                        ObjectRef::new(hash).bookmark(BookmarkType::User).mark(tx)?;
                         Ok(())
                     })
                 }
@@ -167,7 +167,7 @@ fn object_bookmark() -> Router {
             delete(|Path(hash): Path<Hash>| {
                 async move {
                     writable_tx(|tx| {
-                        ObjectRef::new(hash).bookmark(BookmarkType::User).unmark(tx);
+                        ObjectRef::new(hash).bookmark(BookmarkType::User).unmark(tx)?;
                         Ok(())
                     })
                 }

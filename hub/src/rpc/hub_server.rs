@@ -49,9 +49,12 @@ impl HubServer {
         HubServer(Arc::new(HubServerInner {
             connection_id: ConnectionLog::new(addr).insert(),
             call_semaphore: Semaphore::new(cli().max_queries_per_node),
-            call_throttle: Mutex::new(interval(Duration::from_secs_f64(
-                1. / cli().max_query_rate_per_node,
-            ))),
+            // Store the configured throttle. The previous version built a configured
+            // `call_throttle` and then dropped it on the floor, instantiating a fresh
+            // `interval(...)` here with the default `Burst` missed-tick behavior, which
+            // turned the per-node rate limit into "fire many ticks at once after an idle
+            // period". Now we keep the one we set up.
+            call_throttle: Mutex::new(call_throttle),
             addr,
             candidate_channels,
         }))
@@ -88,12 +91,17 @@ impl HubServer {
         let client_addr = self.0.addr;
 
         // Create a channel address from peer address:
-        let channel_id = rand::random::<u32>().into();
+        let channel_id = ChannelId::random();
         let channel_addr = ChannelAddr::new(self.0.addr, channel_id);
 
         // Se if you are not being replayed:
-        if !REPLAY_RESISTANCE.lock().await.check(query) {
-            return QueryResponse::Replayed;
+        match REPLAY_RESISTANCE.check(query) {
+            Ok(true) => {}
+            Ok(false) => return QueryResponse::Replayed,
+            Err(err) => {
+                tracing::error!("replay-resistance check failed: {err}");
+                return QueryResponse::InternalError;
+            }
         }
 
         // If query is empty, nothing to be done:
@@ -113,7 +121,7 @@ impl HubServer {
         };
 
         // And then create a candidate channel to forward candidate peers:
-        let candidate_channel: ChannelId = rand::random::<u32>().into();
+        let candidate_channel: ChannelId = ChannelId::random();
 
         // Get the node for the client address:
         let Some(node) = ROOM.get(client_addr).await else {
@@ -227,9 +235,14 @@ impl Hub for HubServer {
     ) -> Vec<EditionResponse> {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
-            // Se if you are not being replayed:
-            if !REPLAY_RESISTANCE.lock().await.check(&request) {
-                return vec![];
+            // Se if you are not being replayed; treat a DB error as fail-closed.
+            match REPLAY_RESISTANCE.check(&request) {
+                Ok(true) => {}
+                Ok(false) => return vec![],
+                Err(err) => {
+                    tracing::error!("replay-resistance check failed: {err}");
+                    return vec![];
+                }
             }
 
             // Now broadcast the request:
@@ -241,9 +254,14 @@ impl Hub for HubServer {
     async fn announce_edition(self, ctx: context::Context, announcement: EditionAnnouncement) {
         let client_addr = self.0.addr;
         self.throttle(|_| async move {
-            // Se if you are not being replayed:
-            if !REPLAY_RESISTANCE.lock().await.check(&announcement) {
-                return;
+            // Se if you are not being replayed; on DB error, drop the announcement.
+            match REPLAY_RESISTANCE.check(&announcement) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(err) => {
+                    tracing::error!("replay-resistance check failed: {err}");
+                    return;
+                }
             }
 
             // Now, broadcast the announcement:
