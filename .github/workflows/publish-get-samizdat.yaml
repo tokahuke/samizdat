@@ -142,7 +142,10 @@ jobs:
           "$CLI" --data "$DATA_DIR" commit --release
 
       # Install the TESTBED SSH key so we can dump logs on failure.
-      # Separate from the deploy key for the submodule.
+      # Separate from the deploy key for the submodule. The diagnostic
+      # ssh below uses `StrictHostKeyChecking=no`, so we don't need a
+      # known_hosts entry (ssh-keyscan is flaky enough to be its own
+      # failure mode).
       - name: Install testbed SSH key (for diagnostics)
         uses: shimataro/ssh-key-action@v2
         with:
@@ -150,8 +153,6 @@ jobs:
           name: id_testbed
           known_hosts: placeholder
           if_key_exists: replace
-      - name: Trust testbed host key
-        run: ssh-keyscan -H "${{ secrets.TESTBED_HOST }}" >> ~/.ssh/known_hosts
 
       # The testbed is subscribed to get-samizdat (set up by the
       # bootstrap workflow), so when it sees the announcement it
