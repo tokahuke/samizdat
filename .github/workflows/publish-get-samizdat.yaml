@@ -124,8 +124,10 @@ jobs:
             exit 1
           fi
           # GH runners are IPv4-only; UseBoth tries IPv6 first and
-          # times out before falling back. Pin v4.
-          "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com ensure-ipv4
+          # times out before falling back. The HTTP API deserialises
+          # the variant by its CamelCase name (not the kebab-case
+          # FromStr in common/src/address.rs), so it's `EnsureIpv4`.
+          "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com EnsureIpv4
           # Brief settle: hub connection handshake before we announce.
           sleep 5
 
