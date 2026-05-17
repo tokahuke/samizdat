@@ -25,7 +25,10 @@ on:
 jobs:
   publish:
     name: Publish
-    runs-on: ubuntu-latest
+    # Pin to 22.04 to match the testbed droplet's glibc. ubuntu-latest
+    # is 24.04 (glibc 2.39); the droplet is 22.04 (glibc 2.35), so
+    # binaries built on 24.04 fail to load on the droplet.
+    runs-on: ubuntu-22.04
     env:
       TARGET: x86_64-unknown-linux-gnu
       NODE_PORT: "4510"
