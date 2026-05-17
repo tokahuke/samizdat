@@ -186,6 +186,8 @@ jobs:
             systemctl status samizdat-node --no-pager -l | head -30
             echo "--- samizdat hub ls (CLI) ---"
             samizdat hub ls 2>&1
+            echo "--- samizdat connection ls (live hub links) ---"
+            samizdat connection ls 2>&1
             echo "--- samizdat subscription ls (CLI) ---"
             samizdat subscription ls 2>&1
             echo "--- local-loopback probe of proxy ---"

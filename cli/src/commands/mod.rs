@@ -3,12 +3,15 @@
 pub mod auth;
 pub mod collection;
 pub mod connection;
+pub mod doctor;
 pub mod edition;
 pub mod hub;
 pub mod identity;
 pub mod peer;
 pub mod series;
 pub mod subscription;
+
+pub use doctor::run as doctor;
 
 use anyhow::Context;
 use futures::prelude::*;

@@ -194,6 +194,13 @@ pub enum Command {
         #[structopt(long)]
         flush_all: bool,
     },
+
+    /// Prints a one-shot health snapshot of the connected node: configured hubs,
+    /// live hub connections, peers, subscriptions, and recent editions. Useful
+    /// for triage when something stops working ("is the node connected? does it
+    /// know about this series? has it seen any editions?") without composing
+    /// several `samizdat ... ls` invocations.
+    Doctor,
 }
 
 impl Command {
@@ -249,6 +256,7 @@ impl Command {
                         .map(|status| println!("Vacuum status is: {status:?}"))
                 }
             }
+            Command::Doctor => commands::doctor().await,
         }
     }
 }
