@@ -1,0 +1,160 @@
+name: Publish get-samizdat
+
+# Sign + announce a new edition of the `get-samizdat` series straight
+# from CI. The runner spawns a temporary samizdat-node, connects it to
+# the testbed hub, writes the series private key (kept as the
+# `GET_SAMIZDAT_PRIV` action secret) into the working tree just long
+# enough to `samizdat import` + `samizdat commit`, then polls the
+# public proxy URL until the testbed has eager-fetched the new edition.
+# Once that confirms, the runner can die: the testbed is now the
+# canonical mirror.
+#
+# Trust trade-off: this puts the series private key in reach of CI,
+# which is a wider blast radius than "lives on Pedro's laptop only".
+# See docs/deferred.md "Publisher persistence" for the long-term fix
+# (paid pinning tier). For now this is "the hacky solution."
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build from (default: stable)"
+        required: false
+        default: stable
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      NODE_PORT: "4510"
+      DATA_DIR: /tmp/samizdat-publish-data
+
+    steps:
+      # The get-samizdat submodule is fetched over SSH; same deploy key
+      # the build-artifacts workflow uses.
+      - name: Install get-samizdat deploy key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.GET_SAMIZDAT_DEPLOY_KEY }}
+          known_hosts: placeholder
+          if_key_exists: replace
+
+      - name: Scan github.com host key
+        run: ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Cache cargo target dir
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: target-publish-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            target-publish-${{ runner.os }}-
+
+      - name: Build node + CLI
+        run: cargo build --release --target $TARGET -p samizdat -p samizdat-node
+
+      # Write the series private key to the location `samizdat import`
+      # reads it from. The secret is base64'd; decode just-in-time so
+      # the plain bytes only live on the runner FS for the duration of
+      # the import + commit, then we delete it in the `always()` step
+      # at the end.
+      - name: Materialise series private key
+        run: |
+          mkdir -p install/get-samizdat
+          printf '%s' "${{ secrets.GET_SAMIZDAT_PRIV }}" | base64 -d \
+            > install/get-samizdat/.Samizdat.priv
+          chmod 600 install/get-samizdat/.Samizdat.priv
+
+      - name: Start samizdat-node
+        run: |
+          mkdir -p "$DATA_DIR"
+          nohup target/$TARGET/release/samizdat-node \
+            --data "$DATA_DIR" \
+            --port "$NODE_PORT" \
+            > /tmp/samizdat-node.log 2>&1 &
+          echo $! > /tmp/samizdat-node.pid
+
+      - name: Wait for node + connect to testbed hub
+        env:
+          CLI: target/x86_64-unknown-linux-gnu/release/samizdat
+        run: |
+          for i in $(seq 1 30); do
+            if "$CLI" --data "$DATA_DIR" up >/dev/null 2>&1; then
+              echo "Node ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          if ! "$CLI" --data "$DATA_DIR" up; then
+            echo "Node never came up; tail of log:"
+            tail -50 /tmp/samizdat-node.log
+            exit 1
+          fi
+          "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com UseBoth
+          # Brief settle: hub connection handshake before we announce.
+          sleep 5
+
+      - name: Import + commit edition
+        env:
+          CLI: target/x86_64-unknown-linux-gnu/release/samizdat
+        working-directory: install/get-samizdat
+        run: |
+          "$CLI" --data "$DATA_DIR" import
+          "$CLI" --data "$DATA_DIR" commit --release
+
+      # The testbed is subscribed to get-samizdat (set up by the
+      # bootstrap workflow), so when it sees the announcement it
+      # should eager-fetch via `Edition::refresh`. Poll the public
+      # proxy URL of a known small artifact until it starts serving;
+      # that's our "subscriber has mirrored" signal.
+      - name: Wait for testbed to mirror
+        run: |
+          PROBE_URL="https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/install.sh"
+          for i in $(seq 1 60); do
+            CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$PROBE_URL" || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "Testbed serving new edition after ${i} * 5s = $((i*5))s"
+              exit 0
+            fi
+            echo "Attempt $i: got $CODE, retrying..."
+            sleep 5
+          done
+          echo "Testbed did not mirror within 5 minutes; investigate."
+          tail -100 /tmp/samizdat-node.log
+          exit 1
+
+      - name: Tear down
+        if: always()
+        run: |
+          if [ -f /tmp/samizdat-node.pid ]; then
+            kill "$(cat /tmp/samizdat-node.pid)" 2>/dev/null || true
+          fi
+          # Belt and suspenders: the runner FS is destroyed at job
+          # end anyway, but explicitly removing the priv key is
+          # cheap insurance against e.g. a future change that
+          # uploads the workspace as an artifact.
+          rm -f install/get-samizdat/.Samizdat.priv
