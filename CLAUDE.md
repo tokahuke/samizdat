@@ -19,7 +19,15 @@ This file tells you (the agent) where to look first.
    it was deferred.
 4. **[docs/conventions.md](docs/conventions.md)** - DB layer usage, test harness,
    error handling, coding patterns the rest of the codebase already follows.
-5. **[.cursorrules](.cursorrules)** - file-level code style (indentation, naming,
+5. **[docs/extras.md](docs/extras.md)** and **[docs/operations.md](docs/operations.md)** -
+   the non-Rust pieces (js/, install/, blockchain/, simulate-net/, terraform/,
+   .github/workflows/) and the runbook for operating the public testbed
+   (`testbed.hubfederation.com`). Read these before touching anything
+   release-pipeline or deploy-shaped.
+6. **[docs/deferred.md](docs/deferred.md)** - the actionable backlog across all
+   audit passes. Before opening a "should we also..." conversation, check
+   whether it's already there with the rationale.
+7. **[.cursorrules](.cursorrules)** - file-level code style (indentation, naming,
    docstring rules). The conventions doc complements it; do not duplicate.
 
 ## Working preferences (Pedro's, applied always)

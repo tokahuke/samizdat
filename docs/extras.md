@@ -4,6 +4,10 @@ The Rust workspace is the core, but several other folders ship with the
 project. This document maps what each one is, what it expects, and what
 audit findings landed against it.
 
+For *how to operate* the testbed (recreate from scratch, debug a
+broken release, what's TF-managed vs out-of-band), see
+[`operations.md`](operations.md).
+
 ## Sibling repos
 
 - **`../samizdat-blog`** is a Hugo blog whose built `public/` is
