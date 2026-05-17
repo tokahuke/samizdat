@@ -39,3 +39,33 @@ resource "github_actions_secret" "proxy_owner_email" {
   secret_name     = "PROXY_OWNER_EMAIL"
   value = var.proxy_owner_email
 }
+
+###
+#
+# Deploy key for the `get-samizdat` release-collection repo. The
+# `build-artifacts.yaml` workflow recursively clones the
+# `install/get-samizdat` submodule and `postbuild.sh` pushes new
+# release commits into it. Both need credentials.
+#
+# Using a deploy key (repo-scoped) rather than a user PAT (account-
+# scoped) keeps the blast radius small: this key can read/write
+# get-samizdat and nothing else.
+#
+###
+
+resource "tls_private_key" "get_samizdat_deploy" {
+  algorithm = "ED25519"
+}
+
+resource "github_repository_deploy_key" "get_samizdat" {
+  repository = var.get_samizdat_repo
+  title      = "samizdat-builder"
+  key        = trimspace(tls_private_key.get_samizdat_deploy.public_key_openssh)
+  read_only  = false
+}
+
+resource "github_actions_secret" "get_samizdat_deploy_key" {
+  repository  = var.github_repo
+  secret_name = "GET_SAMIZDAT_DEPLOY_KEY"
+  value       = tls_private_key.get_samizdat_deploy.private_key_openssh
+}

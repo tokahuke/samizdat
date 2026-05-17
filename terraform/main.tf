@@ -45,6 +45,12 @@ variable "github_repo" {
   default     = "samizdat"
 }
 
+variable "get_samizdat_repo" {
+  type        = string
+  description = "Name of the get-samizdat release-collection repo (where postbuild.sh pushes built artifacts)."
+  default     = "get-samizdat"
+}
+
 variable "proxy_owner_email" {
   type        = string
   description = "Contact email registered with Let's Encrypt for the proxy's TLS cert."
