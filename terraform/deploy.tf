@@ -34,6 +34,16 @@ resource "github_actions_secret" "testbed_host" {
   value = "testbed.hubfederation.com"
 }
 
+# The proxy terminates TLS for `proxy.hubfederation.com`, distinct from
+# the SSH target. Both DNS names resolve to the same droplet, but the
+# Let's Encrypt cert must be issued for the proxy-facing one (which is
+# what every install script and `~get-samizdat` URL hits).
+resource "github_actions_secret" "proxy_domain" {
+  repository  = var.github_repo
+  secret_name = "PROXY_DOMAIN"
+  value       = "proxy.hubfederation.com"
+}
+
 resource "github_actions_secret" "proxy_owner_email" {
   repository      = var.github_repo
   secret_name     = "PROXY_OWNER_EMAIL"

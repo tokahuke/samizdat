@@ -85,7 +85,7 @@ jobs:
 
       - name: Render proxy.toml
         env:
-          DOMAIN: ${{ secrets.TESTBED_HOST }}
+          DOMAIN: ${{ secrets.PROXY_DOMAIN }}
           PROXY_OWNER_EMAIL: ${{ secrets.PROXY_OWNER_EMAIL }}
         run: |
           envsubst < install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template \
