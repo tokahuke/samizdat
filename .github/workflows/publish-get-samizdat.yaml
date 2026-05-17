@@ -129,7 +129,7 @@ jobs:
 
       - name: Import + commit edition
         env:
-          CLI: target/x86_64-unknown-linux-gnu/release/samizdat
+          CLI: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/samizdat
         working-directory: install/get-samizdat
         run: |
           "$CLI" --data "$DATA_DIR" import
