@@ -131,14 +131,18 @@ jobs:
               $REMOTE:/usr/local/bin/samizdat-self-update
           ssh $REMOTE chmod +x /usr/local/bin/samizdat-self-update
 
-      - name: Enable + start services
+      - name: Enable + (re)start services
+        # `enable` is idempotent and a no-op after the first bootstrap;
+        # `restart` always picks up new binaries and re-read configs,
+        # which matters when re-running bootstrap with config changes.
         run: |
           ssh root@${{ secrets.TESTBED_HOST }} bash -s <<'REMOTE_EOF'
             set -e
             systemctl daemon-reload
-            systemctl enable --now samizdat-hub
-            systemctl enable --now samizdat-node
-            systemctl enable --now samizdat-proxy
+            systemctl enable samizdat-hub samizdat-node samizdat-proxy
+            systemctl restart samizdat-hub
+            systemctl restart samizdat-node
+            systemctl restart samizdat-proxy
             sleep 3
             systemctl is-active samizdat-hub
             systemctl is-active samizdat-node
