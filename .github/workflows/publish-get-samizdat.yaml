@@ -48,8 +48,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-          submodules: recursive
+          submodules: false
           persist-credentials: false
+
+      # actions/checkout sets `url.https://github.com/.insteadOf
+      # git@github.com:` globally, which converts the submodule's SSH
+      # URL into HTTPS and skips our deploy key. Drop the rewrite,
+      # then fetch the submodule the normal way.
+      - name: Fetch get-samizdat submodule over SSH
+        run: |
+          git config --global --unset-all url.https://github.com/.insteadOf || true
+          git submodule update --init --recursive
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly

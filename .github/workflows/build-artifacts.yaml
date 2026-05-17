@@ -25,12 +25,16 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v4
       with:
-        submodules: recursive
-        # No `token:` here -- the main repo is fetched via the default
-        # GITHUB_TOKEN (read-only is fine; nothing pushes into it), and
-        # the submodule's SSH URL picks up the deploy key from the
-        # agent installed above.
+        # We do submodules manually after disabling checkout's URL
+        # rewrite, otherwise the SSH submodule URL gets converted to
+        # HTTPS and the deploy key is bypassed.
+        submodules: false
         persist-credentials: false
+
+    - name: Fetch get-samizdat submodule over SSH
+      run: |
+        git config --global --unset-all url.https://github.com/.insteadOf || true
+        git submodule update --init --recursive
 
     - name: Setup git for committing
       run: |
