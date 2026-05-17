@@ -118,6 +118,19 @@ jobs:
             done
           REMOTE_EOF
 
+      - name: Ensure directories exist
+        # Cloud-init creates these too (`mkdir -p` in runcmd), but
+        # SSH comes up before runcmd finishes on a freshly booted
+        # droplet, so we redo it here to be robust to that race.
+        run: |
+          ssh root@${{ secrets.TESTBED_HOST }} bash -s <<'REMOTE_EOF'
+            set -e
+            mkdir -p /etc/samizdat
+            mkdir -p /var/lib/samizdat/hub
+            mkdir -p /var/lib/samizdat/node
+            mkdir -p /var/lib/samizdat/proxy/acme
+          REMOTE_EOF
+
       - name: Upload systemd units, configs, self-update
         run: |
           set -e
