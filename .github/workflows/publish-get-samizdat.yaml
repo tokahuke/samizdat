@@ -186,7 +186,7 @@ jobs:
             echo "--- raw journal tail ---"
             journalctl --no-pager -n 80 SYSLOG_IDENTIFIER=samizdat-node
             journalctl --no-pager -n 40 SYSLOG_IDENTIFIER=samizdat-hub
-EOSSH
+          EOSSH
           exit 1
 
       - name: Tear down
