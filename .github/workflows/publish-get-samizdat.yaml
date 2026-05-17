@@ -213,18 +213,23 @@ jobs:
       # The testbed is subscribed to get-samizdat (set up by the
       # bootstrap workflow), so when it sees the announcement it
       # should eager-fetch via `Edition::refresh`. Poll the public
-      # proxy URL of a known small artifact until it starts serving;
-      # that's our "subscriber has mirrored" signal.
+      # proxy URL until it serves the SHA we just baked. We can't just
+      # check for HTTP 200 because a previous edition's install.sh
+      # will already 200; we need to verify the *content* matches the
+      # edition we are publishing right now.
       - name: Wait for testbed to mirror
         run: |
           PROBE_URL="https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/install.sh"
+          LOCAL_PATH="install/get-samizdat/dist/latest/x86_64-unknown-linux-gnu/node/install.sh"
+          EXPECTED_SHA=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
+          echo "expecting sha256=$EXPECTED_SHA"
           for i in $(seq 1 60); do
-            CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$PROBE_URL" || echo "000")
-            if [ "$CODE" = "200" ]; then
+            GOT_SHA=$(curl -sS --max-time 10 "$PROBE_URL" | sha256sum | awk '{print $1}')
+            if [ "$GOT_SHA" = "$EXPECTED_SHA" ]; then
               echo "Testbed serving new edition after ${i} * 5s = $((i*5))s"
               exit 0
             fi
-            echo "Attempt $i: got $CODE, retrying..."
+            echo "Attempt $i: got sha=$GOT_SHA, retrying..."
             sleep 5
           done
           echo "Testbed did not mirror within 5 minutes; investigate."
