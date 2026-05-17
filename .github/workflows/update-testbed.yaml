@@ -1,0 +1,34 @@
+name: Update testbed
+
+# Recurring update for the testbed droplet. The point is that this is
+# trivial: the droplet pulls its new binaries from the samizdat
+# network it already participates in, so this workflow just ssh's in
+# and runs the on-droplet `samizdat-self-update` script.
+#
+# Run this after publishing a new `get-samizdat` edition (which you
+# do from your laptop with `samizdat collection update`). Wait long
+# enough for the testbed's subscription to refresh (controlled by the
+# series TTL, currently 1h default; force with
+# `samizdat subscription refresh r0Km0Hpt...` over the SSH tunnel if
+# you don't want to wait).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.TESTBED_SSH_KEY }}
+          known_hosts: placeholder
+          if_key_exists: replace
+
+      - name: Scan host key
+        run: ssh-keyscan -H "${{ secrets.TESTBED_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Self-update
+        run: ssh root@${{ secrets.TESTBED_HOST }} samizdat-self-update
