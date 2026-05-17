@@ -25,17 +25,17 @@ resource "digitalocean_ssh_key" "deploy_testbed" {
 resource "github_actions_secret" "testbed_ssh_key" {
   repository      = var.github_repo
   secret_name     = "TESTBED_SSH_KEY"
-  plaintext_value = tls_private_key.deploy_testbed.private_key_openssh
+  value = tls_private_key.deploy_testbed.private_key_openssh
 }
 
 resource "github_actions_secret" "testbed_host" {
   repository      = var.github_repo
   secret_name     = "TESTBED_HOST"
-  plaintext_value = "testbed.hubfederation.com"
+  value = "testbed.hubfederation.com"
 }
 
 resource "github_actions_secret" "proxy_owner_email" {
   repository      = var.github_repo
   secret_name     = "PROXY_OWNER_EMAIL"
-  plaintext_value = var.proxy_owner_email
+  value = var.proxy_owner_email
 }
