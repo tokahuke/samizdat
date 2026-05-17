@@ -171,14 +171,22 @@ jobs:
           echo "Testbed did not mirror within 5 minutes; investigate."
           echo "=== runner samizdat-node tail ==="
           tail -100 /tmp/samizdat-node.log
-          echo "=== testbed journal: samizdat-node last 200 lines ==="
+          echo "=== testbed diagnostics ==="
           ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
-            root@${{ secrets.TESTBED_HOST }} \
-            'journalctl -u samizdat-node --no-pager -n 200' || true
-          echo "=== testbed journal: samizdat-hub last 100 lines ==="
-          ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
-            root@${{ secrets.TESTBED_HOST }} \
-            'journalctl -u samizdat-hub --no-pager -n 100' || true
+            root@${{ secrets.TESTBED_HOST }} bash -s <<'EOSSH' || true
+            set +e
+            echo "--- systemctl status (all 3) ---"
+            systemctl status samizdat-hub samizdat-node samizdat-proxy --no-pager -l | head -60
+            echo "--- list unit files ---"
+            systemctl list-unit-files 'samizdat*'
+            echo "--- subscriptions ---"
+            samizdat subscription ls 2>&1 | head -20
+            echo "--- hubs ---"
+            samizdat hub ls 2>&1 | head -10
+            echo "--- raw journal tail ---"
+            journalctl --no-pager -n 80 SYSLOG_IDENTIFIER=samizdat-node
+            journalctl --no-pager -n 40 SYSLOG_IDENTIFIER=samizdat-hub
+EOSSH
           exit 1
 
       - name: Tear down
