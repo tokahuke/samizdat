@@ -56,6 +56,12 @@ variable "proxy_owner_email" {
   description = "Contact email registered with Let's Encrypt for the proxy's TLS cert."
 }
 
+variable "get_samizdat_priv" {
+  type        = string
+  description = "Base64-encoded contents of install/get-samizdat/.Samizdat.priv (the series private key that signs new releases). Pushed to GH Actions so the publish workflow can mint new editions."
+  sensitive   = true
+}
+
 provider "digitalocean" {
   token = var.do_token
 }

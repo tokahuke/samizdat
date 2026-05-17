@@ -79,3 +79,20 @@ resource "github_actions_secret" "get_samizdat_deploy_key" {
   secret_name = "GET_SAMIZDAT_DEPLOY_KEY"
   value       = tls_private_key.get_samizdat_deploy.private_key_openssh
 }
+
+# The publishing key for the get-samizdat series. This is the most
+# sensitive secret in the whole pipeline: whoever holds it can mint
+# editions that every existing subscriber will accept. Stored
+# base64-encoded so transport is text-safe regardless of the on-disk
+# format; the publish workflow base64-decodes before writing back to
+# `install/get-samizdat/.Samizdat.priv` for the duration of one run.
+#
+# Trust boundary: this puts the key in reach of any workflow that
+# references the secret, plus anyone with write access to the repo
+# who can author a workflow. See `docs/deferred.md` "Publisher
+# persistence" for the right-long-term answer (a paid pinning tier).
+resource "github_actions_secret" "get_samizdat_priv" {
+  repository  = var.github_repo
+  secret_name = "GET_SAMIZDAT_PRIV"
+  value       = var.get_samizdat_priv
+}
