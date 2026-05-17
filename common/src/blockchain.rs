@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 /// Default RPC endpoint for the Polygon network
-pub const DEFAULT_PROVIDER_ENDPOINT: &str = "https://polygon.llamarpc.com";
+pub const DEFAULT_PROVIDER_ENDPOINT: &str = "https://rpc.ankr.com/polygon";
 
 /// Base URL for the Polygon block explorer
 pub const ETHERSCAN_ENDPOINT: &str = "https://polygonscan.com";

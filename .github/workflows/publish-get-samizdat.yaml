@@ -123,7 +123,9 @@ jobs:
             tail -50 /tmp/samizdat-node.log
             exit 1
           fi
-          "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com UseBoth
+          # GH runners are IPv4-only; UseBoth tries IPv6 first and
+          # times out before falling back. Pin v4.
+          "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com ensure-ipv4
           # Brief settle: hub connection handshake before we announce.
           sleep 5
 
