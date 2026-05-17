@@ -1,6 +1,6 @@
 resource "digitalocean_droplet" "samizdat_testbed" {
   name          = "samizdat-testbed"
-  image         = "ubuntu-22-04-x64"
+  image         = "ubuntu-24-04-x64"
   size          = "s-1vcpu-1gb"
   region        = "nyc3"
   droplet_agent = true
