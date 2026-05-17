@@ -34,10 +34,28 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - name: Cache cargo registry + git + target
-        uses: Swatinem/rust-cache@v2
+      # Share the registry+git cache with `build-artifacts.yaml` (same
+      # key/paths), so the second pipeline doesn't re-download every
+      # dep tarball. `target/` is per-workflow because the toolchain
+      # version and feature set differ between release-artifact
+      # rebuilds and this linux-only bootstrap build.
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
         with:
-          shared-key: bootstrap-testbed
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Cache cargo target dir
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: target-bootstrap-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            target-bootstrap-${{ runner.os }}-
 
       - name: Build release binaries
         run: |
