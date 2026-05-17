@@ -234,9 +234,57 @@ near `drop_if_exists_with` for the full reasoning.
 The same tarpc service traits (`Hub`, `Node`) are used for both client-server
 (`node -> hub`) and federation (`hub -> hub`). A `hub` configured with
 `--partner-addr` opens a connection to another hub and acts as if it were a
-node, allowing queries to fan out across the federation. The replay
+node, putting that hub in its peer ROOM alongside real nodes. The replay
 resistance, throttling, and candidate channel mechanics work the same on
 both paths.
+
+This means **the network of hubs is a graph, not a tree**, and a single
+query from a node N can traverse many hops:
+
+```
+   N -> H1 -> H2 -> H3 -> ... -> Hk -> P (the real node holding the content)
+```
+
+At each hop a hub iterates its ROOM (which includes both real nodes and
+other partner hubs) and forwards the `Resolution` to each. The recursive
+depth is bounded by `riddles_per_query`: each hop pops one riddle off
+`Resolution.content_riddles` (`candidates_for_resolution::pop`); once the
+vec is empty the response is `EmptyResolution`. With the default
+`riddles_per_query = 6` the federation can be 6 hops deep before queries
+naturally terminate. Replay resistance cuts cycles at every hub because
+the message nonce is preserved across hops.
+
+**Why candidate `socket_addr` is intentionally arbitrary.** When a node P
+deep in the graph responds with a candidate, the candidate carries P's IP,
+not the IP of P's immediate forwarder. The `Candidate { socket_addr, validation_riddles }`
+flows back up the chain: every hub takes the candidate it receives via
+`recv_candidate` on its hop-local channel and pushes it through its
+`candidate_channels` to the hop above. The asker eventually dials
+`candidate.socket_addr` directly to start the file transfer, with no
+trust in any of the intermediate hubs.
+
+The only credential the protocol asks of a responder is the
+`validation_riddles`, which require knowing `content_hash`. Anyone who can
+prove that can name any `socket_addr` they want; the asker will dial it.
+A "candidate-IP doesn't match the responding peer" check at any hub would
+break the federation, because at the hub the responding peer is the next
+hub in the chain, not P. The consequence is a small **reflection** primitive
+(a peer who has X can make any asker for X attempt a QUIC handshake at a
+chosen IP), not data exfiltration: the victim sees a stray handshake
+followed by nothing, because the dialed IP cannot prove knowledge of
+`content_hash` and the negotiated cipher in `NonceMessage::recv_negotiate`
+fails. **This is a structural property of the open recursive design, not a
+bug.** Do not propose fixes that bind `candidate.socket_addr` to the
+immediate responding peer's IP; that's the federation-breaking
+false-positive logged in `audit-history.md`.
+
+**Hop fan-out and amplification.** Each hub fans the resolve out to
+`max_resolutions_per_query = 12` of its peers. Combined with depth 6 the
+theoretical worst case is `12^6 ~= 3M` peer-RPCs from one query, bounded
+per-connection by `call_throttle` + `call_semaphore` but not globally
+across the federation. This is the federation-amplification finding on
+the deferred list; the proposed fix is a hop-counter in `Resolution`
+that decrements at each hop.
 
 ### Transport: QUIC + multiplexed channels + tarpc
 

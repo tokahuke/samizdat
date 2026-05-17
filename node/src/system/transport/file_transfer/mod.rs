@@ -196,7 +196,13 @@ impl Hashes {
     }
 
     fn is_done(&self) -> bool {
-        self.original_size == self.received
+        // `>=` rather than `==`: the torrent-style design has multiple peers
+        // serving the same chunks for redundancy, so `received` can overshoot
+        // `original_size` when more than one peer delivers a full set. With
+        // strict equality, the first complete delivery flips done briefly and
+        // then any subsequent duplicate flips it back off forever; candidate
+        // tasks then loop sending empty `GetChunks` requests until QUIC drops.
+        self.received >= self.original_size
     }
 
     fn get_chunk(&mut self) -> Option<Vec<Hash>> {

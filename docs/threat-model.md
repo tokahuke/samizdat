@@ -156,6 +156,35 @@ same-origin context. Cross-origin pages can still issue requests to
   (`node/src/system/node_server.rs::announce_edition`), so a malicious
   hub cannot trick the node into advancing an unrelated series.
 
+### A peer node deep in the federation graph (anywhere reachable via hub-as-node)
+
+Hub-to-hub federation is recursive (see `architecture.md`). When N asks H1,
+H1 may forward to partner hubs H2, H3, ..., which in turn forward to their
+own peers and partners. A query can travel up to `riddles_per_query` (6)
+hops before riddle exhaustion. Implications:
+
+- A node P many hops away in the graph who legitimately has content X
+  can respond with a `Candidate { socket_addr, validation_riddles }`. The
+  `socket_addr` IS intentionally unbound by any direct trust relationship
+  with the asker; P could name any IP. The asker dials it. This is the
+  point of an open recursive P2P discovery layer.
+- The validation_riddles inside the candidate require knowing the content
+  hash to construct, so only entities that legitimately have or know X can
+  participate at all. They CAN, however, name an arbitrary `socket_addr`
+  for X's location.
+- Practical consequence: a small **reflection** primitive. A malicious
+  responder for X can steer any asker for X into attempting a QUIC
+  handshake at a chosen victim IP. The victim sees a stray handshake; the
+  handshake fails at `NonceMessage::recv_negotiate` because the victim
+  cannot prove knowledge of `content_hash`. No content leaks.
+- **Do NOT propose fixes that bind `candidate.socket_addr` to the
+  responding peer's IP at the hub.** At any hub the "responding peer" is
+  the next hub in the chain, not the actual content holder; the check
+  would break federation.
+
+The federation graph itself is the largest under-audited surface in the
+project; see `audit-history.md` for the named uncertainties.
+
 ### A malicious local web page in the user's browser
 
 - Cannot read non-Public node endpoints unless it has a

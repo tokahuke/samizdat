@@ -1,6 +1,6 @@
 # Audit history
 
-A multi-pass bug audit of the workspace was conducted in May 2026. Findings
+A multi-pass bug audit of the workspace was conducted. Findings
 are tagged by crate (P# = common primitives, N# = node, B# = node behavioral,
 H# = hub, F# = proxy, plus a handful from cli). The most important rule:
 **do not re-flag anything on the deferred list without reading why it was
@@ -181,6 +181,15 @@ Total: 51 unit tests across the workspace (5 pre-existing + 46 added).
 - **The replay-resistance freshness check that "doesn't exist"** is by
   design, not an oversight; the messages don't carry a signed
   timestamp.
+- **The candidate's `socket_addr` is intentionally unbounded.** The
+  federation is a recursive graph (see `architecture.md` and
+  `threat-model.md`). At any given hub the "responding peer" is the next
+  hub in the chain, not the actual content holder several hops away.
+  Any agent that proposes binding `candidate.socket_addr.ip()` to the
+  responding peer's connection IP is **wrong**; that fix breaks
+  federation. The acceptable mitigations live elsewhere (cryptographic
+  channel-id binding on the deferred list; making the dial itself
+  unexploitable as a side channel by other means).
 
 ## Things still on the deferred list
 
@@ -204,6 +213,126 @@ In priority order if anyone wants to pick them up:
    strip private-key bytes from list responses.
 8. **Hub HTTP body size cap** if the proxy is ever pointed at a remote
    node.
+
+## Second pass: high-level / protocol findings
+
+A separate pass focused on node-to-hub lifecycle, the protocol itself, the
+file-sharing algorithm, and hub-to-hub federation. Findings carried tags
+"second-pass" (SP) in the working list.
+
+### Fixed in this pass
+
+- **SP1 / Hub QUIC accept panic on transient DB.** `hub/src/rpc/mod.rs`
+  blacklist lookup used `.expect("db error")` — the one site the P9
+  Result-propagation sweep missed. A transient `MAP_FULL` /
+  `READERS_FULL` would silently kill the QUIC accept loop, leaving the
+  hub up but no longer accepting new connections. Now propagates as a
+  fail-closed drop with a tracing::error log.
+- **SP2 / `is_fresh` panic on huge TTL.** `node/src/models/series.rs`
+  `chrono::Duration::from_std(...).expect(...)` crashed the read path
+  if a series owner shipped a single edition whose `ttl` exceeded
+  `chrono::Duration::MAX`. Now saturates at
+  `chrono::Duration::max_value()`.
+- **SP3 / Chunk-distribution non-termination.** `Hashes::is_done` used
+  `==`; under torrent-style multi-peer delivery `received` overshoots
+  `original_size` and equality never holds, so candidate tasks busy-loop
+  sending empty `GetChunks` until QUIC drops. Changed to `>=`.
+- **SP4 / Asymmetric semaphore = silent half-open connection.**
+  `hub/src/rpc/mod.rs::setup_connection` acquired client and server
+  permits in separately-spawned tasks. If one was exhausted the other
+  still ran, producing a connection that handshakes successfully but
+  silently can't service queries (`NoReverseConnection` on every
+  `do_query`, or no receiving server). Now acquires both up front
+  before negotiating transports; either failure closes the QUIC
+  connection cleanly.
+- **SP5 / Permanent-pin via clock-forward.** `SeriesRef::advance` had
+  monotonicity (B5) but no upper bound on `edition.timestamp`. A
+  compromised series owner could publish one edition with
+  `timestamp = now + 100y` and lock subscribers to it indefinitely.
+  Added an `EDITION_CLOCK_SKEW` (5 minute) bound at the module top.
+- **SP6 / FED-1: `hub_as_node::resolve` unsupervised forwarding task.**
+  The spawned forwarding task had no cancellation: when the upstream
+  partner went away, it kept producing candidates and pushing them
+  into a dead RPC. Now breaks the loop on the first `recv_candidate`
+  Err.
+- **SP7 / Refresh-DoS cooldown on the node side.** A malicious hub
+  could mint endless `EditionAnnouncement`s for any known-public series
+  key; each one cost a task spawn + Ed25519 verify + DB read on the
+  receiver before being rejected. Added per-series 30s cooldown in
+  `node/src/system/node_server.rs` (`LAST_REFRESH_ATTEMPT` map gated by
+  `ANNOUNCE_COOLDOWN`).
+- **SP8 / FED-2: `HubAsNodeServer` methods skip throttle.** Client-facing
+  `HubServer` had a per-connection throttle and concurrency cap; the
+  hub-as-node path had none. A misbehaving partner hub could blast any
+  of the four `Node` methods at line-rate. Now mirrors `HubServer`'s
+  `throttle` helper, gated by `max_queries_per_hub` /
+  `max_query_rate_per_hub`.
+
+### Deferred from this pass
+
+- **SP-D1 / Reset-trigger drops loser direction (silent candidate loss
+  across reconnect).** `node/src/system/mod.rs::HubConnectionInner::connect`
+  uses `future::select` on the two reset receivers. When one direction
+  fires, the surviving direction keeps running on the dying QUIC
+  connection. Affects both node-hub and hub-hub
+  (`hub_as_node::connect`). The naive fix (`connection.close()` on either
+  reset) regresses in flaky-network scenarios because it forces a full
+  re-handshake on every tarpc dispatch wobble; the right fix has the
+  new connection INHERIT the old `candidate_channels` so in-flight
+  queries can still see candidates while the new tarpc instances spin
+  up. Non-trivial refactor; not done here.
+
+### Confirmed not bugs
+
+- **SP-N1 / Reconnect holds the write lock across the backoff loop.**
+  Looked like an availability issue (callers block waiting for new
+  connection), but the `Hubs::query` layer fans out to all configured
+  hubs via `buffer_unordered` and returns the first `Ok(found)`. Single-
+  hub deployments DO have indefinite hangs on the down hub; the design
+  choice is "transparent wait" rather than "fast fail," consistent with
+  the structured `ConnectionStatus` state machine. Document the
+  multi-hub deployment as the supported configuration.
+- **SP-N2 / Asker doxing via candidate injection.** The federation is a
+  recursive graph; at any hub the "responding peer" is the next hub in
+  the chain, not the actual content holder several hops away.
+  `candidate.socket_addr` is intentionally unbound. Reduces to a small
+  reflection primitive (handshake at a chosen victim IP, no content
+  leaks because `NonceMessage::recv_negotiate` fails). See
+  `threat-model.md` for the structural explanation.
+
+## Under-audited areas (known unknowns)
+
+The second pass mapped the node-hub connection lifecycle, the
+overall protocol, and the file-sharing algorithm. The hub-to-hub
+federation path was touched only tangentially. Likely sources of
+undiscovered bugs:
+
+- **Multi-hop candidate routing.** Every hop adds a `channel_id`
+  indirection in its `candidate_channels` map. Cleanup paths when an
+  intermediate hub disconnects, or when the asker times out partway
+  through the chain, are not well exercised.
+- **Deadline propagation across hops.** Whether the tarpc
+  `Context.deadline` flows correctly through `Hub::resolve` ->
+  `HubAsNodeServer::resolve` -> next-hop `resolve`, or gets reset to
+  `context::current()` at any hop, is not verified. If reset, malicious
+  hubs can extend deadlines. If propagated, deep-hop responses may be
+  silently discarded.
+- **Replay-resistance under cycle.** `ReplayResistance::check` is keyed
+  by the message nonce; cycles in the federation graph ought to be cut
+  by it because the same nonce is preserved across hops. Worth a
+  property test.
+- **`HubAsNodeServer::recv_candidate` has no `throttle`.** The
+  client-facing `HubServer::recv_candidate` goes through `throttle`;
+  the partner side does not. A malicious partner can blast
+  `recv_candidate` faster than a normal node could.
+- **Forwarding-task lifecycle on partner disconnect.** When a partner
+  hub mid-chain drops mid-fan-out, the forwarding tokio task above it
+  may keep running with a dead `HubClient`. The asker eventually times
+  out, but the task's release path is not audited.
+
+A focused federation-path audit pass is warranted before relying on
+multi-hub deployments. Until then, treat single-hub topologies as the
+trusted configuration.
 
 All have TODO comments in the source with the file and a one-line
 explanation; grep for `TODO(`.

@@ -23,6 +23,12 @@ use crate::{cli, hubs};
 
 use super::{BookmarkType, CollectionRef, Inventory, ItemPath, ObjectRef};
 
+/// Maximum amount by which a freshly-signed edition's `timestamp` may exceed
+/// the receiver's wall clock before being rejected. Generous enough to absorb
+/// realistic clock skew, tight enough that a compromised owner cannot pin
+/// subscribers to a future-dated edition for years.
+const EDITION_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
+
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
@@ -310,8 +316,12 @@ impl SeriesRef {
             Table::SeriesFreshnesses
                 .get(tx, self.key(), |freshness| {
                     let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(freshness)?;
+                    // Saturate instead of panicking. A malicious series owner could
+                    // sign an edition whose `ttl` exceeds `chrono::Duration::MAX`,
+                    // and the old `.expect("can convert duration")` would crash the
+                    // read path on every `is_fresh` call.
                     let ttl = chrono::Duration::from_std(latest.signed.ttl)
-                        .expect("can convert duration");
+                        .unwrap_or(chrono::Duration::max_value());
 
                     Result::<_, crate::Error>::Ok(chrono::Utc::now() < freshness + ttl)
                 })?
@@ -365,6 +375,21 @@ impl SeriesRef {
 
         if self.public_key != edition.public_key {
             return Err(crate::Error::DifferentPublicKeys);
+        }
+
+        // Refuse editions whose timestamp is too far in the future. Without
+        // this bound a compromised series owner could publish an edition with
+        // `timestamp = now + 100y` and lock subscribers to it indefinitely:
+        // the monotonicity check below would then reject every legitimate
+        // republish as stale until real-world clocks catch up. The
+        // `EDITION_CLOCK_SKEW` constant lives at module scope.
+        let now = chrono::Utc::now();
+        if edition.timestamp() > now + EDITION_CLOCK_SKEW {
+            return Err(format!(
+                "edition timestamp {} is too far in the future (now is {now})",
+                edition.timestamp()
+            )
+            .into());
         }
 
         let previous_latest = self.get_last_edition(tx)?;

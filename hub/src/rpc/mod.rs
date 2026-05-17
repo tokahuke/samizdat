@@ -350,12 +350,19 @@ pub async fn run(
         .filter_map(|connecting| async move {
             let remote_addr = utils::socket_to_canonical(connecting.remote_address());
 
-            // Validate if address is not blacklisted:
-            if readonly_tx(|tx| BlacklistedIp::get(tx, remote_addr.ip()))
-                .expect("db error")
-                .is_some()
-            {
-                return None;
+            // Validate if address is not blacklisted. On a transient DB error we
+            // fail closed (drop the connection) rather than panicking the QUIC
+            // accept loop: a one-time MAP_FULL / READERS_FULL otherwise stops the
+            // hub from taking new connections until restart, with no log signal.
+            match readonly_tx(|tx| BlacklistedIp::get(tx, remote_addr.ip())) {
+                Ok(Some(_)) => return None,
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::error!(
+                        "DB error reading blacklist for {remote_addr}: {err}; dropping"
+                    );
+                    return None;
+                }
             }
 
             connecting
@@ -402,24 +409,47 @@ async fn setup_connection(
     client_addr: SocketAddr,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<(), crate::Error> {
-    // TODO(connection-caps): two gaps here, both related to flooding.
-    // - The permits below are taken AFTER `accept_bincode_transports` has already
-    //   awaited and built two transports. A flood of fresh connections allocates
-    //   transports first and only fails after; move the `try_acquire` ahead of
-    //   the transport setup to make `max_connections` a real cap on allocation.
-    // - There is no per-IP cap. One misbehaving host (or NATed peer presenting
-    //   the same IP via many source ports) can occupy every slot. Add an
-    //   IP-keyed bound (e.g. a `dashmap` of `IpAddr -> usize`) and reject when
-    //   per-IP count exceeds `max_connections_per_ip`.
+    // Acquire BOTH permits up front, before we negotiate transports or spawn
+    // anything. Two reasons:
+    // - Atomicity: if one semaphore is exhausted, we must NOT bring up only
+    //   the other half. The previous design acquired permits in separate
+    //   spawned tasks, so a flood would leave many half-open connections
+    //   where the node sees the QUIC handshake succeed but every `do_query`
+    //   returns `NoReverseConnection` (or vice versa).
+    // - Resource cap: `accept_bincode_transports` allocates two transports
+    //   per inbound connection. Acquiring the permits first makes
+    //   `max_connections` an actual cap on resource allocation rather than a
+    //   reject-after-allocation half-measure.
+    //
+    // Per-IP cap is still a TODO; one misbehaving host can still occupy every
+    // slot via many source ports.
+    let server_permit = match server_semaphore.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!(
+                "server connection cap reached; dropping connection from {client_addr}"
+            );
+            connection.close(0u32.into(), b"server cap reached");
+            return Ok(());
+        }
+    };
+    let client_permit = match client_semaphore.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!(
+                "client connection cap reached; dropping connection from {client_addr}"
+            );
+            connection.close(0u32.into(), b"client cap reached");
+            return Ok(());
+        }
+    };
+
     let (direct_transport, reverse_transport) =
         transport::accept_bincode_transports(connection, MAX_LENGTH).await?;
 
     // Serrver setup:
     tokio::spawn(async move {
-        let Ok(_permit) = server_semaphore.try_acquire() else {
-            tracing::error!("Too many servers! Not accepting connection from {client_addr}");
-            return;
-        };
+        let _permit = server_permit;
 
         // Set up server:
         let server = HubServer::new(client_addr, candidate_channels);
@@ -436,10 +466,7 @@ async fn setup_connection(
 
     // Client task:
     tokio::spawn(async move {
-        let Ok(_permit) = client_semaphore.try_acquire() else {
-            tracing::error!("Too many clients! Not accepting connection from {client_addr}");
-            return;
-        };
+        let _permit = client_permit;
 
         // Set up client (remember to drop it when connection is severed):
         let uninstrumented_client =

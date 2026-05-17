@@ -2,7 +2,9 @@
 
 use futures::prelude::*;
 use samizdat_common::db::readonly_tx;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Instant;
 use tarpc::context;
 
 use samizdat_common::address::{ChannelAddr, ChannelId};
@@ -10,6 +12,40 @@ use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
+
+/// Per-series cooldown for accepting fresh edition announcements. Bounds
+/// refresh-DoS from a malicious hub that forges announcements for a
+/// known-public series key (the signature check rejects them, but the
+/// pre-rejection cost is a task spawn + decrypt + Ed25519 verify per
+/// announcement). The cooldown caps the rate at which we even start that
+/// work per series.
+const ANNOUNCE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Map from series public-key hash to the most recent time we started a
+/// refresh attempt for it. `BTreeMap` (rather than `HashMap`) because
+/// `samizdat_common::Hash` derives `Ord` but not `std::hash::Hash`; the
+/// contention is low so the lookup-cost difference is irrelevant.
+static LAST_REFRESH_ATTEMPT: LazyLock<Mutex<BTreeMap<Hash, Instant>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+/// Returns true if a refresh for `series_key_hash` is permitted now, and
+/// records the attempt. Returns false if we're inside the cooldown.
+fn allow_refresh_attempt(series_key_hash: Hash) -> bool {
+    let now = Instant::now();
+    let mut guard = LAST_REFRESH_ATTEMPT.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(&last) = guard.get(&series_key_hash) {
+        if now < last + ANNOUNCE_COOLDOWN {
+            return false;
+        }
+    }
+    guard.insert(series_key_hash, now);
+    // Opportunistic GC: keep the map from growing unboundedly. Walk and prune
+    // entries older than 10 cooldowns. This runs on every accepted attempt;
+    // amortized cost is fine because cooldowns gate the rate.
+    let stale = now - ANNOUNCE_COOLDOWN * 10;
+    guard.retain(|_, &mut last| last > stale);
+    true
+}
 
 use crate::cli;
 use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
@@ -257,6 +293,19 @@ impl Node for NodeServer {
             }
             Ok(Some(subscription)) => {
                 tracing::info!("Found {subscription} for announcement");
+
+                // Refresh-DoS cooldown: a malicious hub can mint endless
+                // announcements for any known-public series key (the
+                // signature check rejects them, but the pre-rejection work is
+                // not free). Bound the rate per series.
+                let series_key_hash = subscription.public_key.hash();
+                if !allow_refresh_attempt(series_key_hash) {
+                    tracing::debug!(
+                        "refresh-cooldown active for series {series_key_hash}; \
+                         dropping announcement"
+                    );
+                    return;
+                }
 
                 let cipher =
                     TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);

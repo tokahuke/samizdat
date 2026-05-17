@@ -14,9 +14,9 @@ This file tells you (the agent) where to look first.
    attacker on each surface can do. Read this before flagging any "security" bug;
    most of them have non-obvious saving graces from the larger model.
 3. **[docs/audit-history.md](docs/audit-history.md)** - the bugs that were found
-   and fixed in a multi-pass audit during May 2026, plus the deferred items with
-   their rationale. Do NOT re-flag anything on the deferred list without reading
-   why it was deferred.
+   and fixed in the multi-pass audit, plus the deferred items with their
+   rationale. Do NOT re-flag anything on the deferred list without reading why
+   it was deferred.
 4. **[docs/conventions.md](docs/conventions.md)** - DB layer usage, test harness,
    error handling, coding patterns the rest of the codebase already follows.
 5. **[.cursorrules](.cursorrules)** - file-level code style (indentation, naming,
