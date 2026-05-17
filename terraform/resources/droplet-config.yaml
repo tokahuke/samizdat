@@ -9,7 +9,7 @@
 #   - Open the firewall ports the services will bind.
 #   - Create the directory layout the systemd units expect (/etc/samizdat
 #     for configs, /var/lib/samizdat for per-service state).
-#   - Install fish as Pedro's interactive shell when SSHing in by hand.
+#   - Install fish as the official login shell.
 #
 # Apt updates run because we want a fresh droplet to have current
 # security patches; `package_upgrade` only runs once at first boot, so
@@ -22,8 +22,9 @@ packages:
 
 runcmd:
   # `chsh -s` defaults to changing root's shell since cloud-init runs
-  # as root. Personal shells for other users go in user_data on the DO
-  # console out of band.
+  # as root. Fish is the project's default; bootstrap/update workflows
+  # explicitly invoke `bash -s` on the remote when they need bash
+  # script semantics.
   - chsh -s /usr/bin/fish
 
   # UFW: SSH for management, 80/443 for the proxy (HTTP redirect +

@@ -92,6 +92,11 @@ jobs:
             > /tmp/proxy.toml
           cat /tmp/proxy.toml
 
+      # Note: the droplet's root login shell is fish. Every `ssh` here
+      # that runs a multi-line script pipes it to `bash -s` on the
+      # remote, so bash semantics (set -e, for/do/done, etc.) work
+      # regardless of login shell.
+
       - name: Upload binaries
         run: |
           set -e
@@ -103,9 +108,13 @@ jobs:
           scp $SRC/samizdat-proxy  $REMOTE:/usr/local/bin/samizdat-proxy.new
           # Atomic rename so a partial scp can't leave a half-written
           # binary on PATH.
-          ssh $REMOTE 'for b in samizdat samizdat-node samizdat-hub samizdat-proxy; do
-            chmod +x /usr/local/bin/$b.new && mv /usr/local/bin/$b.new /usr/local/bin/$b
-          done'
+          ssh $REMOTE bash -s <<'REMOTE_EOF'
+            set -e
+            for b in samizdat samizdat-node samizdat-hub samizdat-proxy; do
+              chmod +x /usr/local/bin/$b.new
+              mv /usr/local/bin/$b.new /usr/local/bin/$b
+            done
+          REMOTE_EOF
 
       - name: Upload systemd units, configs, self-update
         run: |
@@ -120,11 +129,11 @@ jobs:
           scp /tmp/proxy.toml                     $REMOTE:/etc/samizdat/proxy.toml
           scp $UNITS/testbed/samizdat-self-update.sh \
               $REMOTE:/usr/local/bin/samizdat-self-update
-          ssh $REMOTE 'chmod +x /usr/local/bin/samizdat-self-update'
+          ssh $REMOTE chmod +x /usr/local/bin/samizdat-self-update
 
       - name: Enable + start services
         run: |
-          ssh root@${{ secrets.TESTBED_HOST }} '
+          ssh root@${{ secrets.TESTBED_HOST }} bash -s <<'REMOTE_EOF'
             set -e
             systemctl daemon-reload
             systemctl enable --now samizdat-hub
@@ -134,7 +143,7 @@ jobs:
             systemctl is-active samizdat-hub
             systemctl is-active samizdat-node
             systemctl is-active samizdat-proxy
-          '
+          REMOTE_EOF
 
       - name: Subscribe to seed collections
         # Hub + subscription wiring is idempotent (the cli rejects
@@ -142,10 +151,10 @@ jobs:
         # bootstrap is safe. Worst case it prints "already exists" and
         # moves on.
         run: |
-          ssh root@${{ secrets.TESTBED_HOST }} '
+          ssh root@${{ secrets.TESTBED_HOST }} bash -s <<'REMOTE_EOF'
             set +e
             samizdat hub new testbed.hubfederation.com UseBoth
             samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM
             samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
             true
-          '
+          REMOTE_EOF
