@@ -216,10 +216,10 @@ impl Experiment {
 }
 
 /// Samples an ordering of nodes, based on a given priority.
-pub(super) fn sample(
-    sampler: impl PrioritySampler,
+pub(super) fn sample<S: PrioritySampler>(
+    sampler: S,
     nodes: &BTreeMap<SocketAddr, Arc<Node>>,
-) -> impl Iterator<Item = (SocketAddr, Arc<Node>)> {
+) -> impl Iterator<Item = (SocketAddr, Arc<Node>)> + use<S> {
     let mut queue = BinaryHeap::new();
 
     // Thompson sampling solution to find the most successful peers.

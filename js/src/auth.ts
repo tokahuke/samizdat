@@ -44,16 +44,25 @@ async function doAuthenticationFlow(accessRights: Array<AccessRight>) {
     throw new Error("Could not open authentication window");
   }
 
+  // Resolve when the popup dispatches the `auth` custom event, or reject if
+  // the popup is closed by the user before that happens.
   const event = await new Promise<CustomEvent<AuthenticationDetail>>(
-    (resolver) => {
+    (resolve, reject) => {
+      const closePoll = window.setInterval(() => {
+        if (authWindow.closed) {
+          window.clearInterval(closePoll);
+          reject(new Error("Authentication popup closed before completion"));
+        }
+      }, 500);
       authWindow.addEventListener(
         "auth",
-        (e: CustomEvent<AuthenticationDetail>) => resolver(e)
+        (e: CustomEvent<AuthenticationDetail>) => {
+          window.clearInterval(closePoll);
+          resolve(e);
+        }
       );
     }
   );
-
-  console.log(event);
 
   switch (event.detail.status) {
     case "canceled":

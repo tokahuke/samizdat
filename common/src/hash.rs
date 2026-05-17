@@ -96,7 +96,7 @@ impl Hash {
         let mut rand = [0; HASH_LEN];
 
         for rand_i in &mut rand {
-            *rand_i = rng.gen();
+            *rand_i = rng.r#gen();
         }
 
         Hash(rand)

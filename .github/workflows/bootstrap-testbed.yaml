@@ -1,0 +1,129 @@
+name: Bootstrap testbed
+
+# One-shot deployment that turns a fresh DigitalOcean droplet (just
+# stood up by `terraform apply`) into a running Samizdat hub + node +
+# proxy. Out-of-band by necessity: an empty droplet has nothing to
+# serve itself yet. After this runs once, subsequent updates go
+# through `update-testbed.yaml`, which pulls binaries from the
+# samizdat network the testbed now participates in.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build from (default: stable)."
+        required: false
+        default: stable
+
+jobs:
+  bootstrap:
+    name: Bootstrap
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo registry + git + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bootstrap-testbed
+
+      - name: Build release binaries
+        run: |
+          cargo build --release --target $TARGET \
+            -p samizdat \
+            -p samizdat-node \
+            -p samizdat-hub \
+            -p samizdat-proxy
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.TESTBED_SSH_KEY }}
+          known_hosts: placeholder
+          if_key_exists: replace
+
+      # Trust the host on first contact -- the droplet just came up
+      # and we have no prior fingerprint to compare against. Subsequent
+      # workflow runs will keep using whatever the droplet presents.
+      - name: Scan host key
+        run: |
+          ssh-keyscan -H "${{ secrets.TESTBED_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Render proxy.toml
+        env:
+          DOMAIN: ${{ secrets.TESTBED_HOST }}
+          PROXY_OWNER_EMAIL: ${{ secrets.PROXY_OWNER_EMAIL }}
+        run: |
+          envsubst < install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template \
+            > /tmp/proxy.toml
+          cat /tmp/proxy.toml
+
+      - name: Upload binaries
+        run: |
+          set -e
+          REMOTE=root@${{ secrets.TESTBED_HOST }}
+          SRC=target/$TARGET/release
+          scp $SRC/samizdat        $REMOTE:/usr/local/bin/samizdat.new
+          scp $SRC/samizdat-node   $REMOTE:/usr/local/bin/samizdat-node.new
+          scp $SRC/samizdat-hub    $REMOTE:/usr/local/bin/samizdat-hub.new
+          scp $SRC/samizdat-proxy  $REMOTE:/usr/local/bin/samizdat-proxy.new
+          # Atomic rename so a partial scp can't leave a half-written
+          # binary on PATH.
+          ssh $REMOTE 'for b in samizdat samizdat-node samizdat-hub samizdat-proxy; do
+            chmod +x /usr/local/bin/$b.new && mv /usr/local/bin/$b.new /usr/local/bin/$b
+          done'
+
+      - name: Upload systemd units, configs, self-update
+        run: |
+          set -e
+          REMOTE=root@${{ secrets.TESTBED_HOST }}
+          UNITS=install/src/x86_64-unknown-linux-gnu
+          scp $UNITS/hub/samizdat-hub.service     $REMOTE:/etc/systemd/system/
+          scp $UNITS/node/samizdat-node.service   $REMOTE:/etc/systemd/system/
+          scp $UNITS/proxy/samizdat-proxy.service $REMOTE:/etc/systemd/system/
+          scp $UNITS/hub/hub.toml                 $REMOTE:/etc/samizdat/hub.toml
+          scp $UNITS/node/node.toml               $REMOTE:/etc/samizdat/node.toml
+          scp /tmp/proxy.toml                     $REMOTE:/etc/samizdat/proxy.toml
+          scp $UNITS/testbed/samizdat-self-update.sh \
+              $REMOTE:/usr/local/bin/samizdat-self-update
+          ssh $REMOTE 'chmod +x /usr/local/bin/samizdat-self-update'
+
+      - name: Enable + start services
+        run: |
+          ssh root@${{ secrets.TESTBED_HOST }} '
+            set -e
+            systemctl daemon-reload
+            systemctl enable --now samizdat-hub
+            systemctl enable --now samizdat-node
+            systemctl enable --now samizdat-proxy
+            sleep 3
+            systemctl is-active samizdat-hub
+            systemctl is-active samizdat-node
+            systemctl is-active samizdat-proxy
+          '
+
+      - name: Subscribe to seed collections
+        # Hub + subscription wiring is idempotent (the cli rejects
+        # duplicate entries with a clean exit code), so re-running the
+        # bootstrap is safe. Worst case it prints "already exists" and
+        # moves on.
+        run: |
+          ssh root@${{ secrets.TESTBED_HOST }} '
+            set +e
+            samizdat hub new testbed.hubfederation.com UseBoth
+            samizdat subscription new r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM
+            samizdat subscription new fGfgc7ibvwy26U7nHjcaAhYmyLvXl84Ld-qab_0PPJc
+            true
+          '

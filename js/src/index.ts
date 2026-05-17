@@ -115,14 +115,10 @@ export class Samizdat {
 
   async postHub(address: string, resolutionMode: string) {
     await this._ensureRights([AccessRight.ManageHubs]);
-    const response = await call(
-      "POST",
-      `/_hubs`,
-      JSON.stringify({
-        address,
-        resolution_mode: resolutionMode,
-      })
-    );
+    const response = await call("POST", `/_hubs`, {
+      address,
+      resolution_mode: resolutionMode,
+    });
     return await response.text();
   }
 
@@ -258,7 +254,7 @@ export class Samizdat {
     await this._ensureRights([AccessRight.ManageSeries]);
     const response = await call(
       "POST",
-      `/_seriesowner/${seriesOwner}/editions`,
+      `/_seriesowners/${seriesOwner}/editions`,
       {
         collection,
         ttl,
@@ -308,7 +304,7 @@ export class Samizdat {
 
   async deleteSubscription(seriesKey: string) {
     await this._ensureRights([AccessRight.ManageSubscriptions]);
-    const response = await call("DELETE", `/_subscriptions${seriesKey}`);
+    const response = await call("DELETE", `/_subscriptions/${seriesKey}`);
     return (await response.json())["Ok"] as null;
   }
 }

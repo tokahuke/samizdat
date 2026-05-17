@@ -321,7 +321,7 @@ impl SeriesRef {
                     // and the old `.expect("can convert duration")` would crash the
                     // read path on every `is_fresh` call.
                     let ttl = chrono::Duration::from_std(latest.signed.ttl)
-                        .unwrap_or(chrono::Duration::max_value());
+                        .unwrap_or(chrono::TimeDelta::MAX);
 
                     Result::<_, crate::Error>::Ok(chrono::Utc::now() < freshness + ttl)
                 })?

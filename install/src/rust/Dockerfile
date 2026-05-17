@@ -1,10 +1,13 @@
 FROM rust:latest
 
-# Update APT:
+# Update APT. `nsis` provides `makensis`, used to build the Windows
+# installer (`install/src/x86_64-pc-windows-gnu/node/installer.nsi`)
+# alongside the cross-compiled Rust binaries.
 RUN apt-get update &&\
     apt-get install -y\
     build-essential\
-    git &&\
+    git\
+    nsis &&\
     apt-get clean autoclean && \
     apt-get autoremove --yes && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/

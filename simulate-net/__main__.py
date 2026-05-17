@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import socket
 import subprocess
+import sys
 import traceback
+from pathlib import Path
+
 import ryan  # pip install ryan-lang
 
 from dataclasses import dataclass
 from time import sleep
 
 from json import JSONEncoder
+
+# Run paths are anchored to the repo root (parent of `simulate-net/`) so the
+# script works regardless of where the user runs it from.
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
 
 def log[T](x: T) -> T:
@@ -46,9 +56,17 @@ def wait_all(processes: list[subprocess.Popen]) -> None:
         process.wait()
 
 
+def _grab_free_port() -> int:
+    """Asks the OS for a currently-free port on the loopback interface.
+    There is a small race window between this call and the actual bind by
+    the spawned process, but it is good enough for local simulation."""
+    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+        s.bind(("::1", 0))
+        return s.getsockname()[1]
+
+
 class PortBroker:
     def __init__(self) -> None:
-        self.current = 45100
         self.ports: dict[str, int] = {}
         self.rev_ports: dict[int, str] = {}
 
@@ -56,10 +74,10 @@ class PortBroker:
         try:
             return self.ports[interface_id]
         except KeyError:
-            self.ports[interface_id] = self.current
-            self.rev_ports[self.current] = interface_id
-            self.current += 1
-            return self.ports[interface_id]
+            port = _grab_free_port()
+            self.ports[interface_id] = port
+            self.rev_ports[port] = interface_id
+            return port
 
     def interface_for(self, port: int) -> str:
         return self.rev_ports[port]
@@ -85,16 +103,16 @@ class Node:
 
     def command(self) -> list[str]:
         return [
-            f"target/{folder()}/samizdat-node",
+            str(WORKSPACE_ROOT / f"target/{folder()}/samizdat-node"),
             f"--port={self.port()}",
-            f"--data=data/{self.node_id}",
+            f"--data={WORKSPACE_ROOT}/data/{self.node_id}",
         ]
 
     def connect_to_hub(self, hub: Hub) -> list[str]:
         return log(
             [
-                f"target/{folder()}/samizdat",
-                f"--data=data/{self.node_id}",
+                str(WORKSPACE_ROOT / f"target/{folder()}/samizdat"),
+                f"--data={WORKSPACE_ROOT}/data/{self.node_id}",
                 "hub",
                 "new",
                 hub.address(),
@@ -127,9 +145,9 @@ class Hub:
 
     def command(self, hubs: list[Hub]) -> list[str]:
         return [
-            f"target/{folder()}/samizdat-hub",
+            str(WORKSPACE_ROOT / f"target/{folder()}/samizdat-hub"),
             f"--addresses={self.address()}",
-            f"--data=data/{self.hub_id}",
+            f"--data={WORKSPACE_ROOT}/data/{self.hub_id}",
             f"--http-port={self.http_port()}",
             "--partners",
             *[hub.address() for hub in hubs],
@@ -173,20 +191,29 @@ class Graph:
         }
 
         print("Configuration:", json.dumps(report_config, indent=4, ensure_ascii=False))
-        input("Press any key to continue...")
+        if sys.stdin.isatty() and not os.environ.get("SAMIZDAT_SIM_NONINTERACTIVE"):
+            input("Press any key to continue...")
 
-        # Compile stuff:
-        wait_all(
-            [
-                subprocess.Popen(
-                    ["cargo", "build", *opt_flag(), "--bin", "samizdat-node"]
-                ),
-                subprocess.Popen(
-                    ["cargo", "build", *opt_flag(), "--bin", "samizdat-hub"]
-                ),
-                subprocess.Popen(["cargo", "build", *opt_flag(), "--bin", "samizdat"]),
-            ]
-        )
+        # Compile each binary, failing fast if any build errors out.
+        build_processes = [
+            subprocess.Popen(
+                ["cargo", "build", *opt_flag(), "--bin", "samizdat-node"],
+                cwd=WORKSPACE_ROOT,
+            ),
+            subprocess.Popen(
+                ["cargo", "build", *opt_flag(), "--bin", "samizdat-hub"],
+                cwd=WORKSPACE_ROOT,
+            ),
+            subprocess.Popen(
+                ["cargo", "build", *opt_flag(), "--bin", "samizdat"],
+                cwd=WORKSPACE_ROOT,
+            ),
+        ]
+        for proc in build_processes:
+            if proc.wait() != 0:
+                raise RuntimeError(
+                    f"cargo build failed (exit {proc.returncode}); aborting simulation"
+                )
 
         # Launch processes:
         subprocesses = [
@@ -220,7 +247,25 @@ class Graph:
 
 
 if __name__ == "__main__":
-    with open("network.ryan") as network_desc:
+    parser = argparse.ArgumentParser(
+        description="Run a local Samizdat network simulation."
+    )
+    parser.add_argument(
+        "--config",
+        default=str(WORKSPACE_ROOT / "network.ryan"),
+        help="Path to the .ryan network description (default: network.ryan in repo root).",
+    )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Compile and run with --release (slower build, faster runtime).",
+    )
+    args = parser.parse_args()
+
+    if args.release:
+        IS_RELEASE = True
+
+    with open(args.config) as network_desc:
         config = ryan.from_str(network_desc.read())  # type: ignore
         graph = Graph(**config["graph"])
 

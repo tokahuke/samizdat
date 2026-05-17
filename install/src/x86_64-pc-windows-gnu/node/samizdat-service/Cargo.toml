@@ -1,7 +1,9 @@
 [package]
 name = "samizdat-service"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Windows service wrapper around samizdat-node.exe"
 
 [dependencies]
 windows-service = "0.6.0"

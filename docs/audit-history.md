@@ -7,6 +7,12 @@ H# = hub, F# = proxy, plus a handful from cli). The most important rule:
 deferred**. Several findings looked scary in isolation but have non-obvious
 saving graces from the larger threat model; see `docs/threat-model.md`.
 
+The actionable backlog (deferred items across all passes) lives in
+[`deferred.md`](deferred.md). This file is the narrative — what we
+found, what we fixed, and why we chose not to fix the rest. Each
+"Deferred" section below points the corresponding item at
+`deferred.md`.
+
 ## Method
 
 For each crate we ran a structured pass: spawn an audit agent with a
@@ -193,26 +199,8 @@ Total: 51 unit tests across the workspace (5 pre-existing + 46 added).
 
 ## Things still on the deferred list
 
-In priority order if anyone wants to pick them up:
-
-1. **Cryptographic `ChannelId` binding** (HMAC over
-   `(client_addr, peer_id, server_secret)`). Closes:
-   - `recv_candidate` injection on both hub_server.rs and hub_as_node.rs.
-2. **Hub admin token middleware** (`SAMIZDAT_HUB_ADMIN_TOKEN`). Closes:
-   - H4 (`/blacklisted-ips` unauth).
-   - Adds DELETE route for blacklisted IPs.
-3. **Per-IP connection cap in hub QUIC accept** (H11), and move the
-   `try_acquire` ahead of `accept_bincode_transports` (H12).
-4. **Replay-resistance with signed timestamps**: add an authenticated
-   timestamp to the messages and verify freshness in `check`. Currently
-   the only protection beyond the per-nonce dedup is the throttle.
-5. **`Riddle::riddle_for` padding** (P14): leaks message length.
-   Bundle with whatever the next wire-format break is.
-6. **`Matcher` cleanup-task bound** (B13): use `tokio::time::DelayQueue`.
-7. **Per-entity scoping of `ManageSeries`** (B15 root cause). Then
-   strip private-key bytes from list responses.
-8. **Hub HTTP body size cap** if the proxy is ever pointed at a remote
-   node.
+Moved to [`deferred.md`](deferred.md) (priority section + per-area
+subsections).
 
 ## Second pass: high-level / protocol findings
 
@@ -270,17 +258,7 @@ file-sharing algorithm, and hub-to-hub federation. Findings carried tags
 
 ### Deferred from this pass
 
-- **SP-D1 / Reset-trigger drops loser direction (silent candidate loss
-  across reconnect).** `node/src/system/mod.rs::HubConnectionInner::connect`
-  uses `future::select` on the two reset receivers. When one direction
-  fires, the surviving direction keeps running on the dying QUIC
-  connection. Affects both node-hub and hub-hub
-  (`hub_as_node::connect`). The naive fix (`connection.close()` on either
-  reset) regresses in flaky-network scenarios because it forces a full
-  re-handshake on every tarpc dispatch wobble; the right fix has the
-  new connection INHERIT the old `candidate_channels` so in-flight
-  queries can still see candidates while the new tarpc instances spin
-  up. Non-trivial refactor; not done here.
+See [`deferred.md`](deferred.md) "Second-pass deferred" (SP-D1).
 
 ### Confirmed not bugs
 

@@ -1,8 +1,8 @@
 [package]
 name = "samizdat-common"
-version = "0.1.0"
-authors = ["Pedro B Arruda <parruda@artmend.com.br>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["lmdb-rkv"]

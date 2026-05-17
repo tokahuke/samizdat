@@ -21,6 +21,11 @@ def main():
 
     env.set_env(buildspec["env"])
 
+    # Names declared in `env:` are the build-time environment and flow into
+    # the builder containers as well (otherwise `VERSION` and friends would
+    # be host-only and any container-side script reading them gets "").
+    builder_env = {name: os.environ[name] for name in buildspec["env"]}
+
     builders.ensure_images(
         buildspec.get("project", "builder"),
         buildspec["images"],
@@ -29,6 +34,7 @@ def main():
     builders.run_builders(
         buildspec.get("project", "builder"),
         buildspec["builders"],
+        env=builder_env,
         build=False,
     )
 

@@ -21,6 +21,18 @@ builders:
   rust:
     image: rust
     command: install/src/rust/build.sh
+    # Bind-mount the host's cargo cache so registry downloads + the git
+    # index survive across builds. `~` is expanded by the builder before
+    # the dict is handed to docker-py. `target/` is NOT mounted: the
+    # image bakes the source in via `COPY .`, so a target dir from the
+    # host would collide with the in-image one.
+    volumes:
+      ~/.cargo/registry:
+        bind: /root/.cargo/registry
+        mode: rw
+      ~/.cargo/git:
+        bind: /root/.cargo/git
+        mode: rw
 
 exports:
   js:
@@ -51,7 +63,7 @@ exports:
       samizdat-proxy.service: ~
       proxy.toml: ~
       install.sh:
-        run: x86_64-unknown-linux-gnu/hub/build-install.sh
+        run: x86_64-unknown-linux-gnu/proxy/build-install.sh
       samizdat-proxy:
         from: rust
         import: /build/target/x86_64-unknown-linux-gnu/release/samizdat-proxy
@@ -77,3 +89,6 @@ exports:
       samizdat-service.exe:
         from: rust
         import: /build/target/x86_64-pc-windows-gnu/release/samizdat-service.exe
+      samizdat-installer.exe:
+        from: rust
+        import: /build/install/src/x86_64-pc-windows-gnu/node/dist/samizdat-installer.exe

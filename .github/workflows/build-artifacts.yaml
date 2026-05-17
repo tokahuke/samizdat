@@ -29,7 +29,22 @@ jobs:
 
     - name: Setup virtualenv
       run: cd install && poetry install
-    
+
+    # The rust builder bind-mounts the host's `~/.cargo` into the
+    # container. Caching it across runs gives us a free dep download
+    # shortcut on warm builds. The key is keyed on every Cargo.lock so
+    # a dep bump invalidates; the restore-keys let unrelated bumps reuse
+    # most of the cache.
+    - name: Cache cargo registry + git
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          cargo-${{ runner.os }}-
+
     - name: Run install builder
       run: cd install && poetry run python builder
 

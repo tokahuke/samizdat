@@ -27,6 +27,10 @@ contract SamizdatIdentityStorage {
     }
 
     event SetIdentity(string identity, Entry from, Entry to);
+    // Privilege-relevant changes emit events so off-chain indexers can detect
+    // rotations and trigger cache invalidations.
+    event OperatorChanged(address indexed previousOperator, address indexed newOperator);
+    event OwnerChanged(address indexed previousOwner, address indexed newOwner);
 
     // Only the operator of the storage can do this.
     modifier operatorOnly() {
@@ -34,10 +38,30 @@ contract SamizdatIdentityStorage {
         _;
     }
 
-    // Changes the operator of this contract.
+    // Changes the operator of this contract. Either the storage `owner` or
+    // the current `operator` (i.e. the live `SamizdatIdentityV1` calling
+    // `deprecate(successor)`) may rotate. The owner path exists so a
+    // compromised operator can be evicted; the operator path exists so
+    // V1 -> V2 upgrade via `deprecate` works without the human owner
+    // needing to be online. Rejects the zero address (would brick the
+    // storage because `operatorOnly` would reject every caller forever).
     function setOperator(address newOperator) public {
-        require(msg.sender == operator || msg.sender == owner);
+        require(
+            msg.sender == operator || msg.sender == owner,
+            "Only the current operator or storage owner can rotate the operator"
+        );
+        require(newOperator != address(0), "Operator cannot be the zero address");
+        emit OperatorChanged(operator, newOperator);
         operator = newOperator;
+    }
+
+    // Transfers storage ownership. Without this, a lost deployer key bricks
+    // the storage forever (operator can be rotated but owner is permanent).
+    function changeOwner(address newOwner) public {
+        require(msg.sender == owner, "Only the contract owner can change owner");
+        require(newOwner != address(0), "Owner cannot be the zero address");
+        emit OwnerChanged(owner, newOwner);
+        owner = newOwner;
     }
 
     // Method for getting identitied to another contract.
@@ -71,6 +95,11 @@ contract SamizdatIdentityV1 {
         owner = payable(msg.sender);
     }
 
+    event OwnerChanged(address indexed previousOwner, address indexed newOwner);
+    event PriceChanged(uint previousPrice, uint newPrice);
+    event Deprecated(address indexed superseedingContract);
+    event Withdrawn(address indexed to, uint amount);
+
     modifier isOwner() {
         require(msg.sender == owner, "Only the contract owner can run this");
         _;
@@ -87,23 +116,35 @@ contract SamizdatIdentityV1 {
 
     // Changes the owner of the smart contract.
     function changeOwner(address payable newOwner) public isOwner {
+        require(newOwner != address(0), "Owner cannot be the zero address");
+        emit OwnerChanged(owner, newOwner);
         owner = newOwner;
     }
 
     // Changes the price of an identity.
     function setPrice(uint newPrice) public isOwner {
+        emit PriceChanged(price, newPrice);
         price = newPrice;
     }
 
-    // Allows the owner to withdraw funds from the contract.
+    // Allows the owner to withdraw funds from the contract. Uses `.call`
+    // rather than the legacy `.transfer` because `.transfer` forwards only
+    // 2300 gas, which breaks recipients whose receive hook costs more
+    // (multisigs, smart-contract wallets like Gnosis Safe). Reverts cleanly
+    // on insufficient balance and propagates inner reverts.
     function withdraw(uint amount) public isOwner {
-        owner.transfer(amount);
+        require(amount <= address(this).balance, "Insufficient balance");
+        (bool ok, ) = owner.call{value: amount}("");
+        require(ok, "Withdraw transfer failed");
+        emit Withdrawn(owner, amount);
     }
 
     // Deprecates this contract in favor of another one.
     function deprecate(address _superseedingContract) public isOwner {
+        require(_superseedingContract != address(0), "Superseding contract cannot be zero");
         isDeprecated = true;
         superseedingContract = _superseedingContract;
+        emit Deprecated(_superseedingContract);
         SamizdatIdentityStorage(identityStorage).setOperator(superseedingContract);
     }
 

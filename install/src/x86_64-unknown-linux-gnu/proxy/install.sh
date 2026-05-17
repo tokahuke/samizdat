@@ -14,14 +14,14 @@ if [ "$(expr substr $(uname -s) 1 5)" != "Linux" ]; then
 fi
 
 # Set preifx and a temporary work directory:
-urlprefix=http://proxy.hubfederation.com/~get-samizdat/$VERSION/x86_64-unknown-linux-gnu/proxy
+urlprefix=https://proxy.hubfederation.com/~get-samizdat/$VERSION/x86_64-unknown-linux-gnu/proxy
 tmpdir=/tmp/samizdat-install-$RANDOM
 mkdir -p $tmpdir && cd $tmpdir
 
 # Download artifacts:
 curl $urlprefix/samizdat-proxy > samizdat-proxy
 curl $urlprefix/samizdat-proxy.service > samizdat-proxy.service
-curl $urlprefix/proxy.toml > nproxyode.toml
+curl $urlprefix/proxy.toml > proxy.toml
 
 # Mark executables:
 chmod +x samizdat-proxy

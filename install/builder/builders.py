@@ -1,6 +1,7 @@
 import docker
 import docker.errors
 import json
+import os
 
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
@@ -79,7 +80,29 @@ def ensure_images(
             pass
 
 
-def _run_builder(name: str, spec: dict[str, Any], build: bool) -> None:
+def _expand_volumes(spec: dict[str, Any]) -> dict[str, Any]:
+    """Expand `~` and `$VAR` in volume source paths and ensure each
+    host path exists on disk. docker-py errors confusingly if it does
+    not (and the image's own copy would shadow the empty mount)."""
+    raw = spec.get("volumes")
+    if not raw:
+        return spec
+    expanded: dict[str, Any] = {}
+    for src, mount in raw.items():
+        host = os.path.expandvars(os.path.expanduser(src))
+        os.makedirs(host, exist_ok=True)
+        expanded[host] = mount
+    return {**spec, "volumes": expanded}
+
+
+def _run_builder(
+    name: str,
+    spec: dict[str, Any],
+    env: dict[str, str],
+    build: bool,
+) -> None:
+    spec = _expand_volumes(spec)
+
     def get() -> bool:
         try:
             container = client().containers.get(name)
@@ -98,7 +121,10 @@ def _run_builder(name: str, spec: dict[str, Any], build: bool) -> None:
     def create():
         print(f"running container {name}...")
 
-        container = client().containers.run(**{**spec, "name": name}, detach=True)
+        container = client().containers.run(
+            **{**spec, "name": name, "environment": env},
+            detach=True,
+        )
 
         for line in container.logs(stream=True):
             line: bytes
@@ -124,16 +150,20 @@ def _run_builder(name: str, spec: dict[str, Any], build: bool) -> None:
 def run_builders(
     project: str,
     builders: dict[str, dict[str, Any]] | None,
+    env: dict[str, str] | None = None,
     build: bool = False,
 ) -> None:
     if builders is None:
         return
+
+    container_env = env or {}
 
     with ThreadPoolExecutor() as exec:
         for _ in exec.map(
             lambda item: _run_builder(
                 f"{project}_{item[0]}",
                 {**item[1], "image": f'{project}_{item[1]["image"]}'},
+                container_env,
                 build,
             ),
             builders.items(),

@@ -7,8 +7,9 @@ resource "digitalocean_droplet" "samizdat_testbed" {
   ipv6          = true
   monitoring    = true
   user_data     = file("resources/droplet-config.yaml")
-  ssh_keys = [
-    "31459399", # "Deploy Testbed" 
-    "31256334", # "acer-nitro5-garuda-linux"
-  ]
+  # Only the TF-managed Deploy Testbed key; the bootstrap workflow uses
+  # it via the matching GH secret. Add personal keys out-of-band on the
+  # DO console if you want a human login -- keeping them in TF would
+  # tie destroy/apply to a specific developer machine.
+  ssh_keys = [digitalocean_ssh_key.deploy_testbed.id]
 }

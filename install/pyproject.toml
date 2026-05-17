@@ -2,7 +2,7 @@
 name = "install"
 version = "0.1.0"
 description = ""
-authors = ["Pedro Arruda <parruda@findhotel.net>"]
+authors = ["Pedro B Arruda <pedrobittencourt3@gmail.com>"]
 readme = "readme.md"
 package-mode = false
 

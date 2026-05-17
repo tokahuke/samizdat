@@ -1,2 +1,4 @@
 samizdat-node.exe
+samizdat-service.exe
 samizdat.exe
+samizdat-installer.exe
