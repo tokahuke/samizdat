@@ -178,17 +178,22 @@ jobs:
           ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
             root@${{ secrets.TESTBED_HOST }} bash -s <<'EOSSH' || true
             set +e
-            echo "--- systemctl status (all 3) ---"
-            systemctl status samizdat-hub samizdat-node samizdat-proxy --no-pager -l | head -60
-            echo "--- list unit files ---"
-            systemctl list-unit-files 'samizdat*'
-            echo "--- subscriptions ---"
-            samizdat subscription ls 2>&1 | head -20
-            echo "--- hubs ---"
-            samizdat hub ls 2>&1 | head -10
-            echo "--- raw journal tail ---"
-            journalctl --no-pager -n 80 SYSLOG_IDENTIFIER=samizdat-node
-            journalctl --no-pager -n 40 SYSLOG_IDENTIFIER=samizdat-hub
+            echo "--- ss UDP listeners ---"
+            ss -ulnp | head -20
+            echo "--- systemctl status samizdat-hub ---"
+            systemctl status samizdat-hub --no-pager -l | head -30
+            echo "--- systemctl status samizdat-node ---"
+            systemctl status samizdat-node --no-pager -l | head -30
+            echo "--- samizdat hub ls (CLI) ---"
+            samizdat hub ls 2>&1
+            echo "--- samizdat subscription ls (CLI) ---"
+            samizdat subscription ls 2>&1
+            echo "--- local-loopback probe of proxy ---"
+            curl -sS -o /dev/null -w "loopback HTTP %{http_code}\n" --max-time 5 http://localhost:4510/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/install.sh
+            echo "--- journalctl -u samizdat-hub ---"
+            journalctl -u samizdat-hub --no-pager -n 30
+            echo "--- journalctl -u samizdat-node ---"
+            journalctl -u samizdat-node --no-pager -n 30
           EOSSH
           exit 1
 
