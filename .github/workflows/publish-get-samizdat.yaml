@@ -139,6 +139,18 @@ jobs:
           "$CLI" --data "$DATA_DIR" import
           "$CLI" --data "$DATA_DIR" commit --release
 
+      # Install the TESTBED SSH key so we can dump logs on failure.
+      # Separate from the deploy key for the submodule.
+      - name: Install testbed SSH key (for diagnostics)
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.TESTBED_SSH_KEY }}
+          name: id_testbed
+          known_hosts: placeholder
+          if_key_exists: replace
+      - name: Trust testbed host key
+        run: ssh-keyscan -H "${{ secrets.TESTBED_HOST }}" >> ~/.ssh/known_hosts
+
       # The testbed is subscribed to get-samizdat (set up by the
       # bootstrap workflow), so when it sees the announcement it
       # should eager-fetch via `Edition::refresh`. Poll the public
@@ -157,7 +169,16 @@ jobs:
             sleep 5
           done
           echo "Testbed did not mirror within 5 minutes; investigate."
+          echo "=== runner samizdat-node tail ==="
           tail -100 /tmp/samizdat-node.log
+          echo "=== testbed journal: samizdat-node last 200 lines ==="
+          ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
+            root@${{ secrets.TESTBED_HOST }} \
+            'journalctl -u samizdat-node --no-pager -n 200' || true
+          echo "=== testbed journal: samizdat-hub last 100 lines ==="
+          ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
+            root@${{ secrets.TESTBED_HOST }} \
+            'journalctl -u samizdat-hub --no-pager -n 100' || true
           exit 1
 
       - name: Tear down
