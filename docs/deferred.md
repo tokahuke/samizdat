@@ -88,6 +88,47 @@ A focused federation-path audit pass is warranted before relying on
 multi-hub deployments. Until then, treat single-hub topologies as
 the trusted configuration.
 
+## Publisher persistence (the "who keeps your bytes online?" problem)
+
+In a content-addressed network the bytes only exist where someone
+has them on disk. A publisher with an ephemeral or flappy presence
+(laptop, CI runner, anything residential) is a single point of
+failure for everything they sign until the data has propagated to
+nodes that stay online.
+
+The current mitigation: `Edition::refresh` (`node/src/models/series.rs`)
+eager-fetches the full inventory and spawns parallel object fetches
+the moment a subscribed node sees an announcement. So in practice the
+publisher only needs to stay online for the *propagation window* --
+the time from announce to "first long-lived subscriber has the whole
+edition." For the `get-samizdat` collection that means Pedro's laptop
+needs to stay up minutes-to-hours after `samizdat collection update`
+until the testbed has mirrored.
+
+That's a workaround, not a fix. The publisher's network reachability
+is still the bottleneck for a window each publish. The unresolved
+real fix: a **paid pinning / mirror service tier**. A node that any
+publisher can hire to eagerly subscribe to their series and pin its
+content, taking the seeder role permanently so the publisher's
+laptop becomes irrelevant after announce. Economics are the hard
+part: who runs these nodes, how do they get paid, how is service
+quality enforced. Probably ties into the identity dapp on Polygon
+since payment + identity already live there.
+
+Smaller, near-term items that orbit this:
+
+- **Publisher-visible "is-current?" signal.** Today there is no
+  clean way for a publisher to know when a subscriber has finished
+  the eager fetch. CI publish workflows resort to black-box polling
+  (curl the proxy URL of a known object). A `samizdat subscription
+  is-current <series-key>` CLI or an HTTP admin endpoint on the
+  node would make sync points explicit.
+- **Pin-on-subscribe.** Even with eager fetch, the LRU eviction
+  policy can later drop objects. A "this series is pinned, never
+  evict" flag on the subscription record (with separate quota
+  accounting) would let an operator dedicate a node to mirroring a
+  set of series without juggling cache parameters.
+
 ## Blockchain (`blockchain/`)
 
 - **Commit-reveal for name registration.** Mempool front-running
