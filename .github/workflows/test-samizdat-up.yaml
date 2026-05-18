@@ -1,0 +1,178 @@
+name: test-samizdat-up
+
+# Matrix integration test for samizdat-up across the three supported
+# OS service managers (systemd, launchd, SCM). On each runner: build
+# locally, lay out a file:// dist tree at the conventional layout
+# samizdat-up expects, run `samizdat-up install node --from file://`,
+# verify the service is registered + running with OS-native commands,
+# then `samizdat-up uninstall node --purge` and verify it is gone.
+#
+# Failure on the windows job is the regression signal for Windows
+# install paths.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "samizdat-up/**"
+      - ".github/workflows/test-samizdat-up.yaml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            shell: bash
+            exe_suffix: ""
+            service_check: |
+              if ! systemctl is-active --quiet samizdat-node; then
+                echo "service is not active"
+                systemctl status samizdat-node --no-pager -l | head -40
+                exit 1
+              fi
+              echo "systemd reports samizdat-node active"
+            gone_check: |
+              if systemctl list-unit-files samizdat-node.service 2>/dev/null \
+                  | grep -q samizdat-node.service; then
+                echo "unit file still registered after uninstall"
+                exit 1
+              fi
+              echo "systemd no longer knows about samizdat-node"
+
+          - runner: macos-latest
+            triple: aarch64-apple-darwin
+            shell: bash
+            exe_suffix: ""
+            service_check: |
+              if ! sudo launchctl print system/com.samizdat.node > /dev/null 2>&1; then
+                echo "launchd does not know about com.samizdat.node"
+                exit 1
+              fi
+              echo "launchd reports com.samizdat.node loaded"
+            gone_check: |
+              if sudo launchctl print system/com.samizdat.node > /dev/null 2>&1; then
+                echo "launchd still has com.samizdat.node after uninstall"
+                exit 1
+              fi
+              echo "launchd no longer knows about com.samizdat.node"
+
+          - runner: windows-latest
+            triple: x86_64-pc-windows-gnu
+            shell: bash
+            exe_suffix: ".exe"
+            service_check: |
+              # `sc query` returns non-zero when the service does not
+              # exist; success means it is at least registered. Grep
+              # for RUNNING to also confirm SCM thinks it is up.
+              sc.exe query samizdat-node
+              sc.exe query samizdat-node | grep -i RUNNING
+            gone_check: |
+              # After uninstall `sc query` should fail with "service
+              # does not exist". A successful query means we did not
+              # clean up.
+              if sc.exe query samizdat-node 2>/dev/null; then
+                echo "SCM still has samizdat-node after uninstall"
+                exit 1
+              fi
+              echo "SCM no longer knows about samizdat-node"
+
+    name: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.triple }}
+
+      # On windows-latest the default target is msvc; we want gnu so
+      # the binary's `host_target_triple()` matches the published
+      # binaries. Requires the mingw runtime to link.
+      - name: Install mingw (windows only)
+        if: matrix.runner == 'windows-latest'
+        run: choco install -y mingw
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-test-${{ matrix.runner }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-${{ matrix.runner }}-
+
+      - name: Cache cargo target dir
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: target-test-${{ matrix.runner }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: target-test-${{ matrix.runner }}-
+
+      - name: Build samizdat-up + samizdat-node + samizdat (target triple)
+        # Build for the exact triple we will tell samizdat-up to fetch
+        # from, so its `host_target_triple()` value matches the dir we
+        # are about to lay out.
+        run: |
+          cargo build --release --target ${{ matrix.triple }} \
+            -p samizdat-up \
+            -p samizdat-node \
+            -p samizdat
+
+      - name: Lay out file:// dist tree
+        run: |
+          set -e
+          STAGE="${RUNNER_TEMP}/dist"
+          BASE="$STAGE/latest/${{ matrix.triple }}"
+          BIN="target/${{ matrix.triple }}/release"
+          rm -rf "$STAGE"
+          mkdir -p "$BASE/samizdat-up" "$BASE/node"
+          cp "$BIN/samizdat-up${{ matrix.exe_suffix }}" "$BASE/samizdat-up/"
+          cp "$BIN/samizdat-node${{ matrix.exe_suffix }}" "$BASE/node/"
+          cp "$BIN/samizdat${{ matrix.exe_suffix }}"      "$BASE/node/"
+          find "$STAGE" -type f
+          echo "DIST_URL=file://$STAGE" >> $GITHUB_ENV
+
+      - name: samizdat-up install node
+        if: matrix.runner != 'windows-latest'
+        run: |
+          sudo target/${{ matrix.triple }}/release/samizdat-up install node --from "$DIST_URL"
+
+      - name: samizdat-up install node (windows)
+        if: matrix.runner == 'windows-latest'
+        run: |
+          target/${{ matrix.triple }}/release/samizdat-up.exe install node --from "$DIST_URL"
+
+      - name: Service check
+        run: |
+          ${{ matrix.service_check }}
+
+      - name: samizdat-up list
+        run: |
+          target/${{ matrix.triple }}/release/samizdat-up${{ matrix.exe_suffix }} list
+
+      - name: samizdat-up uninstall node --purge
+        if: matrix.runner != 'windows-latest'
+        run: |
+          sudo target/${{ matrix.triple }}/release/samizdat-up uninstall node --purge
+
+      - name: samizdat-up uninstall node --purge (windows)
+        if: matrix.runner == 'windows-latest'
+        run: |
+          target/${{ matrix.triple }}/release/samizdat-up.exe uninstall node --purge
+
+      - name: Gone check
+        run: |
+          ${{ matrix.gone_check }}
