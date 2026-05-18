@@ -4644,13 +4644,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "samizdat-service"
-version = "0.1.0"
-dependencies = [
- "windows-service",
-]
-
-[[package]]
 name = "samizdat-up"
 version = "0.1.0"
 dependencies = [
