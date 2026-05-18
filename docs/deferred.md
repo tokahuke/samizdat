@@ -156,14 +156,34 @@ Smaller, near-term items that orbit this:
 
 No known deferred items.
 
-## Install pipeline (`install/`)
+## Install pipeline (`samizdat-up`, `install/`, brew)
 
-- **Switch `get-samizdat` install scripts to HTTPS.** Currently
-  plain HTTP. Also publish SHA-256 / signatures of all artifacts
-  next to them.
-- **Homebrew formula `sha256`.** The line is commented out in
-  `install/src/aarch64-apple-darwin/homebrew/Samizdat.rb` and must
-  be templated in at build time.
+- **`samizdat-up install` on Windows.** Currently a stub that bails;
+  the SCM registration logic in the deleted
+  `install/src/x86_64-pc-windows-gnu/node/samizdat-service` needs to
+  be ported into `samizdat-up/src/install/windows.rs`. Two design
+  choices to pick from: (a) make `samizdat-node.exe` SCM-aware
+  itself by calling `windows_service::service_dispatcher::start`
+  from its main, so `sc.exe create` is enough; (b) have samizdat-up
+  also act as the SCM wrapper, with a `samizdat-up daemon <role>`
+  hidden subcommand that SCM points at. (a) is cleaner; (b) reuses
+  the old wrapper pattern.
+- **Matrix integration test workflow** for samizdat-up
+  (`.github/workflows/test-samizdat-up.yaml`). Per the plan: ubuntu
+  + macos + windows runners, each `cargo build`, `samizdat-up
+  install node --from file://`, OS-native service check,
+  `samizdat-up uninstall --purge`, OS-native gone check. The
+  Windows path of this workflow is what would catch regressions in
+  the windows branch above. Pedro has no Windows machine to test
+  on, so this matrix IS the Windows test.
+- **Homebrew formula `sha256` + versioned URL.** The current formula
+  pulls from `latest/`, no sha pin. To pass `brew install` cleanly
+  it needs version + sha256 baked in per release. Wire into the
+  publish workflow: after the sha of the macOS samizdat-up tarball
+  is known, generate a new `Samizdat.rb` and push to the
+  `homebrew-samizdat` tap repo.
+- **Switch `get-samizdat` install scripts to HTTPS.** (Already done
+  in `install.sh.template`; remove from this list once verified.)
 - **`get-samizdat/.Samizdat.priv` history verification.** The
   install collection has a series key; verify nothing leaked it via
   `git log -p -- '.Samizdat.priv'` or equivalent.
