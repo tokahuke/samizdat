@@ -123,12 +123,13 @@ pub fn list_versions(remote: bool) -> Result<()> {
     // local binaries are pinned to it -- different binaries can be at
     // different versions (e.g. samizdat-up updated but daemons not
     // yet), and lumping them into a single "installed" tag would lie.
+    // version -> binary names at that version. Populated from
+    // `installed_binary_paths()`; the running samizdat-up's own
+    // version is reported on the header line below and does not get
+    // its own entry (the installed samizdat-up at the platform's
+    // standard path is enumerated like any other binary).
     let mut bins_at: std::collections::BTreeMap<String, Vec<&'static str>> =
         std::collections::BTreeMap::new();
-    bins_at
-        .entry(env!("CARGO_PKG_VERSION").to_owned())
-        .or_default()
-        .push("samizdat-up (running)");
 
     println!("samizdat-up {} (this binary)", env!("CARGO_PKG_VERSION"));
 
