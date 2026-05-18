@@ -243,26 +243,76 @@ jobs:
           known_hosts: placeholder
           if_key_exists: replace
 
-      # Poll the freshly-built linux samizdat-up binary. install.sh
-      # would be a false-positive (its content is stable across
-      # rebuilds because the template only substitutes $VERSION), but
-      # the binary's sha changes every build, so a sha match here
-      # really does mean "the testbed has this exact build".
+      # Two-phase mirror wait:
+      #
+      #  1. Poll for the linux samizdat-up binary. Its sha changes
+      #     every build, so a match really means "the testbed received
+      #     the announcement and finished fetching this object". Once
+      #     it matches, federation + fetch path are proven.
+      #
+      #  2. Then poll, more loosely, every other critical artifact
+      #     until they all 200. The testbed's eager-fetch runs them in
+      #     parallel; we just need to keep the publisher node alive
+      #     until they all land. If a curl times out, that means the
+      #     testbed is still federated-fetching from us, which is the
+      #     whole point of staying online a bit longer.
       - name: Wait for testbed to mirror
         run: |
-          PROBE_URL="https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up"
+          BASE="https://proxy.hubfederation.com/~get-samizdat/latest"
+
+          # Phase 1: sha-match on linux samizdat-up.
           LOCAL_PATH="install/get-samizdat/dist/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up"
           EXPECTED_SHA=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
-          echo "expecting sha256=$EXPECTED_SHA"
+          echo "phase 1: expecting sha256=$EXPECTED_SHA"
           for i in $(seq 1 60); do
-            GOT_SHA=$(curl -sS --max-time 30 "$PROBE_URL" | sha256sum | awk '{print $1}')
+            GOT_SHA=$(curl -sS --max-time 30 "$BASE/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up" | sha256sum | awk '{print $1}')
             if [ "$GOT_SHA" = "$EXPECTED_SHA" ]; then
-              echo "Testbed serving new edition after $((i*5))s"
+              echo "phase 1 ok after $((i*5))s"
+              break
+            fi
+            echo "phase 1 attempt $i: got sha=$GOT_SHA, retrying"
+            sleep 5
+            if [ $i -eq 60 ]; then
+              echo "phase 1 timeout" >&2
+              exit 1
+            fi
+          done
+
+          # Phase 2: poll every remaining published file until 200.
+          paths=(
+            "install.sh"
+            "x86_64-unknown-linux-gnu/node/samizdat-node"
+            "x86_64-unknown-linux-gnu/node/samizdat"
+            "x86_64-unknown-linux-gnu/hub/samizdat-hub"
+            "x86_64-unknown-linux-gnu/proxy/samizdat-proxy"
+            "aarch64-apple-darwin/samizdat-up/samizdat-up"
+            "aarch64-apple-darwin/node/samizdat-node"
+            "aarch64-apple-darwin/node/samizdat"
+            "x86_64-pc-windows-gnu/samizdat-up/samizdat-up.exe"
+            "x86_64-pc-windows-gnu/node/samizdat-node.exe"
+            "x86_64-pc-windows-gnu/node/samizdat.exe"
+          )
+          # The testbed needs ~60s per object in the worst case (its
+          # `query_with_retry` is bounded by Duration::from_secs(60)
+          # per object, but objects fetch in parallel).
+          deadline=$((SECONDS + 300))
+          while [ $SECONDS -lt $deadline ]; do
+            remaining=()
+            for p in "${paths[@]}"; do
+              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$BASE/$p" || echo "000")
+              if [ "$code" != "200" ]; then
+                remaining+=("$p")
+              fi
+            done
+            if [ ${#remaining[@]} -eq 0 ]; then
+              echo "phase 2 ok: all paths served"
               exit 0
             fi
-            echo "Attempt $i: got sha=$GOT_SHA, retrying..."
-            sleep 5
+            echo "phase 2: ${#remaining[@]} paths still missing -- ${remaining[*]}"
+            sleep 10
           done
+          echo "phase 2 timeout: paths still missing: ${remaining[*]}" >&2
+          exit 1
           echo "Testbed did not mirror within 5 minutes; investigate." >&2
           tail -100 /tmp/samizdat-node.log
           ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
