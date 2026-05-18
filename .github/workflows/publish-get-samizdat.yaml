@@ -1,18 +1,18 @@
 name: Publish get-samizdat
 
-# Sign + announce a new edition of the `get-samizdat` series straight
-# from CI. The runner spawns a temporary samizdat-node, connects it to
-# the testbed hub, writes the series private key (kept as the
-# `GET_SAMIZDAT_PRIV` action secret) into the working tree just long
-# enough to `samizdat import` + `samizdat commit`, then polls the
-# public proxy URL until the testbed has eager-fetched the new edition.
-# Once that confirms, the runner can die: the testbed is now the
-# canonical mirror.
+# Build all binaries for every supported (os, arch) target, lay them
+# into the get-samizdat collection's dist tree, sign a fresh edition
+# from CI, announce, and poll the public testbed until it has
+# eager-fetched the new content.
+#
+# Cross-compilation is via cargo-zigbuild on an ubuntu-latest runner.
+# The macOS SDK comes from `install/src/rust/MacOSX14.5.tar.xz` (an
+# in-tree tarball). No docker images, no python builder.
 #
 # Trust trade-off: this puts the series private key in reach of CI,
 # which is a wider blast radius than "lives on Pedro's laptop only".
-# See docs/deferred.md "Publisher persistence" for the long-term fix
-# (paid pinning tier). For now this is "the hacky solution."
+# See `docs/deferred.md` "Publisher persistence" for the long-term
+# fix.
 
 on:
   workflow_dispatch:
@@ -27,13 +27,14 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     env:
-      TARGET: x86_64-unknown-linux-gnu
+      ZIG_VERSION: "0.13.0"
       NODE_PORT: "4510"
       DATA_DIR: /tmp/samizdat-publish-data
 
     steps:
-      # The get-samizdat submodule is fetched over SSH; same deploy key
-      # the build-artifacts workflow uses.
+      # Deploy key for the get-samizdat submodule (the public release
+      # repo). Installed BEFORE checkout because the recursive
+      # submodule clone needs it.
       - name: Install get-samizdat deploy key
         uses: shimataro/ssh-key-action@v2
         with:
@@ -52,21 +53,36 @@ jobs:
           persist-credentials: false
 
       # actions/checkout sets `url.https://github.com/.insteadOf
-      # git@github.com:` globally, which converts the submodule's SSH
-      # URL into HTTPS and skips our deploy key. Drop the rewrite,
-      # then fetch the submodule the normal way.
+      # git@github.com:`, which converts the submodule's SSH URL to
+      # HTTPS and skips our deploy key. Drop the rewrite, fetch
+      # manually.
       - name: Fetch get-samizdat submodule over SSH
         run: |
           git config --global --unset-all url.https://github.com/.insteadOf || true
           git submodule update --init --recursive
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain + cross targets
         uses: dtolnay/rust-toolchain@nightly
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-apple-darwin
 
-      # Cache key includes the runner image (ubuntu-22.04) so we don't
-      # restore target/ built against a different glibc.
+      - name: Install zig + cargo-zigbuild
+        run: |
+          set -e
+          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
+            | sudo tar -xJf - -C /opt
+          sudo ln -sf "/opt/zig-linux-x86_64-${ZIG_VERSION}/zig" /usr/local/bin/zig
+          zig version
+          cargo install cargo-zigbuild --locked
+
+      - name: Extract macOS SDK
+        run: |
+          set -e
+          sudo mkdir -p /opt/sdks
+          sudo tar -xJf install/src/rust/MacOSX14.5.tar.xz -C /opt/sdks
+          ls /opt/sdks
+          echo "SDKROOT=/opt/sdks/MacOSX14.5.sdk" >> $GITHUB_ENV
+
       - name: Cache cargo registry + git
         uses: actions/cache@v4
         with:
@@ -81,74 +97,99 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: target-publish-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: target-publish-multi-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            target-publish-${{ runner.os }}-
+            target-publish-multi-${{ runner.os }}-
 
-      - name: Build all four Linux binaries
-        # node + CLI for the runner's own publishing node; hub + proxy
-        # so we have artifacts to put into the get-samizdat dist/ tree.
+      - name: Build for x86_64-unknown-linux-gnu
+        # Full daemon set on Linux: node + hub + proxy + cli + samizdat-up.
         run: |
-          cargo build --release --target $TARGET \
+          cargo zigbuild --release --target x86_64-unknown-linux-gnu \
+            -p samizdat-up \
             -p samizdat \
             -p samizdat-node \
             -p samizdat-hub \
             -p samizdat-proxy
 
-      # Repopulate install/get-samizdat/dist/ from this build's outputs.
-      # The submodule's checked-in dist/ has historically been stale (it
-      # is regenerated by `build-artifacts.yaml`'s python builder), so
-      # mirror the bits of that pipeline we need to make `samizdat
-      # commit` sign fresh, real content.
-      #
-      # Scoped to Linux x86_64 today: that is the platform the testbed
-      # actually serves install scripts from. Mac and Windows
-      # artifacts still come through build-artifacts.yaml; merging the
-      # two workflows is a TODO.
-      - name: Regenerate dist/ for x86_64-unknown-linux-gnu
+      - name: Build for x86_64-pc-windows-gnu
+        # Node + cli + samizdat-up only. Hub and proxy have unix-only
+        # deps that do not cross-compile.
+        run: |
+          cargo zigbuild --release --target x86_64-pc-windows-gnu \
+            -p samizdat-up \
+            -p samizdat \
+            -p samizdat-node
+
+      - name: Build for aarch64-apple-darwin
+        run: |
+          cargo zigbuild --release --target aarch64-apple-darwin \
+            -p samizdat-up \
+            -p samizdat \
+            -p samizdat-node
+
+      - name: Lay out dist/
         run: |
           set -e
-          export VERSION="$(cargo metadata --format-version=1 --no-deps \
-              | python3 -c "import json,sys; m=json.load(sys.stdin); print(next(p['version'] for p in m['packages'] if p['name']=='samizdat-common'))")"
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
           echo "VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
           REPO_ROOT="${{ github.workspace }}"
-          SRC="$REPO_ROOT/install/src/x86_64-unknown-linux-gnu"
-          BIN="$REPO_ROOT/target/$TARGET/release"
           DIST="$REPO_ROOT/install/get-samizdat/dist"
-
           rm -rf "$DIST"
-          for tag in latest "$VERSION"; do
-            for role in node hub proxy; do
-              out="$DIST/$tag/x86_64-unknown-linux-gnu/$role"
-              mkdir -p "$out"
-              cp "$SRC/$role/samizdat-$role.service" "$out/"
-              cp "$SRC/$role/$role.toml"             "$out/"
-              # Render install.sh via the per-role build-install.sh,
-              # which is `envsubst '$VERSION' < install.sh`. cwd has to
-              # be the role dir so the relative include of install.sh
-              # resolves.
-              ( cd "$SRC/$role" && bash build-install.sh ) > "$out/install.sh"
-              chmod +x "$out/install.sh"
-              # Per-role binaries.
-              cp "$BIN/samizdat-$role" "$out/"
+
+          # place(triple, ext, component, file_basename) -> places into
+          # dist/<version>/<triple>/<component>/<file_basename><ext> AND
+          # dist/latest/<triple>/<component>/<file_basename><ext>.
+          place() {
+            local triple="$1" ext="$2" component="$3" base="$4"
+            local src="$REPO_ROOT/target/$triple/release/${base}${ext}"
+            if [ ! -f "$src" ]; then
+              echo "missing: $src" >&2
+              exit 1
+            fi
+            for tag in latest "$VERSION"; do
+              local dst="$DIST/$tag/$triple/$component"
+              mkdir -p "$dst"
+              cp "$src" "$dst/${base}${ext}"
             done
-            # samizdat CLI ships under node/ per build.yaml's export
-            # layout (so `install.sh` can fetch it from the same
-            # subdir).
-            cp "$BIN/samizdat" "$DIST/$tag/x86_64-unknown-linux-gnu/node/"
+          }
+
+          # Linux x86_64: all five binaries.
+          place x86_64-unknown-linux-gnu ""    samizdat-up samizdat-up
+          place x86_64-unknown-linux-gnu ""    node        samizdat-node
+          place x86_64-unknown-linux-gnu ""    node        samizdat
+          place x86_64-unknown-linux-gnu ""    hub         samizdat-hub
+          place x86_64-unknown-linux-gnu ""    proxy       samizdat-proxy
+
+          # Windows x86_64: samizdat-up + node + cli (hub/proxy
+          # not cross-compilable today).
+          place x86_64-pc-windows-gnu    ".exe" samizdat-up samizdat-up
+          place x86_64-pc-windows-gnu    ".exe" node        samizdat-node
+          place x86_64-pc-windows-gnu    ".exe" node        samizdat
+
+          # macOS aarch64: same shape as Windows (no hub/proxy).
+          place aarch64-apple-darwin     ""    samizdat-up samizdat-up
+          place aarch64-apple-darwin     ""    node        samizdat-node
+          place aarch64-apple-darwin     ""    node        samizdat
+
+          # Bootstrap shim: a tiny shell script served at the root of
+          # the collection. Users curl-pipe-sh this; it detects their
+          # OS+arch, fetches the right samizdat-up, places it in
+          # /usr/local/bin, and prints what to do next.
+          for tag in latest "$VERSION"; do
+            mkdir -p "$DIST/$tag"
+            sed -e "s/__VERSION__/$VERSION/g" \
+                "$REPO_ROOT/install/src/install.sh.template" \
+                > "$DIST/$tag/install.sh"
+            chmod 755 "$DIST/$tag/install.sh"
           done
 
-          echo "--- regenerated tree ---"
-          find "$DIST" -maxdepth 5 -type f | sort
+          echo "--- dist tree (top 40) ---"
+          find "$DIST" -type f | sort | head -40
           echo "--- install.sh head ---"
-          head -3 "$DIST/latest/x86_64-unknown-linux-gnu/node/install.sh"
+          head -5 "$DIST/latest/install.sh"
 
-      # Write the series private key to the location `samizdat import`
-      # reads it from. The secret is base64'd; decode just-in-time so
-      # the plain bytes only live on the runner FS for the duration of
-      # the import + commit, then we delete it in the `always()` step
-      # at the end.
       - name: Materialise series private key
         run: |
           mkdir -p install/get-samizdat
@@ -156,10 +197,10 @@ jobs:
             > install/get-samizdat/.Samizdat.priv
           chmod 600 install/get-samizdat/.Samizdat.priv
 
-      - name: Start samizdat-node
+      - name: Start samizdat-node (publishing)
         run: |
           mkdir -p "$DATA_DIR"
-          nohup target/$TARGET/release/samizdat-node \
+          nohup target/x86_64-unknown-linux-gnu/release/samizdat-node \
             --data "$DATA_DIR" \
             --port "$NODE_PORT" \
             > /tmp/samizdat-node.log 2>&1 &
@@ -181,12 +222,9 @@ jobs:
             tail -50 /tmp/samizdat-node.log
             exit 1
           fi
-          # GH runners are IPv4-only; UseBoth tries IPv6 first and
-          # times out before falling back. The HTTP API deserialises
-          # the variant by its CamelCase name (not the kebab-case
-          # FromStr in common/src/address.rs), so it's `EnsureIpv4`.
+          # GH runners are IPv4-only; UseBoth times out trying IPv6
+          # first. The HTTP API expects the CamelCase variant name.
           "$CLI" --data "$DATA_DIR" hub new testbed.hubfederation.com EnsureIpv4
-          # Brief settle: hub connection handshake before we announce.
           sleep 5
 
       - name: Import + commit edition
@@ -197,11 +235,6 @@ jobs:
           "$CLI" --data "$DATA_DIR" import
           "$CLI" --data "$DATA_DIR" commit --release
 
-      # Install the TESTBED SSH key so we can dump logs on failure.
-      # Separate from the deploy key for the submodule. The diagnostic
-      # ssh below uses `StrictHostKeyChecking=no`, so we don't need a
-      # known_hosts entry (ssh-keyscan is flaky enough to be its own
-      # failure mode).
       - name: Install testbed SSH key (for diagnostics)
         uses: shimataro/ssh-key-action@v2
         with:
@@ -210,53 +243,37 @@ jobs:
           known_hosts: placeholder
           if_key_exists: replace
 
-      # The testbed is subscribed to get-samizdat (set up by the
-      # bootstrap workflow), so when it sees the announcement it
-      # should eager-fetch via `Edition::refresh`. Poll the public
-      # proxy URL until it serves the SHA we just baked. We can't just
-      # check for HTTP 200 because a previous edition's install.sh
-      # will already 200; we need to verify the *content* matches the
-      # edition we are publishing right now.
+      # Sha-check the install.sh shim because it embeds the version
+      # number, so its content changes every release. Polling a binary
+      # would also work but adds multi-MB curls per attempt.
       - name: Wait for testbed to mirror
         run: |
-          PROBE_URL="https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/install.sh"
-          LOCAL_PATH="install/get-samizdat/dist/latest/x86_64-unknown-linux-gnu/node/install.sh"
+          PROBE_URL="https://proxy.hubfederation.com/~get-samizdat/latest/install.sh"
+          LOCAL_PATH="install/get-samizdat/dist/latest/install.sh"
           EXPECTED_SHA=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
           echo "expecting sha256=$EXPECTED_SHA"
           for i in $(seq 1 60); do
             GOT_SHA=$(curl -sS --max-time 10 "$PROBE_URL" | sha256sum | awk '{print $1}')
             if [ "$GOT_SHA" = "$EXPECTED_SHA" ]; then
-              echo "Testbed serving new edition after ${i} * 5s = $((i*5))s"
+              echo "Testbed serving new edition after $((i*5))s"
               exit 0
             fi
             echo "Attempt $i: got sha=$GOT_SHA, retrying..."
             sleep 5
           done
-          echo "Testbed did not mirror within 5 minutes; investigate."
-          echo "=== runner samizdat-node tail ==="
+          echo "Testbed did not mirror within 5 minutes; investigate." >&2
           tail -100 /tmp/samizdat-node.log
-          echo "=== testbed diagnostics ==="
           ssh -i ~/.ssh/id_testbed -o StrictHostKeyChecking=no \
             root@${{ secrets.TESTBED_HOST }} bash -s <<'EOSSH' || true
             set +e
-            echo "--- ss UDP listeners ---"
+            echo "--- ss -ulnp ---"
             ss -ulnp | head -20
-            echo "--- systemctl status samizdat-hub ---"
-            systemctl status samizdat-hub --no-pager -l | head -30
-            echo "--- systemctl status samizdat-node ---"
-            systemctl status samizdat-node --no-pager -l | head -30
-            echo "--- samizdat hub ls (CLI) ---"
+            echo "--- samizdat hub ls ---"
             samizdat hub ls 2>&1
-            echo "--- samizdat connection ls (live hub links) ---"
-            samizdat connection ls 2>&1
-            echo "--- samizdat subscription ls (CLI) ---"
+            echo "--- samizdat subscription ls ---"
             samizdat subscription ls 2>&1
-            echo "--- local-loopback probe of proxy ---"
-            curl -sS -o /dev/null -w "loopback HTTP %{http_code}\n" --max-time 5 http://localhost:4510/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/install.sh
-            echo "--- journalctl -u samizdat-hub ---"
-            journalctl -u samizdat-hub --no-pager -n 30
-            echo "--- journalctl -u samizdat-node ---"
-            journalctl -u samizdat-node --no-pager -n 30
+            echo "--- journalctl samizdat-node ---"
+            journalctl -u samizdat-node --no-pager -n 60
           EOSSH
           exit 1
 
@@ -266,8 +283,4 @@ jobs:
           if [ -f /tmp/samizdat-node.pid ]; then
             kill "$(cat /tmp/samizdat-node.pid)" 2>/dev/null || true
           fi
-          # Belt and suspenders: the runner FS is destroyed at job
-          # end anyway, but explicitly removing the priv key is
-          # cheap insurance against e.g. a future change that
-          # uploads the workspace as an artifact.
           rm -f install/get-samizdat/.Samizdat.priv
