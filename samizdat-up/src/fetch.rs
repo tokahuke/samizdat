@@ -9,6 +9,8 @@
 //! signed edition.
 
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -110,10 +112,11 @@ fn strip_file_scheme(url: &str) -> Option<PathBuf> {
 /// are the source of truth (clap's `--version` reports the version
 /// baked in at build time).
 ///
-/// Remote listing: fetch `<origin>/latest/install.sh` and parse the
-/// version from its header comment. The collection does not expose a
-/// directory-listing API today, so we surface "latest" rather than an
-/// enumeration of all published editions.
+/// Remote listing: fetch the collection's signed `_inventory` (a JSON
+/// object mapping every published path to its content hash) and pull
+/// the set of versions out of the first path segment. This is the
+/// same inventory the proxy resolves objects against, so it is
+/// always in sync with what is actually fetchable.
 pub fn list_versions(remote: bool) -> Result<()> {
     println!("samizdat-up {} (this binary)", env!("CARGO_PKG_VERSION"));
 
@@ -137,9 +140,26 @@ pub fn list_versions(remote: bool) -> Result<()> {
 
     if remote {
         println!();
-        match latest_remote_version(DEFAULT_ORIGIN) {
-            Ok(v) => println!("Latest published version: {v}"),
-            Err(e) => println!("Could not query remote version: {e:#}"),
+        match fetch_remote_inventory(DEFAULT_ORIGIN) {
+            Ok(doc) => {
+                let versions = enumerate_versions(&doc);
+                let latest = resolve_latest_alias(&doc);
+                if versions.is_empty() {
+                    println!("No versions in the published inventory.");
+                } else {
+                    println!("Published versions:");
+                    for v in &versions {
+                        match &latest {
+                            Some(l) if l == v => println!("    {v}  (= latest)"),
+                            _ => println!("    {v}"),
+                        }
+                    }
+                    if latest.is_none() {
+                        println!("(`latest` alias did not match any published version)");
+                    }
+                }
+            }
+            Err(e) => println!("Could not query remote inventory: {e:#}"),
         }
     }
     Ok(())
@@ -169,17 +189,25 @@ fn query_version(path: &std::path::Path) -> Result<String> {
     Ok(first.to_owned())
 }
 
-/// Fetch `<origin>/latest/install.sh` and pull the version out of the
-/// `# samizdat-up bootstrap installer (X.Y.Z)` header that the publish
-/// workflow stamps in. The shim is small (a few KB) and is the one
-/// file the collection guarantees to keep at a stable path, so it is
-/// the cheapest "what is the current version" probe available without
-/// a directory-listing endpoint.
-fn latest_remote_version(origin: &str) -> Result<String> {
-    let url = format!("{origin}/latest/install.sh");
+/// Minimal shape of the collection's `_inventory` JSON, just enough
+/// to extract path->hash pairs. The full type lives in
+/// `node/src/models/collection.rs` (`Inventory`), but pulling that in
+/// would drag the whole node DB/model layer into samizdat-up; the
+/// on-the-wire JSON is stable enough to parse with a 4-line struct.
+#[derive(Debug, Deserialize)]
+struct InventoryDoc {
+    inventory: BTreeMap<String, String>,
+}
+
+/// Fetch `<origin>/_inventory` -- the inventory object that ships with
+/// every base edition of the collection (see `Inventory` in
+/// `node/src/models/collection.rs`). The proxy serves it like any
+/// other content-addressed object; we just decode the JSON.
+fn fetch_remote_inventory(origin: &str) -> Result<InventoryDoc> {
+    let url = format!("{origin}/_inventory");
     let body = if let Some(local_path) = strip_file_scheme(&url) {
         std::fs::read_to_string(&local_path)
-            .with_context(|| format!("reading local install.sh at {}", local_path.display()))?
+            .with_context(|| format!("reading local inventory at {}", local_path.display()))?
     } else {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -194,49 +222,98 @@ fn latest_remote_version(origin: &str) -> Result<String> {
         }
         resp.text().with_context(|| format!("reading body of {url}"))?
     };
-    parse_version_from_install_sh(&body)
-        .with_context(|| format!("could not parse version from {url}"))
+    serde_json::from_str(&body).with_context(|| format!("parsing inventory JSON from {url}"))
 }
 
-fn parse_version_from_install_sh(body: &str) -> Result<String> {
-    const PREFIX: &str = "# samizdat-up bootstrap installer (";
-    for line in body.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix(PREFIX) {
-            if let Some(end) = rest.find(')') {
-                let v = rest[..end].trim();
-                if !v.is_empty() {
-                    return Ok(v.to_owned());
-                }
+/// First path segment of every entry, minus the `latest` alias. The
+/// inventory groups files under `<version>/...` and `latest/...`, so
+/// the set of distinct first segments IS the set of published
+/// versions.
+fn enumerate_versions(doc: &InventoryDoc) -> Vec<String> {
+    let mut versions: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for path in doc.inventory.keys() {
+        let first = path.split('/').next().unwrap_or("");
+        if first.is_empty() || first == "latest" {
+            continue;
+        }
+        versions.insert(first.to_owned());
+    }
+    versions.into_iter().collect()
+}
+
+/// Resolve which concrete version `latest/` aliases to. The publish
+/// workflow places identical objects at `latest/...` and
+/// `<version>/...`, so they share content hashes; pick a sentinel path
+/// that exists for every version (`install.sh`, which the bootstrap
+/// shim sits at) and find the version whose hash matches `latest`'s.
+fn resolve_latest_alias(doc: &InventoryDoc) -> Option<String> {
+    let target = doc.inventory.get("latest/install.sh")?;
+    for (path, hash) in &doc.inventory {
+        if hash != target {
+            continue;
+        }
+        if let Some(version) = path.strip_suffix("/install.sh") {
+            if version != "latest" && !version.contains('/') {
+                return Some(version.to_owned());
             }
         }
     }
-    bail!("no `{PREFIX}X.Y.Z)` header in install.sh")
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_version_from_real_header() {
-        let body = "#! /usr/bin/env bash\n\
-                    #\n\
-                    # samizdat-up bootstrap installer (0.1.0)\n\
-                    #\n\
-                    set -eu\n";
-        assert_eq!(parse_version_from_install_sh(body).unwrap(), "0.1.0");
+    fn doc(pairs: &[(&str, &str)]) -> InventoryDoc {
+        InventoryDoc {
+            inventory: pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        }
     }
 
     #[test]
-    fn rejects_install_sh_without_version_header() {
-        let body = "#! /usr/bin/env bash\nset -eu\n";
-        assert!(parse_version_from_install_sh(body).is_err());
+    fn enumerate_strips_latest_and_dedupes() {
+        let d = doc(&[
+            ("0.1.0/install.sh", "h-installsh"),
+            ("0.1.0/x86_64-unknown-linux-gnu/node/samizdat", "h-cli"),
+            ("0.2.0/install.sh", "h-installsh-2"),
+            ("latest/install.sh", "h-installsh-2"),
+            ("latest/x86_64-unknown-linux-gnu/node/samizdat", "h-cli-2"),
+        ]);
+        assert_eq!(enumerate_versions(&d), vec!["0.1.0", "0.2.0"]);
     }
 
     #[test]
-    fn rejects_unterminated_header() {
-        let body = "# samizdat-up bootstrap installer (0.1.0\n";
-        assert!(parse_version_from_install_sh(body).is_err());
+    fn enumerate_empty_inventory_returns_empty() {
+        let d = doc(&[]);
+        assert!(enumerate_versions(&d).is_empty());
+    }
+
+    #[test]
+    fn resolve_latest_via_install_sh_hash() {
+        let d = doc(&[
+            ("0.1.0/install.sh", "h-a"),
+            ("0.2.0/install.sh", "h-b"),
+            ("latest/install.sh", "h-b"),
+        ]);
+        assert_eq!(resolve_latest_alias(&d), Some("0.2.0".to_owned()));
+    }
+
+    #[test]
+    fn resolve_latest_returns_none_when_no_match() {
+        let d = doc(&[
+            ("0.1.0/install.sh", "h-a"),
+            ("latest/install.sh", "h-detached"),
+        ]);
+        assert_eq!(resolve_latest_alias(&d), None);
+    }
+
+    #[test]
+    fn resolve_latest_returns_none_when_alias_missing() {
+        let d = doc(&[("0.1.0/install.sh", "h-a")]);
+        assert_eq!(resolve_latest_alias(&d), None);
     }
 }
