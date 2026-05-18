@@ -1,0 +1,13 @@
+# Default samizdat-node config written by samizdat-up. Edit and
+# `systemctl restart samizdat-node` to apply changes. samizdat-up will
+# not overwrite this file on a reinstall.
+#
+# All keys correspond to a CLI flag of the same name in snake_case;
+# `samizdat-node --help` is the canonical reference.
+
+data = "/var/lib/samizdat/node"
+
+# Maximum total size in MB for cached + disposable objects. The node may
+# briefly exceed this while bookkeeping; values valuable to the operator
+# are not counted against this budget.
+max_storage = 1_000

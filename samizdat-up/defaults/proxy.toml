@@ -1,0 +1,15 @@
+# Default samizdat-proxy config written by samizdat-up. Edit and
+# `systemctl restart samizdat-proxy` to apply changes. samizdat-up will
+# not overwrite this file on a reinstall.
+#
+# To run a public HTTPS proxy, set `https = true`, fill in `domain` with
+# the hostname your TLS cert is for, and put a real address in `owner`
+# (used as the Let's Encrypt contact email).
+
+data = "/var/lib/samizdat/proxy"
+acme_cache = "/var/lib/samizdat/proxy/acme"
+target_node = "http://localhost:4510"
+
+https = false
+domain = "example.org"
+owner = "you@example.org"

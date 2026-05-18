@@ -6,6 +6,7 @@ members = [
     "hub",
     "cli",
     "proxy",
+    "samizdat-up",
     "install/src/x86_64-pc-windows-gnu/node/samizdat-service",
 ]
 resolver = "2"
