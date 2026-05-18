@@ -118,6 +118,10 @@ fn strip_file_scheme(url: &str) -> Option<PathBuf> {
 /// same inventory the proxy resolves objects against, so it is
 /// always in sync with what is actually fetchable.
 pub fn list_versions(remote: bool) -> Result<()> {
+    let mut locally_installed: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    locally_installed.insert(env!("CARGO_PKG_VERSION").to_owned());
+
     println!("samizdat-up {} (this binary)", env!("CARGO_PKG_VERSION"));
 
     let installed = crate::install::installed_binary_paths();
@@ -125,15 +129,18 @@ pub fn list_versions(remote: bool) -> Result<()> {
         println!("(no Samizdat binaries found in standard install paths)");
     } else {
         for (name, path) in &installed {
-            let version = query_version(path).unwrap_or_else(|_| "unknown".to_owned());
+            let raw = query_version(path).unwrap_or_else(|_| "unknown".to_owned());
             // clap reports "<bin-name> X.Y.Z"; the binary name is
             // already in the first column, so collapse to just the
             // version token for readability.
-            let version = version
+            let version = raw
                 .split_whitespace()
                 .nth(1)
-                .unwrap_or(&version)
+                .unwrap_or(&raw)
                 .to_owned();
+            if version != "unknown" {
+                locally_installed.insert(version.clone());
+            }
             println!("{name:<14} {version} (at {})", path.display());
         }
     }
@@ -149,9 +156,17 @@ pub fn list_versions(remote: bool) -> Result<()> {
                 } else {
                     println!("Published versions:");
                     for v in &versions {
-                        match &latest {
-                            Some(l) if l == v => println!("    {v}  (= latest)"),
-                            _ => println!("    {v}"),
+                        let mut tags: Vec<&str> = Vec::new();
+                        if latest.as_deref() == Some(v.as_str()) {
+                            tags.push("latest");
+                        }
+                        if locally_installed.contains(v) {
+                            tags.push("installed");
+                        }
+                        if tags.is_empty() {
+                            println!("    {v}");
+                        } else {
+                            println!("    {v}  (= {})", tags.join(", "));
                         }
                     }
                     if latest.is_none() {
