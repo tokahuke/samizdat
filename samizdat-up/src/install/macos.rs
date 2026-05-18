@@ -17,7 +17,7 @@ use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::cli::Component;
 use crate::daemons::{self, Daemon, launchd_label};
@@ -60,11 +60,17 @@ pub(super) fn install(opts: InstallOpts) -> Result<()> {
     for name in &names {
         let d = daemons::by_name(name).expect("known");
         let plist = plist_path(d);
-        // `bootstrap` is idempotent: re-bootstrapping a loaded service
-        // is an error, so try `bootout` first to make this safe to
-        // re-run.
+        // `bootstrap` errors if the service is already loaded, so we
+        // unload first. On a fresh install there is nothing loaded to
+        // bootout, which makes launchctl print "Boot-out failed: 3:
+        // No such process" -- noisy but harmless. Swallow that output
+        // so the install log only shows real events.
         let label = launchd_label(d);
-        let _ = launchctl(&["bootout", &format!("system/{label}")]);
+        let _ = Command::new("launchctl")
+            .args(["bootout", &format!("system/{label}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         launchctl(&[
             "bootstrap",
             "system",
@@ -85,9 +91,14 @@ pub(super) fn uninstall(opts: UninstallOpts) -> Result<()> {
         let d = daemons::by_name(name).expect("known");
         let label = launchd_label(d);
         // bootout stops the daemon and removes it from the launchd
-        // session; non-zero exit when the service was not registered
-        // is fine.
-        let _ = launchctl(&["bootout", &format!("system/{label}")]);
+        // session. Non-zero exit when the service was not registered
+        // is fine; the stderr "Boot-out failed: 3: No such process"
+        // is noise that should not pollute the uninstall log.
+        let _ = Command::new("launchctl")
+            .args(["bootout", &format!("system/{label}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let _ = fs::remove_file(plist_path(d));
         let _ = fs::remove_file(format!("/usr/local/bin/samizdat-{name}"));
     }
