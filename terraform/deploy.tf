@@ -96,3 +96,28 @@ resource "github_actions_secret" "get_samizdat_priv" {
   secret_name = "GET_SAMIZDAT_PRIV"
   value       = var.get_samizdat_priv
 }
+
+###
+#
+# Deploy key for the homebrew tap repo. The publish workflow needs
+# write access to bump `Samizdat.rb`'s sha256 + version after every
+# release, otherwise `brew install` 404s on a stale sha.
+#
+###
+
+resource "tls_private_key" "homebrew_tap_deploy" {
+  algorithm = "ED25519"
+}
+
+resource "github_repository_deploy_key" "homebrew_tap" {
+  repository = var.homebrew_tap_repo
+  title      = "samizdat-builder"
+  key        = trimspace(tls_private_key.homebrew_tap_deploy.public_key_openssh)
+  read_only  = false
+}
+
+resource "github_actions_secret" "homebrew_tap_deploy_key" {
+  repository  = var.github_repo
+  secret_name = "HOMEBREW_TAP_DEPLOY_KEY"
+  value       = tls_private_key.homebrew_tap_deploy.private_key_openssh
+}

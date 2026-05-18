@@ -51,6 +51,12 @@ variable "get_samizdat_repo" {
   default     = "get-samizdat"
 }
 
+variable "homebrew_tap_repo" {
+  type        = string
+  description = "Name of the homebrew tap repo (where the publish workflow re-templates Samizdat.rb after each release)."
+  default     = "homebrew-samizdat"
+}
+
 variable "proxy_owner_email" {
   type        = string
   description = "Contact email registered with Let's Encrypt for the proxy's TLS cert."

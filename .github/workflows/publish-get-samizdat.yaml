@@ -190,6 +190,43 @@ jobs:
           echo "--- install.sh head ---"
           head -5 "$DIST/latest/install.sh"
 
+      # Re-template Samizdat.rb in the homebrew tap. The mac
+      # samizdat-up binary's sha256 changes every build, so the
+      # formula's pinned sha is stale right after we publish unless
+      # we update it. Clone the tap via its own deploy key, replace
+      # the formula, push.
+      - name: Refresh homebrew tap formula
+        run: |
+          set -e
+          VERSION="${VERSION}"
+          MAC_BIN="install/get-samizdat/dist/${VERSION}/aarch64-apple-darwin/samizdat-up/samizdat-up"
+          SHA="$(sha256sum "$MAC_BIN" | awk '{print $1}')"
+          echo "version=$VERSION sha=$SHA"
+
+          # Install the tap's deploy key into a separate ssh agent
+          # entry. Cannot reuse the get-samizdat key because deploy
+          # keys are repo-scoped.
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}" > ~/.ssh/id_homebrew_tap
+          chmod 600 ~/.ssh/id_homebrew_tap
+
+          TAP_DIR="$(mktemp -d)"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_homebrew_tap -o StrictHostKeyChecking=no" \
+            git clone git@github.com:tokahuke/homebrew-samizdat.git "$TAP_DIR"
+
+          sed \
+            -e "s|__VERSION__|$VERSION|g" \
+            -e "s|__SHA256__|$SHA|g" \
+            install/src/Samizdat.rb.template \
+            > "$TAP_DIR/Samizdat.rb"
+
+          cd "$TAP_DIR"
+          git -c user.email="<>" -c user.name="samizdat-builder" \
+              commit -a -m "release: bump to $VERSION (sha=$SHA)"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_homebrew_tap -o StrictHostKeyChecking=no" \
+            git push origin main
+          rm -f ~/.ssh/id_homebrew_tap
+
       - name: Materialise series private key
         run: |
           mkdir -p install/get-samizdat
