@@ -158,27 +158,13 @@ No known deferred items.
 
 ## Install pipeline (`samizdat-up`, `install/`, brew)
 
-- **`samizdat-up install` on Windows.** Currently a stub that bails;
-  the SCM registration logic in the deleted
-  `install/src/x86_64-pc-windows-gnu/node/samizdat-service` needs to
-  be ported into `samizdat-up/src/install/windows.rs`. Two design
-  choices to pick from: (a) make `samizdat-node.exe` SCM-aware
-  itself by calling `windows_service::service_dispatcher::start`
-  from its main, so `sc.exe create` is enough; (b) have samizdat-up
-  also act as the SCM wrapper, with a `samizdat-up daemon <role>`
-  hidden subcommand that SCM points at. (a) is cleaner; (b) reuses
-  the old wrapper pattern.
-- **Matrix integration test workflow** for samizdat-up
-  (`.github/workflows/test-samizdat-up.yaml`). Per the plan: ubuntu
-  + macos + windows runners, each `cargo build`, `samizdat-up
-  install node --from file://`, OS-native service check,
-  `samizdat-up uninstall --purge`, OS-native gone check. The
-  Windows path of this workflow is what would catch regressions in
-  the windows branch above. The maintainer has no Windows machine
-  to test on, so this matrix IS the Windows test.
-- **`get-samizdat/.Samizdat.priv` history verification.** The
-  install collection has a series key; verify nothing leaked it via
-  `git log -p -- '.Samizdat.priv'` or equivalent.
+No known deferred items. The SCM wrapper on Windows ships in
+`samizdat-up/src/install/windows.rs` via the hidden `daemon <role>`
+subcommand, the matrix integration workflow runs on every push
+(`.github/workflows/test-samizdat-up.yaml`), and the
+`get-samizdat/.Samizdat.priv` git history has been audited (no blob
+in either the submodule or the outer repo contains the key body or
+the filename across all branches).
 
 ## Windows (`install/src/x86_64-pc-windows-gnu/`)
 
