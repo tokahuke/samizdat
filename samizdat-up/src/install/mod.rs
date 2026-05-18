@@ -108,6 +108,11 @@ pub fn list() -> Result<()> {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub fn run_as_service(component: Component) -> Result<()> {
+    windows::run_as_service(component)
+}
+
 pub fn self_update() -> Result<()> {
     #[cfg(target_os = "linux")]
     {

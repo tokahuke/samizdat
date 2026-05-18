@@ -100,6 +100,19 @@ pub enum Command {
 
     /// Replace samizdat-up itself with the latest published build.
     SelfUpdate,
+
+    /// **Internal**: run as the SCM-managed service wrapper for one
+    /// daemon. Not meant to be invoked by humans -- `samizdat-up
+    /// install <component>` registers this subcommand as the
+    /// `binPath` of a Windows service. SCM calls it when the service
+    /// starts; this process then supervises the actual daemon binary.
+    #[cfg(target_os = "windows")]
+    #[command(hide = true)]
+    Daemon {
+        /// Which daemon to supervise. Must be node | hub | proxy.
+        #[arg(value_enum)]
+        component: Component,
+    },
 }
 
 impl Cli {
@@ -123,6 +136,8 @@ impl Cli {
             Command::List => install::list(),
             Command::Versions { remote } => crate::fetch::list_versions(remote),
             Command::SelfUpdate => install::self_update(),
+            #[cfg(target_os = "windows")]
+            Command::Daemon { component } => install::run_as_service(component),
         }
     }
 }
