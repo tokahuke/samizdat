@@ -10,9 +10,9 @@ name: Publish get-samizdat
 # in-tree tarball). No docker images, no python builder.
 #
 # Trust trade-off: this puts the series private key in reach of CI,
-# which is a wider blast radius than "lives on Pedro's laptop only".
-# See `docs/deferred.md` "Publisher persistence" for the long-term
-# fix.
+# which is a wider blast radius than "key on the publisher's
+# workstation only". See `docs/deferred.md` "Publisher persistence"
+# for the long-term fix.
 
 on:
   workflow_dispatch:

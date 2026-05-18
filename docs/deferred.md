@@ -101,9 +101,9 @@ eager-fetches the full inventory and spawns parallel object fetches
 the moment a subscribed node sees an announcement. So in practice the
 publisher only needs to stay online for the *propagation window* --
 the time from announce to "first long-lived subscriber has the whole
-edition." For the `get-samizdat` collection that means Pedro's laptop
-needs to stay up minutes-to-hours after `samizdat collection update`
-until the testbed has mirrored.
+edition." For the `get-samizdat` collection that means the publisher's
+workstation needs to stay up minutes-to-hours after `samizdat
+collection update` until the testbed has mirrored.
 
 That's a workaround, not a fix. The publisher's network reachability
 is still the bottleneck for a window each publish. The unresolved
@@ -174,8 +174,8 @@ No known deferred items.
   install node --from file://`, OS-native service check,
   `samizdat-up uninstall --purge`, OS-native gone check. The
   Windows path of this workflow is what would catch regressions in
-  the windows branch above. Pedro has no Windows machine to test
-  on, so this matrix IS the Windows test.
+  the windows branch above. The maintainer has no Windows machine
+  to test on, so this matrix IS the Windows test.
 - **Homebrew formula `sha256` + versioned URL.** The current formula
   pulls from `latest/`, no sha pin. To pass `brew install` cleanly
   it needs version + sha256 baked in per release. Wire into the

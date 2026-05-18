@@ -7,7 +7,6 @@ name: test-samizdat-up
 # verify the service is registered + running with OS-native commands,
 # then `samizdat-up uninstall node --purge` and verify it is gone.
 #
-# This workflow IS the Windows test (Pedro has no local Windows box).
 # Failure on the windows job is the regression signal for Windows
 # install paths.
 
