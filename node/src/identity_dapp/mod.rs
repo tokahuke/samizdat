@@ -30,9 +30,11 @@ static IDENTITY_PROVIDER: OnceLock<IdentityProvider> = OnceLock::new();
 pub fn init_identity_provider() -> Result<(), crate::Error> {
     let provider = if let Some(provider) = readonly_tx(|tx| {
         Table::Global.get(tx, "ethereum_provider_endpoint", |endpoint| {
-            IdentityProvider::new(String::from_utf8_lossy(endpoint).as_ref())
+            Ok(IdentityProvider::new(
+                String::from_utf8_lossy(endpoint).as_ref(),
+            ))
         })
-    }) {
+    })? {
         provider
     } else {
         tracing::info!(
@@ -130,7 +132,7 @@ impl IdentityProvider {
         );
 
         writable_tx(|tx| {
-            Table::Global.put(tx, "ethereum_provider_endpoint", new_endpoint);
+            Table::Global.put(tx, "ethereum_provider_endpoint", new_endpoint)?;
             Ok(())
         })
         .expect("infalible");
@@ -139,20 +141,43 @@ impl IdentityProvider {
     }
 
     /// Retrieves identity information from the blockchain.
+    ///
+    /// Verifies the configured RPC reports the expected Polygon chain ID before trusting
+    /// the response; without this an operator who mistakenly points the provider at a
+    /// different chain would silently get identity bindings from a stranger network.
+    /// (The PUT endpoint that mutates the provider is bearer-only, so this only catches
+    /// operator misconfiguration, not external attack.)
     pub async fn get(&self, identity: &str) -> Result<Identity, crate::Error> {
-        let (entity, _owner, ttl, _data) = self
-            .storage_contract
-            .read()
-            .await
+        let contract = self.storage_contract.read().await;
+
+        let reported_chain = contract.client().get_chainid().await.map_err(|e| {
+            format!("Failed to fetch chain ID from configured RPC provider: {e}")
+        })?;
+        if reported_chain.as_u64() != samizdat_common::blockchain::BLOCKCHAIN_ID {
+            return Err(format!(
+                "Configured RPC reports chain id {}, expected {} (Polygon). Refusing to \
+                 trust identity lookup.",
+                reported_chain,
+                samizdat_common::blockchain::BLOCKCHAIN_ID
+            )
+            .into());
+        }
+
+        let (entity, _owner, ttl, _data) = contract
             .method::<_, (String, Address, u64, Vec<u8>)>("identities", identity.to_owned())
             .expect("ABI was not declared as expected")
             .call()
             .await
             .map_err(|e| format!("Smart contract error: {e}"))?;
+
+        // Saturate the ttl cast: a contract returning a `u64` larger than `i64::MAX`
+        // would wrap to a negative `Duration::seconds`, putting `valid_until` in the
+        // past and effectively expiring the identity. Cap at `i64::MAX` instead.
+        let ttl_secs = ttl.min(i64::MAX as u64) as i64;
         Ok(Identity {
             entity,
             identity: identity.to_owned(),
-            valid_until: Utc::now() + Duration::seconds(ttl as i64),
+            valid_until: Utc::now() + Duration::seconds(ttl_secs),
             ttl,
         })
     }

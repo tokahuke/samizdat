@@ -1,0 +1,23 @@
+[package]
+name = "samizdat-up"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Cross-platform installer + updater for the Samizdat daemons"
+
+# Deliberately minimal dep set: this binary is what bootstraps a user's
+# machine into Samizdat, so it should download fast, link cleanly, and
+# not pull in anything from the Samizdat protocol stack (tarpc, quinn,
+# tokio, ethers, axum, askama, ...) just to fetch + place + register.
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# rustls so the binary does not pull libssl at runtime; matters for a
+# bootstrap binary that must work on hosts without OS TLS dev libs.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-service = "0.6"

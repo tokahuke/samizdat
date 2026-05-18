@@ -250,7 +250,7 @@ pub async fn resolve_series(
     tracing::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
-    for edition in readonly_tx(|tx| series.get_editions(tx).collect::<Vec<_>>()) {
+    for edition in readonly_tx(|tx| Ok::<Vec<_>, crate::Error>(series.get_editions(tx)?.collect::<Vec<_>>()))? {
         empty = false;
         tracing::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());

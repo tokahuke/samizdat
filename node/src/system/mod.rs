@@ -179,16 +179,18 @@ impl HubConnection {
 
         // Get the deadline of the request:
         let query_start = Instant::now();
-        let mut context = context::current();
-        context.deadline = deadline.into_std();
+        let mut rpc_context = context::current();
+        rpc_context.deadline = deadline.into_std();
         let request_duration = deadline.duration_since(query_start);
         let deadline_instant = Instant::now() + request_duration;
 
-        // Do the RPC call:
+        // Do the RPC call. Pass `rpc_context` (not a fresh `context::current()`) so the
+        // caller's deadline actually reaches tarpc; the old code silently dropped the
+        // configured deadline and let queries run until tarpc's default expired.
         let query_response = inner
             .client
             .query(
-                context::current(),
+                rpc_context,
                 Query {
                     content_riddles,
                     hint,
@@ -284,6 +286,17 @@ impl HubConnection {
 
             if !candidate_edition.is_valid() {
                 tracing::warn!("received invalid candidate edition: {candidate_edition:?}",);
+                continue;
+            }
+
+            // Defensive: a peer can craft an edition whose `public_key` field disagrees
+            // with the series we asked for. `SeriesRef::advance` already rejects on key
+            // mismatch, but filtering here keeps the wrong-key candidate from winning
+            // `most_recent` and shadowing a legitimate one in the same response set.
+            if candidate_edition.public_key() != &series.public_key {
+                tracing::warn!(
+                    "candidate edition's public_key does not match the queried series; ignoring"
+                );
                 continue;
             }
 

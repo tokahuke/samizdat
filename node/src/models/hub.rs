@@ -16,7 +16,7 @@ pub struct Hub {
 impl Droppable for Hub {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let address = self.address.to_string();
-        Table::Hubs.delete(tx, &address);
+        Table::Hubs.delete(tx, &address)?;
         tokio::spawn(async move { crate::hubs().remove(&address).await });
         Ok(())
     }
@@ -32,21 +32,21 @@ impl Hub {
             tx,
             self.address.as_str(),
             bincode::serialize(&self).expect("can serialize"),
-        );
+        )?;
 
         Ok(())
     }
 
     /// Lists all hubs currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Hub>, crate::Error> {
-        Table::Hubs
-            .range::<_, [u8; 0]>(..)
-            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
+        let collected: Result<Vec<Hub>, crate::Error> =
+            Table::Hubs.range::<_, [u8; 0]>(..).collect(tx, |_, value| {
+                Ok::<Hub, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 
     pub fn get<Tx: TxHandle>(tx: &Tx, address: &str) -> Result<Option<Hub>, crate::Error> {
-        Ok(Table::Hubs
-            .get(tx, address, |k| bincode::deserialize(k))
-            .transpose()?)
+        Table::Hubs.get(tx, address, |k| Ok(bincode::deserialize(k)?))
     }
 }

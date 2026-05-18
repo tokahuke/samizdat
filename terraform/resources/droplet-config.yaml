@@ -1,21 +1,46 @@
 #cloud-config
-
-###
 #
-# Configuration for a Ubuntu VPS to be able to run a Samizdat Hub for the open
-# Web.
+# Minimal cloud-init for the Samizdat testbed droplet. Everything
+# samizdat-specific (binaries, configs, systemd units) is installed
+# later by the `bootstrap-testbed.yaml` GitHub Actions workflow over
+# SSH. Cloud-init only does what has to happen before that workflow
+# can connect:
 #
-###
+#   - Open the firewall ports the services will bind.
+#   - Create the directory layout the systemd units expect (/etc/samizdat
+#     for configs, /var/lib/samizdat for per-service state).
+#   - Install fish as the official login shell.
+#
+# Apt updates run because we want a fresh droplet to have current
+# security patches; `package_upgrade` only runs once at first boot, so
+# it does not interfere with later automation.
 
 package_update: true
 package_upgrade: true
 packages:
   - fish
+
 runcmd:
+  # `chsh -s` defaults to changing root's shell since cloud-init runs
+  # as root. Fish is the project's default; bootstrap/update workflows
+  # explicitly invoke `bash -s` on the remote when they need bash
+  # script semantics.
   - chsh -s /usr/bin/fish
+
+  # UFW: SSH for management, 80/443 for the proxy (HTTP redirect +
+  # HTTPS), 4511/udp for the hub's QUIC accept loop. The hub's HTTP
+  # admin port (45180/tcp) is intentionally NOT exposed; reach it via
+  # the SSH tunnel.
   - yes | ufw enable
   - ufw allow ssh
   - ufw allow http
   - ufw allow https
   - ufw allow 4511/udp
-  - ufw allow 4512/udp
+
+  # Directories the systemd units + configs reference. `mkdir -p` is
+  # idempotent so re-running this cloud-init on a recovered droplet is
+  # safe.
+  - mkdir -p /etc/samizdat
+  - mkdir -p /var/lib/samizdat/hub
+  - mkdir -p /var/lib/samizdat/node
+  - mkdir -p /var/lib/samizdat/proxy/acme

@@ -1,0 +1,10 @@
+# Default samizdat-hub config written by samizdat-up. Edit and
+# `systemctl restart samizdat-hub` to apply changes. samizdat-up will
+# not overwrite this file on a reinstall.
+
+addresses = ["[::]:4511"]
+
+data = "/var/lib/samizdat/hub"
+
+# Other hubs to federate with. Empty by default (single-hub deployment).
+partners = []

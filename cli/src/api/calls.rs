@@ -124,7 +124,12 @@ pub async fn post_object(
         .await
         .with_context(|| "error from samizdat-node response POST /_objects")?;
 
-    tracing::info!("{} POST {} {}", status, url, text);
+    tracing::info!(
+        "{} POST {} {}",
+        status,
+        url,
+        super::redact_if_sensitive("/_objects", &text)
+    );
 
     let content: Result<String, ApiError> = serde_json::from_str(&text)
         .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;

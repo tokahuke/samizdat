@@ -49,6 +49,14 @@ pub enum Error {
     /// Object not found
     #[error("Object not found")]
     ObjectNotFound,
+    /// A peer-supplied edition has a timestamp older than the locally-known latest.
+    /// Rejecting it prevents an attacker (or a misbehaving hub) from rolling back the
+    /// visible state of a series.
+    #[error("stale edition: candidate timestamp {candidate} is not after current latest {current}")]
+    StaleEdition {
+        candidate: chrono::DateTime<chrono::Utc>,
+        current: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 impl From<RpcError> for Error {
@@ -95,6 +103,6 @@ impl From<quinn::ConnectionError> for Error {
 
 impl From<Error> for io::Error {
     fn from(e: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, e.to_string())
+        io::Error::other(e)
     }
 }

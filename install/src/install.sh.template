@@ -1,0 +1,65 @@
+#! /usr/bin/env bash
+#
+# samizdat-up bootstrap installer (__VERSION__)
+#
+# Detects this machine's OS and architecture, downloads the matching
+# `samizdat-up` binary from the public get-samizdat collection, and
+# places it in /usr/local/bin/.
+#
+# After running this, install the Samizdat node service with:
+#
+#     sudo samizdat-up install node
+#
+# Re-running this script upgrades the bootstrapper to the latest
+# published version. The actual daemons are upgraded with
+# `sudo samizdat-up update`.
+
+set -eu
+
+PROXY="https://proxy.hubfederation.com/~get-samizdat"
+
+# --- Detect target triple --------------------------------------------------
+
+os="$(uname -s)"
+arch="$(uname -m)"
+
+case "$os/$arch" in
+    Linux/x86_64)      triple="x86_64-unknown-linux-gnu" ;;
+    Darwin/arm64)      triple="aarch64-apple-darwin"     ;;
+    Darwin/aarch64)    triple="aarch64-apple-darwin"     ;;
+    *)
+        echo "samizdat-up bootstrap: unsupported platform $os/$arch." >&2
+        echo "Published targets:" >&2
+        echo "  Linux x86_64           -> x86_64-unknown-linux-gnu" >&2
+        echo "  macOS Apple Silicon    -> aarch64-apple-darwin" >&2
+        echo "  Windows x86_64         -> use the .exe at $PROXY/latest/x86_64-pc-windows-gnu/samizdat-up/samizdat-up.exe" >&2
+        exit 1
+        ;;
+esac
+
+# --- Need root for /usr/local/bin -----------------------------------------
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "samizdat-up bootstrap: must be run as root (e.g. via sudo)." >&2
+    exit 1
+fi
+
+# --- Download + install ----------------------------------------------------
+
+url="$PROXY/latest/$triple/samizdat-up/samizdat-up"
+dest="/usr/local/bin/samizdat-up"
+tmp="$dest.bootstrap-tmp"
+
+echo "samizdat-up bootstrap: downloading $url"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp" "$url"
+chmod 755 "$tmp"
+mv "$tmp" "$dest"
+
+echo "samizdat-up installed at $dest"
+echo
+echo "Next steps:"
+echo "    sudo samizdat-up install node       # node + cli, registered as a service"
+echo "    sudo samizdat-up install hub        # (Linux only)"
+echo "    sudo samizdat-up install proxy      # (Linux only)"
+echo "    sudo samizdat-up uninstall node     # reverse"
+echo "    sudo samizdat-up uninstall node --purge   # also wipe data"

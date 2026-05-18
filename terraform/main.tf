@@ -4,6 +4,14 @@ terraform {
       source  = "digitalocean/digitalocean"
       version = "~> 2.0"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   cloud {
@@ -16,10 +24,55 @@ terraform {
 }
 
 variable "do_token" {
-  type = string
+  type        = string
+  description = "DigitalOcean API token."
 }
 
-# Configure the DigitalOcean Provider
+variable "github_token" {
+  type        = string
+  description = "GitHub PAT with `repo` scope so terraform can push action secrets."
+  sensitive   = true
+}
+
+variable "github_owner" {
+  type        = string
+  description = "GitHub user or org that owns the samizdat repo."
+}
+
+variable "github_repo" {
+  type        = string
+  description = "Name of the samizdat repo on GitHub (without owner)."
+  default     = "samizdat"
+}
+
+variable "get_samizdat_repo" {
+  type        = string
+  description = "Name of the get-samizdat release-collection repo (where postbuild.sh pushes built artifacts)."
+  default     = "get-samizdat"
+}
+
+variable "homebrew_tap_repo" {
+  type        = string
+  description = "Name of the homebrew tap repo (where the publish workflow re-templates Samizdat.rb after each release)."
+  default     = "homebrew-samizdat"
+}
+
+variable "proxy_owner_email" {
+  type        = string
+  description = "Contact email registered with Let's Encrypt for the proxy's TLS cert."
+}
+
+variable "get_samizdat_priv" {
+  type        = string
+  description = "Base64-encoded contents of install/get-samizdat/.Samizdat.priv (the series private key that signs new releases). Pushed to GH Actions so the publish workflow can mint new editions."
+  sensitive   = true
+}
+
 provider "digitalocean" {
   token = var.do_token
+}
+
+provider "github" {
+  token = var.github_token
+  owner = var.github_owner
 }

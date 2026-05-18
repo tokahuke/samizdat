@@ -18,7 +18,7 @@ impl FromStr for Hash {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Hash, crate::Error> {
         Ok(Hash(base64_url::decode(s)?.try_into().map_err(
-            |e: Vec<_>| format!("expected 64 bytes; got {}", e.len()),
+            |e: Vec<_>| format!("expected {HASH_LEN} bytes; got {}", e.len()),
         )?))
     }
 }
@@ -59,16 +59,6 @@ impl<'a> TryFrom<&'a [u8]> for Hash {
     }
 }
 
-impl From<i64> for Hash {
-    fn from(int: i64) -> Hash {
-        let mut hash = Hash::default();
-        let bytes = int.to_be_bytes();
-        hash.0[..8].clone_from_slice(&bytes[..8]);
-
-        hash
-    }
-}
-
 impl Hash {
     /// Creates a [`struct@Hash`] object from a binary hash value, which has to be 28
     /// bytes long.
@@ -106,7 +96,7 @@ impl Hash {
         let mut rand = [0; HASH_LEN];
 
         for rand_i in &mut rand {
-            *rand_i = rng.gen();
+            *rand_i = rng.r#gen();
         }
 
         Hash(rand)
@@ -118,23 +108,21 @@ impl Hash {
         Hash::from_bytes([rand.0, self.0].concat())
     }
 
-    /// Checks whether this hash value is contained in a Merkle tree with root hash `root`,
-    /// given an inclusion proof.
+    /// Checks whether this hash is in a Merkle tree with root `root`, given an
+    /// inclusion proof. `proof.path` is ordered from leaf level upward; bit `i` of
+    /// `proof.index` selects which side `self` was on at level `i` above the leaves.
     pub fn is_proved_by(&self, root: &Hash, proof: &InclusionProof) -> bool {
-        let mut mask = 1;
+        let mut mask: usize = 1;
         let mut current = *self;
 
-        for hash in proof.path.iter() {
-            // The proof completes the left side if 1, else, right.
+        for sibling in proof.path.iter() {
+            // If the bit is 1, our subtree was the right child and the sibling is on the
+            // left; otherwise we were the left child and the sibling is on the right.
             current = if proof.index & mask != 0 {
-                hash.rehash(&current)
+                sibling.rehash(&current)
             } else {
-                current.rehash(hash)
+                current.rehash(sibling)
             };
-
-            if hash != &current {
-                return false;
-            }
 
             mask <<= 1;
         }
@@ -154,7 +142,22 @@ pub struct MerkleTree {
 }
 
 impl From<Vec<Hash>> for MerkleTree {
+    /// # Panics
+    ///
+    /// If `vec` is empty. Use [`MerkleTree::try_from_leaves`] for fallible construction.
     fn from(vec: Vec<Hash>) -> MerkleTree {
+        MerkleTree::try_from_leaves(vec).expect("MerkleTree requires at least one leaf")
+    }
+}
+
+impl MerkleTree {
+    /// Constructs a [`MerkleTree`] from a list of leaf hashes, returning `None` if the
+    /// list is empty.
+    pub fn try_from_leaves(vec: Vec<Hash>) -> Option<MerkleTree> {
+        if vec.is_empty() {
+            return None;
+        }
+
         fn iterate_level(slice: &[Hash]) -> Vec<Hash> {
             slice
                 .chunks(2)
@@ -166,7 +169,7 @@ impl From<Vec<Hash>> for MerkleTree {
                 .collect::<Vec<_>>()
         }
 
-        MerkleTree {
+        Some(MerkleTree {
             tree: std::iter::successors(Some(vec), |vec| {
                 if vec.len() > 1 {
                     Some(iterate_level(vec))
@@ -178,11 +181,9 @@ impl From<Vec<Hash>> for MerkleTree {
             .into_iter()
             .rev()
             .collect(),
-        }
+        })
     }
-}
 
-impl MerkleTree {
     /// Returns the root hash of the tree.
     pub fn root(&self) -> Hash {
         self.tree[0][0]
@@ -204,28 +205,30 @@ impl MerkleTree {
     }
 
     /// Builds the inclusion proof for a given item in the tree. Returns `None` if `index`
-    /// out of range.
+    /// is out of range.
+    ///
+    /// The returned `path` is ordered from leaf level upward (leaf-side siblings first),
+    /// matching the order [`Hash::is_proved_by`] expects.
     pub fn proof_for(&self, index: usize) -> Option<InclusionProof> {
-        if index > self.len() {
+        if index >= self.len() {
             return None;
         }
 
         let mut level_index = index;
+        // Walk leaves; up, skipping the root (it has no sibling). For a tree of N leaves
+        // the path length is `tree.len() - 1` (the number of edges from leaf to root).
+        let depth = self.tree.len().saturating_sub(1);
 
         let path = self
             .tree
             .iter()
+            .rev()
+            .take(depth)
             .map(|level| {
-                // `n-1` if `n` is odd, `n+1` is `n` is even.
                 let sibling_index = level_index ^ 1;
                 level_index >>= 1;
 
-                if let Some(sibling) = level.get(sibling_index) {
-                    *sibling
-                } else {
-                    // Incomplete level. Filling up.
-                    Hash::default()
-                }
+                level.get(sibling_index).copied().unwrap_or_default()
             })
             .collect::<Box<[_]>>();
 
@@ -247,5 +250,100 @@ impl InclusionProof {
     /// given tree, represented by its root hash.
     pub fn proves(&self, root: &Hash, hash: &Hash) -> bool {
         hash.is_proved_by(root, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaves(n: usize) -> Vec<Hash> {
+        (0..n).map(|i| Hash::from_bytes(i.to_le_bytes())).collect()
+    }
+
+    /// Regression test for P11; the error message used to say "expected 64 bytes".
+    #[test]
+    fn from_str_error_reports_correct_length() {
+        // 4 bytes of base64; 3 bytes of payload.
+        let err = Hash::from_str("AAAA").unwrap_err().to_string();
+        assert!(
+            err.contains(&format!("expected {HASH_LEN} bytes")),
+            "got: {err}"
+        );
+    }
+
+    /// Regression test for P1; `is_proved_by` used to always return false.
+    #[test]
+    fn merkle_proof_round_trips() {
+        let hs = leaves(8);
+        let tree = MerkleTree::from(hs.clone());
+        let root = tree.root();
+
+        for (i, leaf) in hs.iter().enumerate() {
+            let proof = tree.proof_for(i).expect("in range");
+            assert!(
+                leaf.is_proved_by(&root, &proof),
+                "valid proof for index {i} was rejected"
+            );
+            assert!(proof.proves(&root, leaf));
+        }
+    }
+
+    /// Regression test for P1+P4; proofs at odd, non-power-of-two tree sizes also work.
+    #[test]
+    fn merkle_proof_round_trips_odd_sizes() {
+        for n in [1usize, 2, 3, 5, 7, 9, 13, 200] {
+            let hs = leaves(n);
+            let tree = MerkleTree::from(hs.clone());
+            let root = tree.root();
+            for (i, leaf) in hs.iter().enumerate() {
+                let proof = tree.proof_for(i).unwrap_or_else(|| {
+                    panic!("expected proof for ({n}, {i})");
+                });
+                assert!(
+                    leaf.is_proved_by(&root, &proof),
+                    "n={n} i={i} proof rejected"
+                );
+            }
+        }
+    }
+
+    /// Regression test for P1; a proof for a different leaf must NOT verify.
+    #[test]
+    fn merkle_wrong_leaf_rejected() {
+        let hs = leaves(8);
+        let tree = MerkleTree::from(hs.clone());
+        let root = tree.root();
+        let proof = tree.proof_for(3).unwrap();
+        // Try every other leaf; none of them should validate against index 3's proof.
+        for (i, leaf) in hs.iter().enumerate() {
+            if i != 3 {
+                assert!(
+                    !leaf.is_proved_by(&root, &proof),
+                    "leaf {i} forged a proof for index 3"
+                );
+            }
+        }
+    }
+
+    /// Regression test for P4; `proof_for(len)` used to return `Some(bogus_proof)`.
+    #[test]
+    fn proof_for_out_of_range_returns_none() {
+        let tree = MerkleTree::from(leaves(8));
+        assert!(tree.proof_for(8).is_none());
+        assert!(tree.proof_for(usize::MAX).is_none());
+    }
+
+    /// Regression test for P10; `MerkleTree::from(vec![])` used to silently produce a
+    /// tree whose `root()` then panicked deep inside callers.
+    #[test]
+    fn empty_tree_is_explicit() {
+        assert!(MerkleTree::try_from_leaves(Vec::new()).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "MerkleTree requires at least one leaf")]
+    fn empty_tree_from_panics_with_clear_message() {
+        let _ = MerkleTree::from(Vec::<Hash>::new());
     }
 }

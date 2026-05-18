@@ -3,12 +3,15 @@
 pub mod auth;
 pub mod collection;
 pub mod connection;
+pub mod doctor;
 pub mod edition;
 pub mod hub;
 pub mod identity;
 pub mod peer;
 pub mod series;
 pub mod subscription;
+
+pub use doctor::run as doctor;
 
 use anyhow::Context;
 use futures::prelude::*;
@@ -77,7 +80,7 @@ pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
     let pwd = env::current_dir()?;
     let name = name.unwrap_or_else(|| {
         pwd.iter()
-            .last()
+            .next_back()
             .expect("not empty")
             .to_string_lossy()
             .to_string()
@@ -90,10 +93,13 @@ pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
         .await
         .context("failed to create `.Samizdat.priv`")?;
 
+    // `PrivateKey: Display` deliberately prints `PrivateKey(<redacted>)`; use
+    // `reveal_base64()` to show the secret here, where the user is being told to
+    // copy and back it up.
     println!(
-        "NOTE: Your private key for this project is \n\n\t{}
-        \n\nStore it somewhere safe! (you were warned)",
-        private_key
+        "NOTE: Your private key for this project is \n\n\t{}\n\n\
+         Store it somewhere safe! (you were warned)",
+        private_key.reveal_base64()
     );
 
     Ok(())
@@ -101,8 +107,12 @@ pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
 
 /// Imports an existing project's private key or creates a new one.
 ///
-/// If a private key is provided, it will be used. Otherwise, a new key will be generated.
-pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
+/// The private key, if supplied, is read from a FILE path rather than from a
+/// CLI argument value; this keeps secret material out of `argv`, shell history,
+/// `/proc/<pid>/cmdline`, and shared audit logs.
+pub async fn import(
+    private_key_file: Option<PathBuf>,
+) -> Result<(), anyhow::Error> {
     let manifest = Manifest::find_opt()
         .context("failed to find `Samizdat.toml`")?
         .ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exist"))?;
@@ -111,15 +121,16 @@ pub async fn import(private_key: Option<String>) -> Result<(), anyhow::Error> {
     let private_manifest = if let Some(private_manifest) = private_manifest_opt {
         private_manifest
     } else {
-        PrivateManifest::create(
-            &manifest.debug.name,
-            private_key
-                .map(|pk| pk.parse::<PrivateKey>())
-                .transpose()?
-                .as_ref(),
-        )
-        .await
-        .context("failed to create `.Samizdat.priv`")?
+        let parsed_key = private_key_file
+            .map(|path| -> anyhow::Result<PrivateKey> {
+                let raw = std::fs::read_to_string(&path)
+                    .with_context(|| format!("reading private key from {}", path.display()))?;
+                Ok(raw.trim().parse::<PrivateKey>()?)
+            })
+            .transpose()?;
+        PrivateManifest::create(&manifest.debug.name, parsed_key.as_ref())
+            .await
+            .context("failed to create `.Samizdat.priv`")?
     };
 
     // Import debug series owner.
@@ -163,16 +174,40 @@ pub async fn commit(
     refresh_socket: Option<SocketAddr>,
 ) -> Result<(), anyhow::Error> {
     // Oh, generators would be so nice now...
+    //
+    // Symlinks are skipped, not followed. A previous version of this function
+    // followed them via `is_dir()` (which traverses symlinks). A malicious
+    // build step (or anything that can write into `base` between the build
+    // and the commit) could drop e.g. `dist/secrets -> ~/.ssh/id_ed25519`
+    // and have the CLI happily publish the user's SSH private key to the
+    // network as an object. Use `symlink_metadata` so a symlink shows up as
+    // its own kind regardless of what it points at.
     fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             let subpath = entry.path();
+            let meta = fs::symlink_metadata(&subpath)?;
+            let kind = meta.file_type();
 
-            if subpath.is_dir() {
+            if kind.is_symlink() {
+                tracing::warn!(
+                    "Skipping symlink {} (commit refuses to follow symlinks; \
+                     create a regular file or directory instead)",
+                    subpath.display()
+                );
+                continue;
+            }
+
+            if kind.is_dir() {
                 walk(&subpath, files)?;
-            } else {
-                // file or symlink.
+            } else if kind.is_file() {
                 files.push(subpath);
+            } else {
+                tracing::warn!(
+                    "Skipping non-regular file {} (kind: {:?})",
+                    subpath.display(),
+                    kind
+                );
             }
         }
 
@@ -376,6 +411,15 @@ pub async fn watch(
     let mut last_exec = Instant::now();
 
     // The commit loop.
+    //
+    // `watched_files_changed` is true when any changed path is OUTSIDE the
+    // configured `build.base` (the output directory). The intent is "only
+    // rebuild on changes to source files, not on changes the build itself
+    // emits". Note: if a user misconfigures `base = "."` (or any ancestor of
+    // the project root), every path starts with `base`, so this predicate is
+    // always false and nothing ever rebuilds. We do not currently guard
+    // against that; the misconfig surfaces as "watch does nothing" rather
+    // than as data loss.
     while let Some(event) = recv.recv().await {
         let now = Instant::now();
         let watched_files_changed = event.paths.iter().any(|path| !path.starts_with(&base));

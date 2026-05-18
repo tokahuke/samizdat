@@ -24,9 +24,14 @@ pub fn cli<'a>() -> &'a Cli {
     CLI.get_or_init(init_cli)
 }
 
-/// Returns the server URL for the local Samizdat node
+/// Returns the server URL for the local Samizdat node.
+///
+/// Uses `127.0.0.1` literally rather than the string `localhost`; the bearer
+/// access token rides in the `Authorization` header in plaintext and we do
+/// not want a `/etc/hosts` override on a compromised user account to redirect
+/// it to an arbitrary host.
 pub fn server() -> Result<String, anyhow::Error> {
-    Ok(format!("http://localhost:{}", crate::access_token::port()?))
+    Ok(format!("http://127.0.0.1:{}", crate::access_token::port()?))
 }
 
 /// Main CLI configuration structure containing global options and subcommands
@@ -65,11 +70,13 @@ pub enum Command {
 
     /// Imports a series from a `Samizdat.toml` in the current directory
     Import {
-        /// The private key of the series. If not provided, it will attempt to get the
-        /// value from the privave manifest `.Samizdat.priv`
-        ///
-        #[structopt(long)]
-        private_key: Option<String>,
+        /// Path to a file containing the private key for the series. If omitted,
+        /// the value is taken from the private manifest `.Samizdat.priv`. The
+        /// flag intentionally takes a PATH, not the raw key, so the secret never
+        /// passes through argv and does not appear in `ps`, shell history,
+        /// `/proc/<pid>/cmdline`, or audit logs.
+        #[structopt(long = "private-key-file")]
+        private_key_file: Option<PathBuf>,
     },
 
     /// Creates a new version (collection) of the content in this folder
@@ -187,6 +194,13 @@ pub enum Command {
         #[structopt(long)]
         flush_all: bool,
     },
+
+    /// Prints a one-shot health snapshot of the connected node: configured hubs,
+    /// live hub connections, peers, subscriptions, and recent editions. Useful
+    /// for triage when something stops working ("is the node connected? does it
+    /// know about this series? has it seen any editions?") without composing
+    /// several `samizdat ... ls` invocations.
+    Doctor,
 }
 
 impl Command {
@@ -197,7 +211,7 @@ impl Command {
                 Ok(())
             }
             Command::Init { name } => commands::init(name).await,
-            Command::Import { private_key } => commands::import(private_key).await,
+            Command::Import { private_key_file } => commands::import(private_key_file).await,
             Command::Commit {
                 ttl,
                 release,
@@ -242,6 +256,7 @@ impl Command {
                         .map(|status| println!("Vacuum status is: {status:?}"))
                 }
             }
+            Command::Doctor => commands::doctor().await,
         }
     }
 }
@@ -348,17 +363,25 @@ pub enum SeriesCommand {
         /// Whether the series is a draft
         #[structopt(long)]
         is_draft: bool,
-        /// Optional public key
+        /// Optional public key (paired with `--private-key-file`)
         #[structopt(long)]
         public_key: Option<String>,
-        /// Optional private key
-        #[structopt(long)]
-        private_key: Option<String>,
+        /// Path to a file containing the private key. The flag takes a PATH, not
+        /// the raw key, so the secret never appears in argv (`ps`, shell history,
+        /// `/proc/<pid>/cmdline`, audit logs).
+        #[structopt(long = "private-key-file")]
+        private_key_file: Option<PathBuf>,
     },
-    /// Removes an existing locally owned series
+    /// Removes an existing locally owned series. Destroys the series owner and
+    /// its private key on the node; this is irreversible. Prompts for
+    /// confirmation unless `--yes` is supplied.
     Rm {
         /// Name of the series owner
         series_owner_name: String,
+        /// Skip the interactive confirmation prompt. Required when stdin is not
+        /// a terminal (e.g. in scripts) since there is no way to confirm.
+        #[structopt(long, short = "y")]
+        r#yes: bool,
     },
     /// Shows details on a particular locally owned series
     Show {
@@ -381,11 +404,15 @@ impl SeriesCommand {
                 series_owner_name,
                 is_draft,
                 public_key,
-                private_key,
-            } => commands::series::new(series_owner_name, is_draft, public_key, private_key).await,
-            SeriesCommand::Rm { series_owner_name } => {
-                commands::series::rm(series_owner_name).await
+                private_key_file,
+            } => {
+                commands::series::new(series_owner_name, is_draft, public_key, private_key_file)
+                    .await
             }
+            SeriesCommand::Rm {
+                series_owner_name,
+                r#yes,
+            } => commands::series::rm(series_owner_name, r#yes).await,
             SeriesCommand::Show { series_owner_name } => {
                 commands::series::show(series_owner_name).await
             }

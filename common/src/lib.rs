@@ -1,7 +1,5 @@
 //! Common utilities and types used across the Samizdat project.
 
-#![feature(ip)]
-
 pub extern crate quinn;
 pub extern crate rustls;
 
@@ -30,10 +28,10 @@ pub use riddles::{Hint, MessageRiddle, Riddle};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-/// Creates a cryptographically safe pseudo-random number generator using [`getrandom`] to
-/// generate the seed from the operating system's random number generator.
+/// Creates a cryptographically safe pseudo-random number generator, seeded with 32 bytes
+/// from the operating system's random number generator (the full state of `ChaChaRng`).
 pub fn csprng() -> ChaChaRng {
-    let mut seed = [0; 8];
+    let mut seed = [0u8; 32];
     getrandom::getrandom(&mut seed).expect("getrandom failed");
-    ChaChaRng::seed_from_u64(u64::from_le_bytes(seed))
+    ChaChaRng::from_seed(seed)
 }

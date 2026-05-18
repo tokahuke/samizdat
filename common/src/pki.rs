@@ -6,6 +6,7 @@ use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerializ
 use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::FromStr;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::Hash;
 
@@ -53,9 +54,20 @@ impl<T> Deref for Signed<T> {
 }
 
 /// A private key.
+///
+/// The key bytes are zeroized on drop. `Debug` and `Display` deliberately do NOT include
+/// the secret bytes; call [`PrivateKey::reveal_base64`] explicitly to serialize.
 #[derive(DeriveDeserialize, DeriveSerialize)]
 #[serde(transparent)]
 pub struct PrivateKey(ed25519_dalek::SecretKey);
+
+impl Drop for PrivateKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for PrivateKey {}
 
 impl FromStr for PrivateKey {
     type Err = crate::Error;
@@ -63,7 +75,7 @@ impl FromStr for PrivateKey {
         Ok(PrivateKey(
             ed25519_dalek::SecretKey::try_from(base64_url::decode(s)?).map_err(|dec| {
                 format!(
-                    "Failed to deserialize secret key {s}: wrong key length, got {}",
+                    "Failed to deserialize secret key: wrong key length, got {}",
                     dec.len()
                 )
             })?,
@@ -73,13 +85,21 @@ impl FromStr for PrivateKey {
 
 impl Display for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        f.write_str("PrivateKey(<redacted>)")
     }
 }
 
 impl Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        f.write_str("PrivateKey(<redacted>)")
+    }
+}
+
+impl PrivateKey {
+    /// Returns the base64-url encoding of the secret bytes. Use this only when persisting
+    /// the key to disk or transmitting on a trusted channel; never in logs.
+    pub fn reveal_base64(&self) -> String {
+        base64_url::encode(&self.0)
     }
 }
 
@@ -181,5 +201,71 @@ impl Key {
     /// Retrieves the binary representation of this public key.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+
+    fn fresh_keypair() -> SigningKey {
+        let mut seed = [0u8; 32];
+        getrandom::getrandom(&mut seed).expect("getrandom");
+        SigningKey::from_bytes(&seed)
+    }
+
+    /// Regression test for P3; Debug used to print the raw base64 secret.
+    #[test]
+    fn private_key_debug_is_redacted() {
+        let sk = fresh_keypair();
+        let pk = PrivateKey::from(sk.to_bytes());
+        let secret_b64 = pk.reveal_base64();
+
+        let dbg = format!("{pk:?}");
+        let disp = format!("{pk}");
+
+        assert!(!dbg.contains(&secret_b64), "Debug leaked the key: {dbg}");
+        assert!(!disp.contains(&secret_b64), "Display leaked the key: {disp}");
+        assert!(dbg.contains("redacted"));
+    }
+
+    /// Regression test for P3; secret bytes must not surface through any format string.
+    #[test]
+    fn private_key_format_strings_dont_leak_bytes() {
+        let sk = fresh_keypair();
+        let pk = PrivateKey::from(sk.to_bytes());
+        let raw_first_bytes = format!("{:02x}{:02x}", sk.to_bytes()[0], sk.to_bytes()[1]);
+
+        let dbg = format!("{pk:?}");
+        let disp = format!("{pk}");
+        assert!(!dbg.to_lowercase().contains(&raw_first_bytes));
+        assert!(!disp.to_lowercase().contains(&raw_first_bytes));
+    }
+
+    /// Regression test for P5. `PrivateKey` should implement `ZeroizeOnDrop`. A
+    /// compile-time trait-bound check is the practical regression guard.
+    #[test]
+    fn private_key_zeroize_on_drop() {
+        fn assert_zod<T: ZeroizeOnDrop>() {}
+        assert_zod::<PrivateKey>();
+    }
+
+    #[test]
+    fn signed_round_trip() {
+        let sk = fresh_keypair();
+        let vk = sk.verifying_key();
+        let signed = Signed::new(("hello".to_string(), 42u32), &sk);
+        assert!(signed.verify(&vk));
+    }
+
+    /// A signature from one key must not verify under a different key.
+    #[test]
+    fn signed_wrong_key_rejected() {
+        let sk = fresh_keypair();
+        let other = fresh_keypair();
+        let signed = Signed::new(123u64, &sk);
+        assert!(signed.verify(&sk.verifying_key()));
+        assert!(!signed.verify(&other.verifying_key()));
     }
 }

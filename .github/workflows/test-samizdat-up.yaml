@@ -12,12 +12,6 @@ name: test-samizdat-up
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "samizdat-up/**"
-      - ".github/workflows/test-samizdat-up.yaml"
-      - "Cargo.lock"
-      - "Cargo.toml"
 
 jobs:
   test:

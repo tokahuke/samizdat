@@ -65,9 +65,9 @@ async fn get(
     async move {
         let maybe_value = readonly_tx(|tx| {
             Table::KVStore.get(tx, key(&entity, &tail), |bytes| {
-                String::from_utf8_lossy(bytes).into_owned()
+                Ok(String::from_utf8_lossy(bytes).into_owned())
             })
-        });
+        })?;
         Ok(maybe_value)
     }
     .map(ApiResponse)
@@ -88,7 +88,7 @@ async fn put(
 ) -> ApiResponse<()> {
     async move {
         writable_tx(|tx| {
-            Table::KVStore.put(tx, key(&entity, &tail), request.value.as_str());
+            Table::KVStore.put(tx, key(&entity, &tail), request.value.as_str())?;
             Ok(())
         })
     }
@@ -100,7 +100,7 @@ async fn put(
 async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
         writable_tx(|tx| {
-            Table::KVStore.delete(tx, key(&entity, &tail));
+            Table::KVStore.delete(tx, key(&entity, &tail))?;
             Ok(())
         })
     }
@@ -112,7 +112,7 @@ async fn delete(Path(tail): Path<String>, SecurityScope(entity): SecurityScope) 
 async fn clear(SecurityScope(entity): SecurityScope) -> ApiResponse<()> {
     async move {
         writable_tx(|tx| {
-            Table::KVStore.prefix(prefix(&entity)).delete(tx);
+            Table::KVStore.prefix(prefix(&entity)).delete(tx)?;
             Ok(())
         })
     }

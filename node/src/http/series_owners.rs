@@ -44,6 +44,19 @@ pub fn api() -> Router {
         hashes: Vec<(String, String)>,
     }
 
+    // NOTE on private-key exposure: every GET on this router that returns a
+    // `SeriesOwner` serializes the `keypair` field as well, including the secret bytes.
+    // This is by design; `samizdat series show` displays the keypair so users can back
+    // it up. Three things make this defensible today:
+    //   1. The proxy strips Authorization/Referer, so external requests resolve to
+    //      `granted=[Public]` and never reach `ManageSeries`.
+    //   2. `ManageSeries` is only granted via the `/_register` trusted context, an
+    //      explicit admin action by the human operator.
+    //   3. `deny_outside_requests` confines listener to loopback.
+    // BUT: `ManageSeries` is flat (not per-entity), so a web page granted the right for
+    // entity A can also list/read secrets of series owned by entity B. If you ever add
+    // multi-tenant browser usage, scope `GET /_series-owners` per-entity AND introduce
+    // an explicit `/export-keypair/{name}` (bearer-only) for the backup flow.
     Router::new()
         .route(
             // Creates a new series owner, i.e., a public-private keypair that allows one to push new

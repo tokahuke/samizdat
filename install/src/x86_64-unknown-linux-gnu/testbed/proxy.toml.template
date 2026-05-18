@@ -1,0 +1,11 @@
+# Proxy config for the public testbed droplet. The bootstrap workflow
+# substitutes ${DOMAIN} and ${PROXY_OWNER_EMAIL} via envsubst before
+# scp'ing this file to /etc/samizdat/proxy.toml on the droplet.
+
+data = "/var/lib/samizdat/proxy"
+acme_cache = "/var/lib/samizdat/proxy/acme"
+target_node = "http://localhost:4510"
+
+https = true
+domain = "${DOMAIN}"
+owner = "${PROXY_OWNER_EMAIL}"

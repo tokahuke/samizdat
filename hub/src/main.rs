@@ -1,5 +1,3 @@
-#![feature(ip)]
-
 mod cli;
 mod db;
 mod http;

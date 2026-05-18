@@ -35,7 +35,11 @@ pub fn proxy_page(raw: &[u8], _entity: &str, _content_hash: &str) -> hyper::body
         .next()
         .map(|body| body.inner_html())
         .unwrap_or_default();
-    let rand = format!("samizdat_{:x}", rand::random::<u16>());
+    // 32-bit suffix so the CSS namespace prefix collides with user-published
+    // HTML only with probability ~1/2^32 per page rather than ~1/65536 with
+    // the old u16. The id is purely cosmetic (CSS scoping for the "Get
+    // Samizdat" modal) but a collision is annoying enough to bump.
+    let rand = format!("samizdat_{:08x}", rand::random::<u32>());
 
     ProxyedPage {
         head,

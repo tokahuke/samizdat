@@ -70,6 +70,13 @@ impl Manifest {
             anyhow::bail!("`Samizdat.toml` already exists.");
         }
 
+        // The name flows raw into a TOML template (Askama's `.txt` extension
+        // uses the no-op `Text` escaper). Reject anything that would break the
+        // resulting file or smuggle additional keys. Allowed: letters, digits,
+        // `-`, `_`, `.`, `/`, space. Names without this restriction could
+        // contain `"` to terminate the string, or newlines to inject sections.
+        validate_project_name(name)?;
+
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
             series_owner_name: name,
             keypair: None,
@@ -243,9 +250,54 @@ impl PrivateManifest {
         .render()
         .expect("can render");
 
-        fs::write("./.Samizdat.priv", rendered_private)?;
+        write_priv_file("./.Samizdat.priv", rendered_private.as_bytes())?;
         let manifest = toml::from_str(&fs::read_to_string("./.Samizdat.priv")?)?;
 
         Ok(manifest)
     }
+}
+
+/// Validates a project name before it is rendered into `Samizdat.toml`.
+///
+/// The Askama template uses the no-op `Text` escaper because the output is
+/// TOML, not HTML; the name is dropped raw inside `name = "{{ name }}"`. If we
+/// let through `"`, `\`, or newlines we either produce a malformed file or
+/// allow an attacker (or a careless directory naming) to inject extra TOML
+/// keys. The allowed alphabet is the same one paths/URLs use, plus a few
+/// punctuation marks; anything more exotic is rejected.
+fn validate_project_name(name: &str) -> Result<(), anyhow::Error> {
+    if name.is_empty() {
+        anyhow::bail!("project name must not be empty");
+    }
+    if name.len() > 128 {
+        anyhow::bail!("project name is too long (max 128 chars)");
+    }
+    for c in name.chars() {
+        let ok = c.is_ascii_alphanumeric()
+            || matches!(c, '-' | '_' | '.' | '/' | ' ');
+        if !ok {
+            anyhow::bail!(
+                "project name contains disallowed character {c:?}; \
+                 use letters, digits, '-', '_', '.', '/' or space"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Writes a file containing secret material. On Unix the file is created mode
+/// 0o600 (owner read/write only). On other platforms we still set `create_new`
+/// to avoid clobbering an existing file by mistake.
+fn write_priv_file(path: &str, contents: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    file.write_all(contents)?;
+    Ok(())
 }

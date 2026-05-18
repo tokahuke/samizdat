@@ -1,6 +1,6 @@
 {% match private_key -%}
-    {%- when Some with (key) -%} private_key = "{{ key }}"
+    {%- when Some with (key) -%} private_key = "{{ key.reveal_base64() }}"
     {%- when None -%} # private-key = "series private key here"
 {%- endmatch %}
-private-key-debug = "{{ private_key_debug }}"
+private-key-debug = "{{ private_key_debug.reveal_base64() }}"
 public-key-debug = "{{ public_key_debug }}"

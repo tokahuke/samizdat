@@ -1,4 +1,4 @@
-//! General utilities which don’t fit anywhere else.
+//! General utilities which don't fit anywhere else.
 
 use std::net::SocketAddr;
 

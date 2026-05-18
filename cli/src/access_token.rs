@@ -1,8 +1,11 @@
 //! Access token and port management for the Samizdat HTTP API.
 
-use crate::cli::cli;
+use anyhow::Context;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use crate::cli::cli;
 
 /// Access token used for authenticating requests to the Samizdat HTTP API.
 ///
@@ -19,12 +22,15 @@ pub fn access_token<'a>() -> Result<&'a str, anyhow::Error> {
 /// Initializes access token. The access token is a file in the local
 /// filesystem that grants access to protected routes in the Samizdat HTTP API.
 fn init_access_token() -> Result<String, anyhow::Error> {
-    let path = format!(
-        "{}/access-token",
-        cli().data.to_str().expect("path is not a string")
-    );
-
-    Ok(fs::read_to_string(path)?.trim().to_owned())
+    let path = data_file("access-token");
+    let contents = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "cannot read access token at {}. Is samizdat-node running with --data={}?",
+            path.display(),
+            cli().data.display()
+        )
+    })?;
+    Ok(contents.trim().to_owned())
 }
 
 /// Port number used by the Samizdat HTTP API. The port is loaded from a file in the local
@@ -38,10 +44,25 @@ pub fn port() -> Result<u16, anyhow::Error> {
 
 /// Initializes HTTP port value.
 pub fn init_port() -> Result<u16, anyhow::Error> {
-    let path = format!(
-        "{}/port",
-        cli().data.to_str().expect("path is not a string")
-    );
+    let path = data_file("port");
+    let contents = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "cannot read port file at {}. Is samizdat-node running with --data={}?",
+            path.display(),
+            cli().data.display()
+        )
+    })?;
+    contents
+        .trim()
+        .parse::<u16>()
+        .with_context(|| format!("port file at {} does not contain a valid u16", path.display()))
+}
 
-    Ok(fs::read_to_string(path)?.trim().parse::<u16>()?)
+/// Build a path inside the configured data dir. Uses `Path::join` so the
+/// result is a real `PathBuf` (no non-UTF8 panic) and so non-ASCII data
+/// dirs work as well as ASCII ones.
+fn data_file(name: &str) -> PathBuf {
+    let mut p: PathBuf = cli().data.clone();
+    p.push(Path::new(name));
+    p
 }

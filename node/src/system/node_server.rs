@@ -2,7 +2,9 @@
 
 use futures::prelude::*;
 use samizdat_common::db::readonly_tx;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Instant;
 use tarpc::context;
 
 use samizdat_common::address::{ChannelAddr, ChannelId};
@@ -10,6 +12,40 @@ use samizdat_common::cipher::TransferCipher;
 use samizdat_common::keyed_channel::KeyedChannel;
 use samizdat_common::rpc::*;
 use samizdat_common::{Hash, Riddle};
+
+/// Per-series cooldown for accepting fresh edition announcements. Bounds
+/// refresh-DoS from a malicious hub that forges announcements for a
+/// known-public series key (the signature check rejects them, but the
+/// pre-rejection cost is a task spawn + decrypt + Ed25519 verify per
+/// announcement). The cooldown caps the rate at which we even start that
+/// work per series.
+const ANNOUNCE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Map from series public-key hash to the most recent time we started a
+/// refresh attempt for it. `BTreeMap` (rather than `HashMap`) because
+/// `samizdat_common::Hash` derives `Ord` but not `std::hash::Hash`; the
+/// contention is low so the lookup-cost difference is irrelevant.
+static LAST_REFRESH_ATTEMPT: LazyLock<Mutex<BTreeMap<Hash, Instant>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+/// Returns true if a refresh for `series_key_hash` is permitted now, and
+/// records the attempt. Returns false if we're inside the cooldown.
+fn allow_refresh_attempt(series_key_hash: Hash) -> bool {
+    let now = Instant::now();
+    let mut guard = LAST_REFRESH_ATTEMPT.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(&last) = guard.get(&series_key_hash) {
+        if now < last + ANNOUNCE_COOLDOWN {
+            return false;
+        }
+    }
+    guard.insert(series_key_hash, now);
+    // Opportunistic GC: keep the map from growing unboundedly. Walk and prune
+    // entries older than 10 cooldowns. This runs on every accepted attempt;
+    // amortized cost is fine because cooldowns gate the rate.
+    let stale = now - ANNOUNCE_COOLDOWN * 10;
+    guard.retain(|_, &mut last| last > stale);
+    true
+}
 
 use crate::cli;
 use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
@@ -204,7 +240,7 @@ impl Node for NodeServer {
         let maybe_response = if let Some(series) =
             readonly_tx(|tx| SeriesRef::find(tx, &latest.key_riddle, &latest.hint)).transpose()
         {
-            match series.map(|s| readonly_tx(|tx| s.get_last_edition(tx))) {
+            match series.and_then(|s| readonly_tx(|tx| s.get_last_edition(tx))) {
                 Ok(None) => None,
                 // Do not publish draft editions in non-draft series!
                 Ok(Some(latest)) if latest.is_draft() => None,
@@ -258,6 +294,19 @@ impl Node for NodeServer {
             Ok(Some(subscription)) => {
                 tracing::info!("Found {subscription} for announcement");
 
+                // Refresh-DoS cooldown: a malicious hub can mint endless
+                // announcements for any known-public series key (the
+                // signature check rejects them, but the pre-rejection work is
+                // not free). Bound the rate per series.
+                let series_key_hash = subscription.public_key.hash();
+                if !allow_refresh_attempt(series_key_hash) {
+                    tracing::debug!(
+                        "refresh-cooldown active for series {series_key_hash}; \
+                         dropping announcement"
+                    );
+                    return;
+                }
+
                 let cipher =
                     TransferCipher::new(&subscription.public_key.hash(), &announcement.rand);
 
@@ -266,6 +315,20 @@ impl Node for NodeServer {
 
                     if !edition.is_valid() {
                         tracing::warn!("an invalid edition was announced: {:?}", edition);
+                        return Ok(());
+                    }
+
+                    // Bind the announced edition to the subscription that matched the
+                    // riddle. AEAD authenticates the cipher key (= HKDF of
+                    // subscription.public_key.hash()), but `edition.public_key` itself is
+                    // NOT part of the signed payload; so without this check a hub could
+                    // wrap a B-signed edition under an A-targeted announcement and have
+                    // the node advance and fetch inventory for an unrelated series B.
+                    if edition.public_key() != &subscription.public_key {
+                        tracing::warn!(
+                            "announced edition's public key does not match the matching \
+                             subscription's public key; rejecting"
+                        );
                         return Ok(());
                     }
 

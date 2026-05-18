@@ -23,6 +23,12 @@ use crate::{cli, hubs};
 
 use super::{BookmarkType, CollectionRef, Inventory, ItemPath, ObjectRef};
 
+/// Maximum amount by which a freshly-signed edition's `timestamp` may exceed
+/// the receiver's wall clock before being rejected. Generous enough to absorb
+/// realistic clock skew, tight enough that a compromised owner cannot pin
+/// subscribers to a future-dated edition for years.
+const EDITION_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
+
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
@@ -45,26 +51,27 @@ impl Droppable for SeriesOwner {
         // Bad idea to drop series and not really worth it space wise.
         // self.series().drop_if_exists_with(batch)?; // bad!
 
-        Table::SeriesOwners.delete(tx, self.name.as_str());
+        Table::SeriesOwners.delete(tx, self.name.as_str())?;
         Ok(())
     }
 }
 
 impl SeriesOwner {
     /// Inserts the series owner using the supplied [`WriteBatch`].
-    fn insert(&self, tx: &mut WritableTx<'_>) {
+    fn insert(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
         let series = self.series();
 
         Table::SeriesOwners.put(
             tx,
             &self.name,
             bincode::serialize(&self).expect("can serialize"),
-        );
+        )?;
         Table::Series.put(
             tx,
             series.key(),
             bincode::serialize(&series).expect("can serialize"),
-        );
+        )?;
+        Ok(())
     }
 
     /// Creates a new [`SeriesOwner`] and inserts it into the database.
@@ -81,7 +88,7 @@ impl SeriesOwner {
             is_draft,
         };
 
-        owner.insert(tx);
+        owner.insert(tx)?;
         Ok(owner)
     }
 
@@ -100,24 +107,25 @@ impl SeriesOwner {
             is_draft,
         };
 
-        owner.insert(tx);
+        owner.insert(tx)?;
         Ok(owner)
     }
 
     /// Retrieves a series owner from the database using the internal series name.
     pub fn get<Tx: TxHandle>(tx: &Tx, name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
-        Ok(Table::SeriesOwners
-            .get(tx, name.as_bytes(), |serialized| {
-                bincode::deserialize(serialized)
-            })
-            .transpose()?)
+        Table::SeriesOwners.get(tx, name.as_bytes(), |serialized| {
+            Ok(bincode::deserialize(serialized)?)
+        })
     }
 
     /// Gets all series owners in this node.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesOwner>, crate::Error> {
-        Table::SeriesOwners
+        let collected: Result<Vec<SeriesOwner>, crate::Error> = Table::SeriesOwners
             .range::<_, [u8; 0]>(..)
-            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| {
+                Ok::<SeriesOwner, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 
     /// Retrieves the series reference for this series owner.
@@ -161,15 +169,17 @@ impl SeriesOwner {
         kind: EditionKind,
     ) -> Result<Edition, crate::Error> {
         // But first, unbookmark all your old assets...
-        if let Some(edition) = self.series().get_last_edition(tx) {
-            for object in edition.collection().list_objects(tx).collect::<Vec<_>>() {
-                object?.bookmark(BookmarkType::Reference).unmark(tx);
+        if let Some(edition) = self.series().get_last_edition(tx)? {
+            let old_objects: Vec<_> = edition.collection().list_objects(tx)?.collect();
+            for object in old_objects {
+                object?.bookmark(BookmarkType::Reference).unmark(tx)?;
             }
         }
 
         // ... and bookmark all your new ones
-        for object in collection.list_objects(tx).collect::<Vec<_>>() {
-            object?.bookmark(BookmarkType::Reference).mark(tx);
+        let new_objects: Vec<_> = collection.list_objects(tx)?.collect();
+        for object in new_objects {
+            object?.bookmark(BookmarkType::Reference).mark(tx)?;
         }
 
         let edition = self.sign(collection, timestamp, ttl, kind);
@@ -178,7 +188,7 @@ impl SeriesOwner {
             tx,
             edition.key(),
             bincode::serialize(&edition).expect("can serialize"),
-        );
+        )?;
 
         Ok(edition)
     }
@@ -240,21 +250,21 @@ impl SeriesRef {
         riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<SeriesRef>, crate::Error> {
-        let outcome = Table::Series
-            .prefix(hint.prefix())
-            .for_each(tx, |key, value| match Key::from_bytes(key) {
+        let outcome = Table::Series.prefix(hint.prefix()).for_each(tx, |key, value| {
+            match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        Some(bincode::deserialize(value).expect("can deserialize"))
+                        Ok(Some(bincode::deserialize(value)?))
                     } else {
-                        None
+                        Ok(None)
                     }
                 }
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    None
+                    Ok(None)
                 }
-            });
+            }
+        })?;
 
         Ok(outcome)
     }
@@ -265,13 +275,13 @@ impl SeriesRef {
         let outcome = Table::SeriesOwners
             .range::<_, [u8; 0]>(..)
             .for_each(tx, |_, owner| {
-                let owner: SeriesOwner = bincode::deserialize(owner).expect("can deserialize");
+                let owner: SeriesOwner = bincode::deserialize(owner)?;
                 if self.public_key.as_ref() == &owner.keypair.verifying_key() {
-                    Some(true)
+                    Ok(Some(true))
                 } else {
-                    None
+                    Ok(None)
                 }
-            });
+            })?;
 
         Ok(outcome.unwrap_or(false))
     }
@@ -283,7 +293,7 @@ impl SeriesRef {
             tx,
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
-        );
+        )?;
 
         Ok(())
     }
@@ -295,23 +305,26 @@ impl SeriesRef {
             tx,
             self.key(),
             bincode::serialize(&chrono::Utc::now()).expect("can serialize"),
-        );
+        )?;
 
         Ok(())
     }
 
     /// Whether this series is still fresh, according to the latest time-to-leave.
     pub fn is_fresh<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
-        let is_fresh = if let Some(latest) = self.get_last_edition(tx) {
+        let is_fresh = if let Some(latest) = self.get_last_edition(tx)? {
             Table::SeriesFreshnesses
                 .get(tx, self.key(), |freshness| {
                     let freshness: chrono::DateTime<chrono::Utc> = bincode::deserialize(freshness)?;
+                    // Saturate instead of panicking. A malicious series owner could
+                    // sign an edition whose `ttl` exceeds `chrono::Duration::MAX`,
+                    // and the old `.expect("can convert duration")` would crash the
+                    // read path on every `is_fresh` call.
                     let ttl = chrono::Duration::from_std(latest.signed.ttl)
-                        .expect("can convert duration");
+                        .unwrap_or(chrono::TimeDelta::MAX);
 
                     Result::<_, crate::Error>::Ok(chrono::Utc::now() < freshness + ttl)
-                })
-                .transpose()?
+                })?
                 .unwrap_or(false)
         } else {
             false
@@ -326,21 +339,35 @@ impl SeriesRef {
     pub fn get_editions<Tx: TxHandle>(
         &self,
         tx: &Tx,
-    ) -> impl Send + Sync + Iterator<Item = Edition> {
+    ) -> Result<impl Send + Sync + Iterator<Item = Edition>, crate::Error> {
         let all_editions: Vec<Edition> =
             Table::Editions.prefix(self.key()).collect(tx, |_, value| {
                 bincode::deserialize(value).expect("can deserialize")
-            });
+            })?;
 
-        all_editions.into_iter().rev()
+        Ok(all_editions.into_iter().rev())
     }
 
     /// Gets the last edition for this series in the database.
-    pub fn get_last_edition<Tx: TxHandle>(&self, tx: &Tx) -> Option<Edition> {
-        self.get_editions(tx).next()
+    pub fn get_last_edition<Tx: TxHandle>(
+        &self,
+        tx: &Tx,
+    ) -> Result<Option<Edition>, crate::Error> {
+        Ok(self.get_editions(tx)?.next())
     }
 
     /// Advances the series with the supplied edition, if the edition is valid.
+    ///
+    /// Used by all peer-driven paths (announcement, get_edition, refresh). Performs:
+    ///   1. Signature validity check (already done before this call, but defensive).
+    ///   2. Key-binding check: edition's public_key must match this SeriesRef.
+    ///   3. **Monotonicity check (B5):** rejects editions older than the current latest.
+    ///      Defeats rollback replays from a misbehaving peer/hub that re-broadcasts an
+    ///      old (still-validly-signed) edition.
+    ///   4. **Bookmark accounting (B4):** Reference-pins the new edition's objects and
+    ///      Reference-unpins the previous edition's objects, so the vacuum doesn't
+    ///      collect inventory that an active subscription wants. Idempotent: advancing
+    ///      to the same edition twice (same key) is a no-op.
     pub fn advance(&self, tx: &mut WritableTx, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {
             return Err(crate::Error::InvalidEdition);
@@ -350,28 +377,74 @@ impl SeriesRef {
             return Err(crate::Error::DifferentPublicKeys);
         }
 
+        // Refuse editions whose timestamp is too far in the future. Without
+        // this bound a compromised series owner could publish an edition with
+        // `timestamp = now + 100y` and lock subscribers to it indefinitely:
+        // the monotonicity check below would then reject every legitimate
+        // republish as stale until real-world clocks catch up. The
+        // `EDITION_CLOCK_SKEW` constant lives at module scope.
+        let now = chrono::Utc::now();
+        if edition.timestamp() > now + EDITION_CLOCK_SKEW {
+            return Err(format!(
+                "edition timestamp {} is too far in the future (now is {now})",
+                edition.timestamp()
+            )
+            .into());
+        }
+
+        let previous_latest = self.get_last_edition(tx)?;
+
+        if let Some(ref latest) = previous_latest {
+            // Idempotent re-advance: same edition key; already applied, nothing to do.
+            if latest.key() == edition.key() {
+                return Ok(());
+            }
+            // Refuse stale editions.
+            if edition.timestamp() < latest.timestamp() {
+                return Err(crate::Error::StaleEdition {
+                    candidate: edition.timestamp(),
+                    current: latest.timestamp(),
+                });
+            }
+        }
+
+        // Reference-unpin the previous edition's objects, if any.
+        if let Some(ref latest) = previous_latest {
+            let old_objects: Vec<_> = latest.collection().list_objects(tx)?.collect();
+            for object in old_objects {
+                object?.bookmark(BookmarkType::Reference).unmark(tx)?;
+            }
+        }
+
+        // Reference-pin the new edition's objects.
+        let new_objects: Vec<_> = edition.collection().list_objects(tx)?.collect();
+        for object in new_objects {
+            object?.bookmark(BookmarkType::Reference).mark(tx)?;
+        }
+
         // Insert series if you don't have it yet.
         Table::Series.put(
             tx,
             self.key(),
             bincode::serialize(&self).expect("can serialize"),
-        );
+        )?;
         Table::Editions.put(
             tx,
             edition.key(),
             bincode::serialize(&edition).expect("can serialize"),
-        );
-
-        // TODO: do some cleanup on the old values.
+        )?;
 
         Ok(())
     }
 
     /// Gets all the series references in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<SeriesRef>, crate::Error> {
-        Table::Series
+        let collected: Result<Vec<SeriesRef>, crate::Error> = Table::Series
             .range::<_, [u8; 0]>(..)
-            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| {
+                Ok::<SeriesRef, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 }
 
@@ -450,11 +523,16 @@ impl Edition {
     }
 
     /// The key of this edition in the database.
+    ///
+    /// Encodes the timestamp at microsecond precision (i64, big-endian). At second
+    /// precision two editions cut in the same second would silently overwrite each other
+    /// in `Table::Editions`. Microseconds give more than enough headroom (i64 µs
+    /// represents ~292 000 years) while keeping the key small.
     #[inline(always)]
     fn key(&self) -> Vec<u8> {
         [
             self.public_key.as_bytes(),
-            &self.timestamp().timestamp().to_be_bytes(),
+            &self.timestamp().timestamp_micros().to_be_bytes(),
         ]
         .concat()
     }
@@ -487,7 +565,15 @@ impl Edition {
         }
     }
 
-    /// Refresh the underlying series using and *already validated* edition.
+    /// Refresh the underlying series using an *already validated* edition.
+    ///
+    /// Ordering matters here: we fetch and parse the inventory FIRST, only then commit
+    /// the `advance` + `refresh` to disk. Previously the advance/refresh happened
+    /// upfront; so if the inventory fetch failed, the series was already marked fresh
+    /// against a missing edition and `is_fresh` suppressed re-queries for one TTL period.
+    /// A hub announcing a valid edition while withholding the inventory could DoS the
+    /// subscription for the TTL window. Fetching first means a failed fetch leaves the
+    /// previous state intact and the next resolve attempt will re-query naturally.
     pub async fn refresh(&self) -> Result<(), crate::Error> {
         let exp_backoff = || [0, 10, 30, 70, 150].into_iter().map(Duration::from_secs);
 
@@ -500,14 +586,8 @@ impl Edition {
             .locator_for(ItemPath::from(inventory_location.as_str()))
             .hash();
 
-        writable_tx(|tx| {
-            let series = self.series();
-            series.advance(tx, self)?;
-            series.refresh(tx)?;
-            Ok(())
-        })?;
-
-        if let Some(received_item) = hubs()
+        // 1. Fetch + parse inventory BEFORE persisting any state.
+        let Some(received_item) = hubs()
             .query_with_retry(
                 inventory_content_hash,
                 QueryKind::Item,
@@ -515,98 +595,224 @@ impl Edition {
                 exp_backoff(),
             )
             .await
-        {
-            let content = match received_item {
-                ReceivedItem::NewObject(received_object) => {
-                    received_object
-                        .into_content_stream()
-                        .collect_content()
-                        .await?
-                }
-                ReceivedItem::ExistingObject(object) => object.content()?.expect("object exists"),
-            };
+        else {
+            return Err(crate::Error::from(format!(
+                "Inventory not found for edition {:?}. Could not refresh",
+                self
+            )));
+        };
 
-            let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
-                crate::Error::from(format!(
-                    "failed to deserialize inventory for edition {:?}: {}",
-                    self, err
-                ))
-            })?;
-
-            // Make the necessary calls indiscriminately:
-            for (item_path, hash) in &inventory {
-                if !readonly_tx(|tx| ObjectRef::new(*hash).exists(tx))? {
-                    let content_hash = collection.locator_for(item_path.as_path()).hash();
-                    tokio::spawn(
-                        hubs()
-                            .query_with_retry(
-                                content_hash,
-                                QueryKind::Item,
-                                Instant::now() + Duration::from_secs(60),
-                                exp_backoff(),
-                            )
-                            .map(|_| ()),
-                    );
-                } else {
-                    tracing::info!("Object {hash} already exists in the database. Skipping");
-                }
+        let content = match received_item {
+            ReceivedItem::NewObject(received_object) => {
+                received_object
+                    .into_content_stream()
+                    .collect_content()
+                    .await?
             }
+            ReceivedItem::ExistingObject(object) => object.content()?.expect("object exists"),
+        };
 
-            return Ok(());
+        let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
+            crate::Error::from(format!(
+                "failed to deserialize inventory for edition {:?}: {}",
+                self, err
+            ))
+        })?;
+
+        // 2. Inventory in hand; commit advance + refresh atomically.
+        writable_tx(|tx| {
+            let series = self.series();
+            series.advance(tx, self)?;
+            series.refresh(tx)?;
+            Ok(())
+        })?;
+
+        // 3. Schedule fetches for objects not yet local. (Best-effort; failures of
+        //    individual object fetches do not roll back the advance/refresh; the series
+        //    is at the new edition, missing objects will be queried on demand.)
+        for (item_path, hash) in &inventory {
+            if !readonly_tx(|tx| ObjectRef::new(*hash).exists(tx))? {
+                let content_hash = collection.locator_for(item_path.as_path()).hash();
+                tokio::spawn(
+                    hubs()
+                        .query_with_retry(
+                            content_hash,
+                            QueryKind::Item,
+                            Instant::now() + Duration::from_secs(60),
+                            exp_backoff(),
+                        )
+                        .map(|_| ()),
+                );
+            } else {
+                tracing::info!("Object {hash} already exists in the database. Skipping");
+            }
         }
 
-        Err(crate::Error::from(format!(
-            "Inventory not found for edition {:?}. Could not refresh",
-            self
-        )))
+        Ok(())
     }
 
     /// Gets all the editions currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Edition>, crate::Error> {
-        Table::Editions
+        let collected: Result<Vec<Edition>, crate::Error> = Table::Editions
             .range::<_, [u8; 0]>(..)
-            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| {
+                Ok::<Edition, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 }
 
-#[test]
-fn generate_series_ownership() {
-    println!(
-        "{}",
-        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use samizdat_common::db::test_harness::TestDb;
+    use samizdat_common::Hash;
+
+    /// Builds a series-owner name unique enough not to collide with leftover state from
+    /// previous tests in the same binary (TestDb shares the global DB across tests).
+    fn unique_name(base: &str) -> String {
+        format!("{base}-{}", Hash::rand())
+    }
+
+    #[test]
+    fn generate_series_ownership() {
+        TestDb::<crate::db::Table>::with(|| {
+            let name = unique_name("a-series");
+            let series = writable_tx(|tx| {
+                SeriesOwner::create(tx, &name, Duration::from_secs(3600), true)
+            })
             .unwrap()
-            .series()
-    );
-}
+            .series();
+            // Just check we got a series back; we don't compare structure.
+            let _ = series;
+        });
+    }
 
-#[test]
-fn validate_edition() {
-    let owner =
-        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
+    #[test]
+    fn validate_edition() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("v"), Duration::from_secs(3600), true)
+            })
             .unwrap();
-    let _series = owner.series();
-    let current_collection = CollectionRef::rand();
-    let edition = owner.sign(current_collection, Utc::now(), None, EditionKind::Base);
+            let edition = owner.sign(CollectionRef::rand(), Utc::now(), None, EditionKind::Base);
+            assert!(edition.is_valid());
+        });
+    }
 
-    assert!(edition.is_valid())
-}
-
-#[test]
-fn not_validate_edition() {
-    let owner =
-        writable_tx(|tx| SeriesOwner::create(tx, "a series", Duration::from_secs(3600), true))
+    #[test]
+    fn not_validate_edition_with_swapped_key() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("nv-a"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
+            let other = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("nv-b"), Duration::from_secs(3600), true)
+            })
             .unwrap();
 
-    let other_owner = writable_tx(|tx| {
-        SeriesOwner::create(tx, "another series", Duration::from_secs(3600), true)
-    })
-    .unwrap();
-    let other_series = other_owner.series();
+            let mut edition =
+                owner.sign(CollectionRef::rand(), Utc::now(), None, EditionKind::Base);
+            edition.public_key = other.series().public_key;
 
-    let current_collection = CollectionRef::rand();
+            assert!(!edition.is_valid());
+        });
+    }
 
-    let mut edition = owner.sign(current_collection, Utc::now(), None, EditionKind::Base);
-    edition.public_key = other_series.public_key;
+    /// Regression test for B5; the key used to be at second granularity, so two
+    /// editions cut in the same second overwrote each other. Now we encode microseconds
+    /// (12 bytes total: public_key || i64 µs BE).
+    #[test]
+    fn edition_key_includes_microseconds() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("k"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
 
-    assert!(!edition.is_valid())
+            let t = Utc::now();
+            let e1 = owner.sign(CollectionRef::rand(), t, None, EditionKind::Base);
+            let e2 = owner.sign(
+                CollectionRef::rand(),
+                t + chrono::Duration::microseconds(1),
+                None,
+                EditionKind::Base,
+            );
+
+            assert_ne!(e1.key(), e2.key(), "1µs-apart editions must produce distinct keys");
+        });
+    }
+
+    /// Regression test for B5; `SeriesRef::advance` must reject editions older than
+    /// the current latest to defeat rollback replays from a misbehaving peer.
+    #[test]
+    fn advance_rejects_stale_edition() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("stale"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
+            let series = owner.series();
+
+            let t_new = Utc::now();
+            let newer = owner.sign(CollectionRef::rand(), t_new, None, EditionKind::Base);
+            let older = owner.sign(
+                CollectionRef::rand(),
+                t_new - chrono::Duration::seconds(60),
+                None,
+                EditionKind::Base,
+            );
+
+            writable_tx(|tx| series.advance(tx, &newer)).unwrap();
+
+            let result = writable_tx(|tx| series.advance(tx, &older));
+            assert!(
+                matches!(result, Err(crate::Error::StaleEdition { .. })),
+                "stale edition was accepted: {result:?}"
+            );
+        });
+    }
+
+    /// Regression test for B5; re-advancing to the SAME edition (same key) must be an
+    /// idempotent no-op (not a stale rejection, not a duplicate insert).
+    #[test]
+    fn advance_is_idempotent_for_same_edition() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("idem"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
+            let series = owner.series();
+            let edition = owner.sign(CollectionRef::rand(), Utc::now(), None, EditionKind::Base);
+
+            writable_tx(|tx| series.advance(tx, &edition)).unwrap();
+            // Second call: must not error.
+            writable_tx(|tx| series.advance(tx, &edition)).unwrap();
+        });
+    }
+
+    /// Regression test for the cross-key forgery; `SeriesRef::advance` already
+    /// rejected via `DifferentPublicKeys`; pin that behavior.
+    #[test]
+    fn advance_rejects_wrong_public_key() {
+        TestDb::<crate::db::Table>::with(|| {
+            let owner = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("wk-a"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
+            let other = writable_tx(|tx| {
+                SeriesOwner::create(tx, &unique_name("wk-b"), Duration::from_secs(3600), true)
+            })
+            .unwrap();
+
+            let edition = owner.sign(CollectionRef::rand(), Utc::now(), None, EditionKind::Base);
+            // The series we ask to advance with this edition is the OTHER one.
+            let result = writable_tx(|tx| other.series().advance(tx, &edition));
+            assert!(matches!(
+                result,
+                Err(crate::Error::DifferentPublicKeys)
+            ));
+        });
+    }
 }

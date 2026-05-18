@@ -11,29 +11,53 @@ use std::str::FromStr;
 use crate::Hash;
 
 /// Represents a channel for a multiplexed QUIC connection.
+///
+/// Widened to 64 bits so randomly-assigned channel ids have a negligible birthday-bound
+/// collision probability: ~50% at ~4 billion concurrent ids, vs. ~65k for the previous
+/// 32-bit version. Collisions in the 32-bit form were a remote-triggerable panic via the
+/// asserts in `Matcher::expect/arrive`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ChannelId(u32);
+pub struct ChannelId(u64);
 
-impl From<u32> for ChannelId {
-    fn from(value: u32) -> Self {
+impl From<u64> for ChannelId {
+    fn from(value: u64) -> Self {
         Self(value)
     }
 }
 
-impl From<ChannelId> for u32 {
+impl From<ChannelId> for u64 {
     fn from(value: ChannelId) -> Self {
         value.0
     }
 }
 
+impl ChannelId {
+    /// Allocates a cryptographically random channel id.
+    pub fn random() -> Self {
+        let mut buf = [0u8; 8];
+        getrandom::getrandom(&mut buf).expect("getrandom failed");
+        Self(u64::from_le_bytes(buf))
+    }
+
+    /// Encodes the id as 8 big-endian bytes, suitable for sending on a wire.
+    pub fn to_be_bytes(self) -> [u8; 8] {
+        self.0.to_be_bytes()
+    }
+
+    /// Decodes the id from 8 big-endian bytes.
+    pub fn from_be_bytes(bytes: [u8; 8]) -> Self {
+        Self(u64::from_be_bytes(bytes))
+    }
+}
+
 impl fmt::Debug for ChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:08x}", self.0)
+        write!(f, "{:016x}", self.0)
     }
 }
 impl fmt::Display for ChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:08x}", self.0)
+        write!(f, "{:016x}", self.0)
     }
 }
 
@@ -69,11 +93,14 @@ impl ChannelAddr {
         }
     }
 
-    /// Derives a special channel address from a given hash value.
+    /// Derives a special channel address from a given hash value. Uses the first 8 bytes
+    /// of the hash as the channel id.
     pub fn from_socket_and_hash(peer_addr: SocketAddr, hash: Hash) -> ChannelAddr {
+        let mut id_bytes = [0u8; 8];
+        id_bytes.copy_from_slice(&hash[..8]);
         ChannelAddr {
             peer_addr,
-            channel_id: u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]).into(),
+            channel_id: ChannelId::from_be_bytes(id_bytes),
         }
     }
 

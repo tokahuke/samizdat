@@ -42,7 +42,7 @@ async fn receiver_task(
     loop {
         match connection.accept_uni().await {
             Ok(mut stream) => {
-                let mut id_buf = [0; 4];
+                let mut id_buf = [0; 8];
 
                 // Receive the channel id for this stream.
                 if let Err(err) = stream.read_exact(&mut id_buf).await {
@@ -51,7 +51,7 @@ async fn receiver_task(
                 }
 
                 // Decode id:
-                let channel_id = u32::from_be_bytes(id_buf).into();
+                let channel_id = ChannelId::from_be_bytes(id_buf);
                 tracing::info!("stream arrived for channel {}", channel_id);
 
                 // Send to the appropriate channel.
@@ -108,7 +108,7 @@ impl Multiplexed {
         tracing::debug!("stream opened for {}", channel_id);
 
         stream
-            .write_all(&u32::from(channel_id).to_be_bytes())
+            .write_all(&channel_id.to_be_bytes())
             .await
             .map_err(io::Error::from)?;
         tracing::debug!("channel id sent for {}", channel_id);

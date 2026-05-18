@@ -47,9 +47,9 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
                 total_size += bincode::deserialize::<ObjectStatistics>(statistics)
                     .expect("can deserialize")
                     .size();
-                None as Option<()>
+                Ok::<Option<()>, crate::Error>(None)
             })
-    });
+    })?;
 
     // If within limits, very ok!
     if total_size < cli().max_storage * 1_000_000 {
@@ -78,9 +78,9 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
                     content: (key.to_vec(), statistics.size()),
                 });
 
-                None as Option<()>
+                Ok::<Option<()>, crate::Error>(None)
             })
-    });
+    })?;
 
     // Prune until you get under the threshold.
     let mut status = VacuumStatus::Done;
@@ -118,8 +118,8 @@ pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
                     items_to_drop.push(item);
                 }
 
-                None as Option<()>
-            });
+                Ok::<Option<()>, crate::Error>(None)
+            })?;
 
         for item in items_to_drop {
             item.drop_if_exists_with(tx)?;
@@ -203,12 +203,12 @@ pub async fn run_vacuum_daemon() {
 pub fn flush_all() {
     let mut all_objects = vec![];
 
-    readonly_tx(|tx| {
+    let _: Result<Option<()>, _> = readonly_tx(|tx| {
         Table::ObjectMetadata
             .range::<_, [u8; 0]>(..)
             .for_each(tx, |hash, _| {
                 all_objects.push(ObjectRef::new(Hash::new(hash)));
-                None as Option<()>
+                Ok::<Option<()>, crate::Error>(None)
             })
     });
 
@@ -238,11 +238,11 @@ pub fn fix_chunk_ref_count(tx: &mut WritableTx) -> Result<(), crate::Error> {
                 *ref_counts.entry(chunk_hash).or_default() += 1;
             }
 
-            None as Option<()>
-        });
+            Ok::<Option<()>, crate::Error>(None)
+        })?;
 
     for (hash, ref_count) in ref_counts {
-        Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger());
+        Table::ObjectChunkRefCount.map(tx, hash, MergeOperation::Set(ref_count).merger())?;
     }
 
     Ok(())
@@ -252,13 +252,22 @@ pub fn fix_chunk_ref_count(tx: &mut WritableTx) -> Result<(), crate::Error> {
 ///
 /// Removes chunks whose reference count has dropped to zero, cleaning up orphaned data.
 ///
+/// Scan + delete happen in a single `writable_tx` to close the TOCTOU race where a
+/// concurrent `ObjectRef::create_object_with` would bump the refcount AFTER the scan but
+/// BEFORE the delete, leaving the new object with a missing chunk. Inside a writable_tx
+/// no other writer can interleave, so the refcount value we read is the same value we
+/// act on.
+///
+/// We also remove the (now zero) refcount entry itself, so a re-import of the same chunk
+/// doesn't immediately hit the same orphan path on the next vacuum pass.
+///
 /// # Note
 ///
 /// Only call this function in a __blocking__ context. If `async` is needed, refactor!
 fn drop_orphan_chunks() -> Result<usize, crate::Error> {
-    let mut chunks_to_drop = vec![];
+    writable_tx(|tx| {
+        let mut chunks_to_drop = vec![];
 
-    readonly_tx(|tx| {
         Table::ObjectChunkRefCount
             .range::<_, [u8; 0]>(..)
             .for_each(tx, |hash, ref_count| {
@@ -274,15 +283,50 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
                     }
                 }
 
-                None as Option<()>
-            })
-    });
+                Ok::<Option<()>, crate::Error>(None)
+            })?;
 
-    writable_tx(|tx| {
         let dropped = chunks_to_drop.len();
-
         for hash in chunks_to_drop {
-            Table::ObjectChunks.delete(tx, hash);
+            Table::ObjectChunks.delete(tx, hash)?;
+            Table::ObjectChunkRefCount.delete(tx, hash)?;
+        }
+
+        Ok(dropped)
+    })
+}
+
+/// Startup-only sweep: deletes any entry in `ObjectChunks` that has no corresponding
+/// `ObjectChunkRefCount` row. These are leftovers from imports that were killed
+/// mid-flight (process crash, OOM) and so never reached `create_object_with`.
+///
+/// Safe to run only when no `ObjectRef::do_import` is in flight; i.e. before the
+/// network tasks spawn. At that point an entry in `ObjectChunks` with no refcount
+/// is unambiguously orphaned and can be deleted without racing an active import.
+pub fn sweep_crash_leaked_chunks() -> Result<usize, crate::Error> {
+    writable_tx(|tx| {
+        let mut chunks_to_drop = vec![];
+
+        Table::ObjectChunks
+            .range::<_, [u8; 0]>(..)
+            .for_each(tx, |hash_bytes, _| {
+                let hash = Hash::new(hash_bytes);
+                let has_refcount = Table::ObjectChunkRefCount.has(tx, hash_bytes)?;
+                if !has_refcount {
+                    chunks_to_drop.push(hash);
+                }
+                Ok::<Option<()>, crate::Error>(None)
+            })?;
+
+        let dropped = chunks_to_drop.len();
+        for hash in chunks_to_drop {
+            Table::ObjectChunks.delete(tx, hash)?;
+        }
+
+        if dropped > 0 {
+            tracing::info!(
+                "Startup sweep removed {dropped} chunk(s) left behind by previous crashed imports"
+            );
         }
 
         Ok(dropped)
@@ -296,28 +340,20 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
 fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 
-    let outcome = readonly_tx(|tx| {
+    readonly_tx(|tx| {
         Table::CollectionItems
             .range::<_, [u8; 0]>(..)
             .for_each(tx, |_, item| {
                 let item: CollectionItem = bincode::deserialize(item).expect("can deserialize");
 
-                item.object()
-                    .and_then(|o| o.exists(tx))
-                    .map(|exists| {
-                        if !exists {
-                            items_to_drop.push(item);
-                        }
-                    })
-                    .err()?;
+                let exists = item.object().and_then(|o| o.exists(tx))?;
+                if !exists {
+                    items_to_drop.push(item);
+                }
 
-                None
+                Ok::<Option<()>, crate::Error>(None)
             })
-    });
-
-    if let Some(err) = outcome {
-        return Err(err);
-    }
+    })?;
 
     writable_tx(|tx| {
         let dropped = items_to_drop.len();

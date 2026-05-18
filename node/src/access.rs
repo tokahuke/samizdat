@@ -15,6 +15,8 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::OnceLock;
 
 use samizdat_common::Hash;
@@ -43,7 +45,14 @@ pub fn init_access_token() -> Result<(), crate::Error> {
         "{}/access-token",
         cli().data.to_str().expect("path is not a string")
     );
-    let try_open_existing = OpenOptions::new().write(true).create_new(true).open(&path);
+
+    // Owner-only (0600) on Unix. On other platforms, create_new + the data dir's perms
+    // are the best we can do without a platform-specific ACL crate.
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    let try_open_existing = opts.open(&path);
 
     let access_token = match try_open_existing {
         Ok(mut file) => {
@@ -57,8 +66,9 @@ pub fn init_access_token() -> Result<(), crate::Error> {
         Err(error) => return Err(error.into()),
     };
 
-    // Set static:
-    tracing::info!("Node access token is {access_token:?}");
+    // Set static. Deliberately do NOT log the token: it grants admin rights to the node
+    // and would leak via journald, file logging, or shared shells.
+    tracing::info!("Node access token initialised (length {})", access_token.len());
     ACCESS_TOKEN.set(access_token).ok();
 
     // ... and also piggyback writing port here. I know this is hacky, but...

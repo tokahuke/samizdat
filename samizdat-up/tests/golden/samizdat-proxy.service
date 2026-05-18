@@ -1,0 +1,15 @@
+[Unit]
+Description=Samizdat Proxy
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+Environment=RUST_BACKTRACE=1
+ExecStart=/usr/local/bin/samizdat-proxy --config /etc/samizdat/proxy.toml
+
+[Install]
+WantedBy=multi-user.target

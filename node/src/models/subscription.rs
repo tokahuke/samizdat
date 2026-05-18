@@ -57,7 +57,7 @@ impl Display for SubscriptionRef {
 
 impl Droppable for SubscriptionRef {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
-        Table::Subscriptions.delete(tx, self.key());
+        Table::Subscriptions.delete(tx, self.key())?;
         Ok(())
     }
 }
@@ -74,7 +74,7 @@ impl SubscriptionRef {
 
     /// Whether the subscription exists in the local database.
     pub fn exists<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
-        Ok(Table::Subscriptions.has(tx, self.public_key.as_bytes()))
+        Table::Subscriptions.has(tx, self.public_key.as_bytes())
     }
 
     /// The key of this subscription in the database.
@@ -91,7 +91,7 @@ impl SubscriptionRef {
             tx,
             subscription.public_key.as_bytes(),
             bincode::serialize(&subscription).expect("can serialize"),
-        );
+        )?;
 
         let subscription_ref = SubscriptionRef {
             public_key: subscription.public_key,
@@ -127,16 +127,17 @@ impl SubscriptionRef {
     /// Gets the subscription corresponding to this reference in the database, if it
     /// exists.
     pub fn get<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<Subscription>, crate::Error> {
-        Ok(Table::Subscriptions
-            .get(tx, self.key(), |value| bincode::deserialize(value))
-            .transpose()?)
+        Table::Subscriptions.get(tx, self.key(), |value| Ok(bincode::deserialize(value)?))
     }
 
     /// Gets all subscriptions currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Subscription>, crate::Error> {
-        Table::Subscriptions
+        let collected: Result<Vec<Subscription>, crate::Error> = Table::Subscriptions
             .range::<_, [u8; 0]>(..)
-            .collect(tx, |_, value| Ok(bincode::deserialize(value)?))
+            .collect(tx, |_, value| {
+                Ok::<Subscription, crate::Error>(bincode::deserialize(value)?)
+            })?;
+        collected
     }
 
     /// Runs through the database looking for a subscription the matches the supplied
@@ -146,21 +147,22 @@ impl SubscriptionRef {
         riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<SubscriptionRef>, crate::Error> {
-        let outcome = Table::Subscriptions
-            .prefix(hint.prefix())
-            .for_each(tx, |key, value| match Key::from_bytes(key) {
+        let outcome = Table::Subscriptions.prefix(hint.prefix()).for_each(
+            tx,
+            |key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
-                        Some(bincode::deserialize(value).expect("can deserialize"))
+                        Ok(Some(bincode::deserialize(value)?))
                     } else {
-                        None
+                        Ok(None)
                     }
                 }
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    None
+                    Ok(None)
                 }
-            });
+            },
+        )?;
 
         Ok(outcome)
     }

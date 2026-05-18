@@ -135,7 +135,7 @@ impl ObjectHeader {
 /// Helper function to get a chunk by its hash in the database.
 pub fn get_chunk<Tx: TxHandle>(tx: &Tx, hash: Hash) -> Result<Vec<u8>, crate::Error> {
     Ok(Table::ObjectChunks
-        .get(tx, hash, |slice| slice.to_vec())
+        .get(tx, hash, |slice| Ok(slice.to_vec()))?
         .ok_or_else(|| format!("Chunk missing: {}", hash))?)
 }
 
@@ -351,18 +351,28 @@ impl Droppable for ObjectRef {
         // }
 
         for chunk_hash in metadata.hashes {
-            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(-1).merger());
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(-1).merger())?;
         }
 
         // leave the vacuum daemon to clean up unused chunks. It runs frequently.
 
-        self.bookmark(BookmarkType::Reference).clear(tx);
-        self.bookmark(BookmarkType::User).clear(tx);
+        // Only the User bookmark is cleared here. The Reference bookmark is a counter of
+        // pinning entities (e.g. live editions of an owned series); clearing it
+        // unconditionally would lose that information and let the count drift negative on
+        // a subsequent series-owner advance. The two callers of this function that can
+        // reach a "Reference > 0" object are:
+        //   1. `vacuum()`; guarded by `is_bookmarked(tx)?` (vacuum.rs), which returns
+        //      true when Reference > 0, so the call never actually happens then.
+        //   2. `flush_all` and `DELETE /_objects/{hash}`; admin actions; the count is
+        //      left in the table and naturally decays as editions are advanced/dropped.
+        //      Any non-zero count (incl. negative) is treated as "still bookmarked" by
+        //      `Bookmark::is_marked`, so vacuum does not collect mid-drift objects.
+        self.bookmark(BookmarkType::User).clear(tx)?;
 
-        Table::ObjectStatistics.delete(tx, self.hash);
-        Table::ObjectMetadata.delete(tx, self.hash);
-        Table::ObjectMetadata.delete(tx, self.hash);
-        Table::Objects.delete(tx, self.hash);
+        Table::ObjectStatistics.delete(tx, self.hash)?;
+        Table::ObjectMetadata.delete(tx, self.hash)?;
+        Table::ObjectMetadata.delete(tx, self.hash)?;
+        Table::Objects.delete(tx, self.hash)?;
 
         Ok(())
     }
@@ -385,15 +395,15 @@ impl ObjectRef {
 
     /// Returns whether an object exists in the database or not.
     pub fn exists<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
-        Ok(Table::ObjectMetadata.has(tx, self.hash))
+        Table::ObjectMetadata.has(tx, self.hash)
     }
 
     /// Returns the metadata on this object. This function returns `Ok(None)` if the object
     /// does not actually exist.
     pub fn metadata<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectMetadata>, crate::Error> {
-        Ok(Table::ObjectMetadata
-            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
-            .transpose()?)
+        Table::ObjectMetadata.get(tx, self.hash, |serialized| {
+            Ok(bincode::deserialize(serialized)?)
+        })
     }
 
     /// Gets statistics on this object. Returns `Ok(None)` if the object does not exist.
@@ -401,9 +411,9 @@ impl ObjectRef {
         &self,
         tx: &Tx,
     ) -> Result<Option<ObjectStatistics>, crate::Error> {
-        Ok(Table::ObjectStatistics
-            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
-            .transpose()?)
+        Table::ObjectStatistics.get(tx, self.hash, |serialized| {
+            Ok(bincode::deserialize(serialized)?)
+        })
     }
 
     /// Update statistics indicating that this object was used. This will signal to the
@@ -411,9 +421,10 @@ impl ObjectRef {
     ///
     /// This function has no effect if the object does not exist.
     fn touch(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
-        let maybe_statistics: Option<ObjectStatistics> = Table::ObjectStatistics
-            .get(tx, self.hash, |serialized| bincode::deserialize(serialized))
-            .transpose()?;
+        let maybe_statistics: Option<ObjectStatistics> =
+            Table::ObjectStatistics.get(tx, self.hash, |serialized| {
+                Ok(bincode::deserialize(serialized)?)
+            })?;
 
         if let Some(mut statistics) = maybe_statistics {
             statistics.touch();
@@ -422,7 +433,7 @@ impl ObjectRef {
                 tx,
                 self.hash,
                 bincode::serialize(&statistics).expect("can serialize"),
-            );
+            )?;
         }
 
         Ok(())
@@ -439,16 +450,16 @@ impl ObjectRef {
                 Ok(hash) => hash,
                 Err(err) => {
                     tracing::warn!("{}", err);
-                    return None;
+                    return Ok(None);
                 }
             };
 
             if content_riddle.resolves(&hash) {
-                return Some(ObjectRef { hash });
+                return Ok(Some(ObjectRef { hash }));
             }
 
-            None
-        });
+            Ok(None)
+        })?;
 
         Ok(outcome)
     }
@@ -460,31 +471,33 @@ impl ObjectRef {
         metadata: &ObjectMetadata,
         statistics: &ObjectStatistics,
         bookmark: bool,
-    ) {
+    ) -> Result<(), crate::Error> {
         // Do not insert if object already exists. This will overwrite information!
         if ObjectRef::new(hash).exists(tx).unwrap_or(false) {
             tracing::info!("Object {hash} already exists in the database; skipping creation");
-            return;
+            return Ok(());
         }
-        Table::Objects.put(tx, hash, []);
+        Table::Objects.put(tx, hash, [])?;
         Table::ObjectMetadata.put(
             tx,
             hash,
             bincode::serialize(&metadata).expect("can serialize"),
-        );
+        )?;
         Table::ObjectStatistics.put(
             tx,
             hash,
             bincode::serialize(&statistics).expect("can serialize"),
-        );
+        )?;
 
         for chunk_hash in &metadata.hashes {
-            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(1).merger());
+            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(1).merger())?;
         }
 
         if bookmark {
-            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark(tx);
+            Bookmark::new(BookmarkType::User, ObjectRef { hash }).mark(tx)?;
         }
+
+        Ok(())
     }
 
     /// Build a new object from data coming from a _trusted_ source.
@@ -513,7 +526,7 @@ impl ObjectRef {
             let chunk_hash = Hash::from_bytes(&buffer);
 
             writable_tx(|tx| {
-                Table::ObjectChunks.put(tx, chunk_hash.as_ref(), buffer.as_slice());
+                Table::ObjectChunks.put(tx, chunk_hash.as_ref(), buffer.as_slice())?;
                 Ok(())
             })
             .expect("infalible");
@@ -547,7 +560,7 @@ impl ObjectRef {
         tracing::debug!("Object {hash} metadata is {:#?}", metadata);
 
         writable_tx(|tx| {
-            ObjectRef::create_object_with(tx, hash, &metadata, &statistics, bookmark);
+            ObjectRef::create_object_with(tx, hash, &metadata, &statistics, bookmark)?;
             Ok(())
         })
         .unwrap();
@@ -628,89 +641,126 @@ impl ObjectRef {
         let mut arrived_chunks = vec![false; merkle_tree.len()];
         let mut content_size = 0;
         let mut maybe_header = None;
+        // Track chunks we wrote that didn't pre-exist in the DB. On the failure path we
+        // roll these back, guarded by a re-check that no other import has since claimed
+        // them (i.e. `ObjectChunkRefCount` is still absent). Chunks we did NOT add
+        // ourselves stay put.
+        let mut my_newly_written: Vec<Hash> = Vec::new();
         let mut limited_chunks = chunks.take(merkle_tree.len());
 
-        while let Some(chunk) = limited_chunks.next().await.transpose()? {
-            // Check if hash actually corresponds to hash in merkle tree.
-            let received_hash = Hash::from_bytes(&chunk);
-            let Some(chunk_id) = hashes.get(&received_hash).copied() else {
-                return Err(format!(
-                    "Received chunk has hash {received_hash}; which was not expected"
-                )
-                .into());
-            };
-
-            // Extract object header in the first chunk:
-            if chunk_id == 0 {
-                let (_, header) = ObjectHeader::read(chunk.iter().copied().map(Ok))?;
-
-                if header != supplied_metadata.header {
+        let outcome: Result<(), crate::Error> = async {
+            while let Some(chunk) = limited_chunks.next().await.transpose()? {
+                // Check if hash actually corresponds to hash in merkle tree.
+                let received_hash = Hash::from_bytes(&chunk);
+                let Some(chunk_id) = hashes.get(&received_hash).copied() else {
                     return Err(format!(
-                        "Supplied object header {:?} is not equal to transmitted header {:?}",
-                        supplied_metadata.header, header
+                        "Received chunk has hash {received_hash}; which was not expected"
                     )
                     .into());
+                };
+
+                // Extract object header in the first chunk:
+                if chunk_id == 0 {
+                    let (_, header) = ObjectHeader::read(chunk.iter().copied().map(Ok))?;
+
+                    if header != supplied_metadata.header {
+                        return Err(format!(
+                            "Supplied object header {:?} is not equal to transmitted header {:?}",
+                            supplied_metadata.header, header
+                        )
+                        .into());
+                    }
+
+                    maybe_header = Some(header);
                 }
 
-                maybe_header = Some(header);
+                // Warn of incompatible chunk size (big chunks are dealt with somewhere else):
+                if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
+                    tracing::warn!(
+                        "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
+                        sized chunks might become illegal in the future.",
+                        chunk.len() / 1_000
+                    );
+                }
+
+                // Put chunk in the database and record whether we added it fresh.
+                writable_tx(|tx| {
+                    let was_present = Table::ObjectChunks.has(tx, received_hash.as_ref())?;
+                    Table::ObjectChunks.put(tx, received_hash.as_ref(), chunk.as_slice())?;
+                    if !was_present {
+                        my_newly_written.push(received_hash);
+                    }
+                    Ok(())
+                })?;
+
+                // Emit received chunk:
+                tracing::info!("Chunk {chunk_id} for object {hash} received");
+                sender.send(Ok((chunk_id, received_hash))).ok();
+
+                // Next chunk!
+                content_size += chunk.len();
+                arrived_chunks[chunk_id] = true;
             }
 
-            // Warn of incompatible chunk size (big chunks are dealt with somewhere else):
-            if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
-                tracing::warn!(
-                    "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
-                    sized chunks might become illegal in the future.",
-                    chunk.len() / 1_000
-                );
+            // Check if _all_ chunks were ingested
+            let not_arrived = arrived_chunks
+                .iter()
+                .enumerate()
+                .filter(|&(_, &x)| !x)
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>();
+            if !not_arrived.is_empty() {
+                return Err(format!(
+                    "Insufficient chunks for object {} received: missing {:?}",
+                    merkle_tree.root(),
+                    not_arrived,
+                )
+                .into());
             }
 
-            // Put chunk in the database
+            // Build object:
+            let metadata = ObjectMetadata {
+                hashes: merkle_tree.hashes().to_vec(),
+                header: maybe_header.ok_or(crate::Error::NoHeaderRead)?,
+                content_size,
+                received_at: chrono::Utc::now(),
+            };
+            let statistics = ObjectStatistics::new(content_size, query_duration);
+
             writable_tx(|tx| {
-                Table::ObjectChunks.put(tx, received_hash.as_ref(), chunk.as_slice());
+                ObjectRef::create_object_with(tx, hash, &metadata, &statistics, false)?;
+                tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
+
                 Ok(())
             })
-            .expect("infalible");
+        }
+        .await;
 
-            // Emit received chunk:
-            tracing::info!("Chunk {chunk_id} for object {hash} received");
-            sender.send(Ok((chunk_id, received_hash))).ok();
-
-            // Next chunk!
-            content_size += chunk.len();
-            arrived_chunks[chunk_id] = true;
+        // Best-effort rollback of chunks we wrote that aren't yet referenced by any
+        // object. A concurrent successful import of the same chunk will have bumped
+        // ObjectChunkRefCount; we leave those alone.
+        if outcome.is_err() && !my_newly_written.is_empty() {
+            let to_remove = std::mem::take(&mut my_newly_written);
+            let n = to_remove.len();
+            let cleanup = writable_tx(|tx| {
+                for hash in &to_remove {
+                    let still_unreferenced =
+                        !Table::ObjectChunkRefCount.has(tx, hash.as_ref())?;
+                    if still_unreferenced {
+                        Table::ObjectChunks.delete(tx, hash.as_ref())?;
+                    }
+                }
+                Ok(())
+            });
+            if let Err(err) = cleanup {
+                tracing::warn!(
+                    "Rollback of {n} partial-import chunk(s) failed: {err}. \
+                     Startup sweep will reclaim them on next restart."
+                );
+            }
         }
 
-        // Check if _all_ chunks were ingested
-        let not_arrived = arrived_chunks
-            .into_iter()
-            .enumerate()
-            .filter(|&(_, x)| !x)
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-        if !not_arrived.is_empty() {
-            return Err(format!(
-                "Insufficient chunks for object {} received: missing {:?}",
-                merkle_tree.root(),
-                not_arrived,
-            )
-            .into());
-        }
-
-        // Build object:
-        let metadata = ObjectMetadata {
-            hashes: merkle_tree.hashes().to_vec(),
-            header: maybe_header.ok_or(crate::Error::NoHeaderRead)?,
-            content_size,
-            received_at: chrono::Utc::now(),
-        };
-        let statistics = ObjectStatistics::new(content_size, query_duration);
-
-        writable_tx(|tx| {
-            ObjectRef::create_object_with(tx, hash, &metadata, &statistics, false);
-            tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
-
-            Ok(())
-        })
+        outcome
     }
 
     /// Create a copy of this object, but with a different nonce header value. This new object

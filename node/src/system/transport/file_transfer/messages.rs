@@ -34,7 +34,7 @@ pub trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeseria
             .recv(MAX_HEADER_LENGTH)
             .await?
             .ok_or("channel dried")?;
-        cipher.decrypt(&mut serialized_header);
+        cipher.decrypt(&mut serialized_header)?;
         let header: Self = bincode::deserialize(&serialized_header)?;
 
         Ok(header)
@@ -47,7 +47,7 @@ pub trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeseria
         cipher: &TransferCipher,
     ) -> Result<(), crate::Error> {
         let mut serialized_header = bincode::serialize(&self).expect("can serialize");
-        cipher.encrypt(&mut serialized_header);
+        cipher.encrypt(&mut serialized_header)?;
         sender.send(&serialized_header).await?;
 
         Ok(())
@@ -132,17 +132,6 @@ impl ItemMessage {
     }
 }
 
-/// Whether to proceed or not after receiving the value of the item object hash.
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ProceedMessage {
-    /// Proceed with object transmission.
-    Proceed,
-    /// Object found local; end of transaction.
-    Cancel,
-}
-
-impl Message for ProceedMessage {}
-
 /// A header sending information (metadata) on an item.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectMessage {
@@ -181,6 +170,20 @@ impl ObjectMessage {
     /// Validates if this messge corresponds to specific hash, among other things,
     /// returning a tustred merkle tree in the end, or a validation error.
     pub fn validate(&self, hash: Hash) -> Result<MerkleTree, crate::Error> {
+        // Size cap FIRST (cheap), before constructing the merkle tree from peer-supplied
+        // hashes (each level is a SHA3-224 over its children; non-trivial CPU on long
+        // hash lists). `saturating_mul` defangs an absurd `max_content_size` config that
+        // would otherwise wrap.
+        let max_bytes = (cli().max_content_size).saturating_mul(1_000_000);
+        if self.metadata.content_size > max_bytes {
+            return Err(format!(
+                "content too big: max size is {}Mb, but content is {}Mb",
+                cli().max_content_size,
+                self.metadata.content_size / 1_000_000,
+            )
+            .into());
+        }
+
         let merkle_tree = MerkleTree::from(self.metadata.hashes.clone());
 
         // Check if content actually corresponds to advertized hash:
@@ -189,16 +192,6 @@ impl ObjectMessage {
                 "bad content from peer: expected {}, got {}",
                 hash,
                 merkle_tree.root(),
-            )
-            .into());
-        }
-
-        // Refuse if content is too big:
-        if self.metadata.content_size > cli().max_content_size * 1_000_000 {
-            return Err(format!(
-                "content too big: max size is {}Mb, but content is {}Mb",
-                cli().max_content_size,
-                self.metadata.content_size / 1_000_000,
             )
             .into());
         }
@@ -226,7 +219,7 @@ impl ObjectMessage {
                 .map(move |compressed_chunk| {
                     compressed_chunk.and_then(|mut compressed_chunk| {
                         // Decrypt and decompress:
-                        cipher.decrypt(&mut compressed_chunk);
+                        cipher.decrypt(&mut compressed_chunk)?;
 
                         // Decompress chunk:
                         let mut chunk = Vec::with_capacity(CHUNK_SIZE);
@@ -278,9 +271,12 @@ impl ObjectMessage {
                     .bytes()
                     .collect::<Result<Vec<_>, _>>()
                     .expect("never error");
-                cipher.encrypt(&mut compressed);
+                let encrypt_result = cipher.encrypt(&mut compressed);
 
-                async move { sender.send(&compressed).await }
+                async move {
+                    encrypt_result?;
+                    sender.send(&compressed).await
+                }
             })
             .await?;
 

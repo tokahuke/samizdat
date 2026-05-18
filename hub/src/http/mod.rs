@@ -96,8 +96,13 @@ pub async fn serve() -> Result<(), crate::Error> {
                 .layer(tower_http::trace::TraceLayer::new_for_http()),
         );
 
+    // Bind to loopback only. The admin plane is operator-facing; remote operators
+    // should tunnel in (ssh -L, wireguard) rather than expose this port. Combined
+    // with `deny_outside_requests`, this is defense in depth: a future middleware
+    // reorder, an added route mounted before `.layer`, or a reverse proxy in front
+    // can't accidentally publish the admin API.
     axum::serve(
-        tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, cli().http_port)).await?,
+        tokio::net::TcpListener::bind((Ipv6Addr::LOCALHOST, cli().http_port)).await?,
         server.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await?;
@@ -189,13 +194,13 @@ fn connection_logs() -> Router {
 
                         ConnectionLog::range(start, end).for_each(tx, |_, serialized| {
                             if logs.len() >= limit {
-                                return Some(());
+                                return Ok(Some(()));
                             }
 
-                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
+                            logs.push(bincode::deserialize(serialized)?);
 
-                            None
-                        });
+                            Ok(None)
+                        })?;
 
                         Ok(ConnectionLogResponse { logs })
                     })
@@ -235,12 +240,12 @@ fn query_logs() -> Router {
 
                         QueryLog::range(start, end).for_each(tx, |_, serialized| {
                             if logs.len() >= limit {
-                                return Some(());
+                                return Ok(Some(()));
                             }
 
-                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
-                            None
-                        });
+                            logs.push(bincode::deserialize(serialized)?);
+                            Ok(None)
+                        })?;
 
                         Ok(QueryLogsResponse { logs })
                     })
@@ -280,12 +285,12 @@ fn candidate_logs() -> Router {
 
                         CandidateLog::range(start, end).for_each(tx, |_, serialized| {
                             if logs.len() >= limit {
-                                return Some(());
+                                return Ok(Some(()));
                             }
 
-                            logs.push(bincode::deserialize(serialized).expect("can deserialize"));
-                            None
-                        });
+                            logs.push(bincode::deserialize(serialized)?);
+                            Ok(None)
+                        })?;
 
                         Ok(CandidateLogsResponse { logs })
                     })
@@ -336,25 +341,24 @@ fn statistics_logs() -> Router {
 
                         StatisticsLog::range(start, end).for_each(tx, |_, serialized| {
                             if logs.len() >= limit {
-                                return Some(());
+                                return Ok(Some(()));
                             }
 
-                            let log: StatisticsLog =
-                                bincode::deserialize(serialized).expect("can deserialize");
+                            let log: StatisticsLog = bincode::deserialize(serialized)?;
 
                             if let Some(statistics_type) = statistics_type {
                                 if statistics_type != log.statistics().statistics_type {
-                                    return None;
+                                    return Ok(None);
                                 }
                             }
 
                             if !peers.is_empty() && !peers.contains(&log.statistics().peer_ip) {
-                                return None;
+                                return Ok(None);
                             }
 
                             logs.push(log);
-                            None
-                        });
+                            Ok(None)
+                        })?;
 
                         Ok(StatisticsLogsResponse { logs })
                     })

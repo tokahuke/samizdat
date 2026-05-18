@@ -6,9 +6,14 @@ members = [
     "hub",
     "cli",
     "proxy",
-    "install/src/x86_64-pc-windows-gnu/node/samizdat-service",
+    "samizdat-up",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+authors = ["Pedro B Arruda <pedrobittencourt3@gmail.com>"]
+edition = "2024"
 
 [profile.release]
 

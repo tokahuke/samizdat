@@ -30,6 +30,7 @@ async fn main() {
     };
 
     if let Err(err) = outcome {
-        println!("Error: {err:?}");
+        eprintln!("Error: {err:?}");
+        std::process::exit(1);
     }
 }
