@@ -176,14 +176,6 @@ No known deferred items.
   Windows path of this workflow is what would catch regressions in
   the windows branch above. The maintainer has no Windows machine
   to test on, so this matrix IS the Windows test.
-- **Homebrew formula `sha256` + versioned URL.** The current formula
-  pulls from `latest/`, no sha pin. To pass `brew install` cleanly
-  it needs version + sha256 baked in per release. Wire into the
-  publish workflow: after the sha of the macOS samizdat-up tarball
-  is known, generate a new `Samizdat.rb` and push to the
-  `homebrew-samizdat` tap repo.
-- **Switch `get-samizdat` install scripts to HTTPS.** (Already done
-  in `install.sh.template`; remove from this list once verified.)
 - **`get-samizdat/.Samizdat.priv` history verification.** The
   install collection has a series key; verify nothing leaked it via
   `git log -p -- '.Samizdat.priv'` or equivalent.
