@@ -236,19 +236,53 @@ pub(super) fn self_update() -> Result<()> {
         fetch::fetch_file(&origin, "latest", target, "samizdat-up", SAMIZDAT_UP_EXE)
             .context("fetching new samizdat-up.exe")?;
     let dest = wrapper_path();
-    // Windows can't overwrite a running .exe; rename the current one
-    // out of the way first. The kernel keeps the running mapping
-    // until process exit, but the path is now free for the new binary.
+
+    // Stage the new exe + smoke-test it before parking the running
+    // one. If the new binary is corrupt or wrong-arch, we bail with
+    // the old samizdat-up.exe untouched.
+    let staged = dest.with_extension("exe.new");
+    atomic_write(&staged, &fetched.bytes)
+        .with_context(|| format!("staging new samizdat-up at {}", staged.display()))?;
+    smoke_test(&staged)
+        .with_context(|| format!("rejected new samizdat-up at {}", staged.display()))?;
+
+    // Windows can't overwrite a running .exe; park the current one
+    // first. The kernel keeps the running mapping until process exit,
+    // but the path is now free for the new binary.
     let parked = dest.with_extension("exe.old");
     let _ = fs::remove_file(&parked);
     if dest.exists() {
         fs::rename(&dest, &parked)
             .with_context(|| format!("parking {}", dest.display()))?;
     }
-    atomic_write(&dest, &fetched.bytes)
-        .with_context(|| format!("replacing {} from {}", dest.display(), fetched.source))?;
+    fs::rename(&staged, &dest)
+        .with_context(|| format!("renaming {} -> {}", staged.display(), dest.display()))?;
     println!("samizdat-up: self-updated -> {}", dest.display());
     println!("(previous samizdat-up.exe parked at {}; remove later if you like)", parked.display());
+    Ok(())
+}
+
+fn smoke_test(path: &Path) -> Result<()> {
+    let out = Command::new(path)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("could not exec {}", path.display()))?;
+    if !out.status.success() {
+        bail!(
+            "{} --version exited with {} (stderr: {:?})",
+            path.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !stdout.contains("samizdat-up") {
+        bail!(
+            "{} --version did not identify as samizdat-up: {:?}",
+            path.display(),
+            stdout
+        );
+    }
     Ok(())
 }
 

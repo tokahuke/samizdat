@@ -48,6 +48,15 @@ pub struct Fetched {
 
 /// Download a file from the collection. `origin` is the URL prefix up
 /// to but not including `<version>`, normally [`DEFAULT_ORIGIN`].
+///
+/// Transit integrity comes from HTTPS (TLS MAC on the body). End-to-
+/// end signature verification is not done here: the proxy stamps an
+/// `X-Samizdat-Object` header with `Sha3_224(body)`, but that hash is
+/// computed by whoever served the bytes, so it cannot defend against
+/// a compromised proxy serving different bytes. The real defense is
+/// the `docs/deferred.md` "V2 trust model" item: fetch the signed
+/// inventory + verify objects against the series public key baked
+/// into samizdat-up.
 pub fn fetch_file(
     origin: &str,
     version: &str,
@@ -58,9 +67,6 @@ pub fn fetch_file(
     let url = format!("{origin}/{version}/{target_triple}/{component}/{file}");
 
     if let Some(local_path) = strip_file_scheme(&url) {
-        // file://... -- local artifact path, used by the integration
-        // test workflow so we exercise install logic without depending
-        // on the testbed being up.
         let bytes = std::fs::read(&local_path)
             .with_context(|| format!("reading local artifact at {}", local_path.display()))?;
         return Ok(Fetched {

@@ -157,9 +157,48 @@ pub(super) fn self_update() -> Result<()> {
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
     let dest = PathBuf::from("/usr/local/bin/samizdat-up");
-    atomic_write_executable(&dest, &fetched.bytes)
-        .with_context(|| format!("replacing {} from {}", dest.display(), fetched.source))?;
+
+    // Stage the new binary in a sibling file, run `--version` on it,
+    // and only swap if it answers cleanly. Catches mismatched-arch
+    // bytes, corrupted downloads, and binaries that link against a
+    // libc the host does not have, all of which would otherwise brick
+    // the user's samizdat-up.
+    let staged = dest.with_extension("samizdat-up-new");
+    atomic_write_executable(&staged, &fetched.bytes)
+        .with_context(|| format!("staging new samizdat-up at {}", staged.display()))?;
+    smoke_test(&staged)
+        .with_context(|| format!("rejected new samizdat-up at {}", staged.display()))?;
+    fs::rename(&staged, &dest)
+        .with_context(|| format!("renaming {} -> {}", staged.display(), dest.display()))?;
     println!("samizdat-up: self-updated -> {}", dest.display());
+    Ok(())
+}
+
+/// Spawn `<path> --version` and require exit 0 with output that
+/// looks like a samizdat-up version line. Tier 1 self-update gate:
+/// catches operational corruption (truncation, wrong arch, missing
+/// libc symbols) before the binary lands on PATH.
+fn smoke_test(path: &Path) -> Result<()> {
+    let out = Command::new(path)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("could not exec {}", path.display()))?;
+    if !out.status.success() {
+        bail!(
+            "{} --version exited with {} (stderr: {:?})",
+            path.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !stdout.contains("samizdat-up") {
+        bail!(
+            "{} --version did not identify as samizdat-up: {:?}",
+            path.display(),
+            stdout
+        );
+    }
     Ok(())
 }
 

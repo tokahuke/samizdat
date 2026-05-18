@@ -195,9 +195,39 @@ pub(super) fn self_update() -> Result<()> {
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
     let dest = PathBuf::from("/usr/local/bin/samizdat-up");
-    atomic_write_executable(&dest, &fetched.bytes)
-        .with_context(|| format!("replacing {} from {}", dest.display(), fetched.source))?;
+
+    let staged = dest.with_extension("samizdat-up-new");
+    atomic_write_executable(&staged, &fetched.bytes)
+        .with_context(|| format!("staging new samizdat-up at {}", staged.display()))?;
+    smoke_test(&staged)
+        .with_context(|| format!("rejected new samizdat-up at {}", staged.display()))?;
+    fs::rename(&staged, &dest)
+        .with_context(|| format!("renaming {} -> {}", staged.display(), dest.display()))?;
     println!("samizdat-up: self-updated -> {}", dest.display());
+    Ok(())
+}
+
+fn smoke_test(path: &Path) -> Result<()> {
+    let out = Command::new(path)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("could not exec {}", path.display()))?;
+    if !out.status.success() {
+        bail!(
+            "{} --version exited with {} (stderr: {:?})",
+            path.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !stdout.contains("samizdat-up") {
+        bail!(
+            "{} --version did not identify as samizdat-up: {:?}",
+            path.display(),
+            stdout
+        );
+    }
     Ok(())
 }
 
