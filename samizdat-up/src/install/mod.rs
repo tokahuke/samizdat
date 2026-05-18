@@ -7,6 +7,7 @@
 //! module.
 
 use anyhow::Result;
+use std::path::PathBuf;
 
 use crate::cli::Component;
 
@@ -111,6 +112,29 @@ pub fn list() -> Result<()> {
 #[cfg(target_os = "windows")]
 pub fn run_as_service(component: Component) -> Result<()> {
     windows::run_as_service(component)
+}
+
+/// Paths of installed Samizdat binaries that exist on disk right now,
+/// labelled by short name (`samizdat-node`, `samizdat`, `samizdat-up`,
+/// ...). Used by `samizdat-up versions` to query each binary with
+/// `--version`.
+pub fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
+    #[cfg(target_os = "linux")]
+    {
+        return linux::installed_binary_paths();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos::installed_binary_paths();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return windows::installed_binary_paths();
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Vec::new()
+    }
 }
 
 pub fn self_update() -> Result<()> {

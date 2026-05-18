@@ -188,6 +188,25 @@ pub(super) fn list() -> Result<()> {
     Ok(())
 }
 
+pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
+    let mut out = Vec::new();
+    for d in daemons::ALL {
+        let p = PathBuf::from(format!("/usr/local/bin/{}", d.bin));
+        if p.exists() {
+            out.push((d.bin, p));
+        }
+    }
+    let cli = PathBuf::from("/usr/local/bin/samizdat");
+    if cli.exists() {
+        out.push(("samizdat", cli));
+    }
+    let up = PathBuf::from("/usr/local/bin/samizdat-up");
+    if up.exists() {
+        out.push(("samizdat-up", up));
+    }
+    out
+}
+
 pub(super) fn self_update() -> Result<()> {
     require_root()?;
     let origin = DEFAULT_ORIGIN.to_owned();
