@@ -118,9 +118,17 @@ fn strip_file_scheme(url: &str) -> Option<PathBuf> {
 /// same inventory the proxy resolves objects against, so it is
 /// always in sync with what is actually fetchable.
 pub fn list_versions(remote: bool) -> Result<()> {
-    let mut locally_installed: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    locally_installed.insert(env!("CARGO_PKG_VERSION").to_owned());
+    // version -> binary names at that version. Used in the remote
+    // section to annotate a published version with EXACTLY which
+    // local binaries are pinned to it -- different binaries can be at
+    // different versions (e.g. samizdat-up updated but daemons not
+    // yet), and lumping them into a single "installed" tag would lie.
+    let mut bins_at: std::collections::BTreeMap<String, Vec<&'static str>> =
+        std::collections::BTreeMap::new();
+    bins_at
+        .entry(env!("CARGO_PKG_VERSION").to_owned())
+        .or_default()
+        .push("samizdat-up (running)");
 
     println!("samizdat-up {} (this binary)", env!("CARGO_PKG_VERSION"));
 
@@ -139,7 +147,7 @@ pub fn list_versions(remote: bool) -> Result<()> {
                 .unwrap_or(&raw)
                 .to_owned();
             if version != "unknown" {
-                locally_installed.insert(version.clone());
+                bins_at.entry(version.clone()).or_default().push(name);
             }
             println!("{name:<14} {version} (at {})", path.display());
         }
@@ -156,17 +164,17 @@ pub fn list_versions(remote: bool) -> Result<()> {
                 } else {
                     println!("Published versions:");
                     for v in &versions {
-                        let mut tags: Vec<&str> = Vec::new();
+                        let mut tags: Vec<String> = Vec::new();
                         if latest.as_deref() == Some(v.as_str()) {
-                            tags.push("latest");
+                            tags.push("latest".to_owned());
                         }
-                        if locally_installed.contains(v) {
-                            tags.push("installed");
+                        if let Some(bins) = bins_at.get(v) {
+                            tags.push(format!("installed: {}", bins.join(", ")));
                         }
                         if tags.is_empty() {
                             println!("    {v}");
                         } else {
-                            println!("    {v}  (= {})", tags.join(", "));
+                            println!("    {v}  (= {})", tags.join("; "));
                         }
                     }
                     if latest.is_none() {
