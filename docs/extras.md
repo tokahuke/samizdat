@@ -55,83 +55,67 @@ rather than hanging forever, which is what the previous version did.
 
 ### `install/`
 
-Multi-platform build pipeline written in Python (Poetry-managed). The
-top-level orchestrator is `python -m builder`, which reads
-`build.yaml` and:
+The cross-platform install path is now owned by a single Rust
+binary, `samizdat-up` (see the dedicated crate at the workspace
+root). What lives in `install/` is the minimum that has to survive
+that crate:
 
-- builds Docker images defined under `images:`,
-- runs builder commands defined under `builders:` inside those
-  images,
-- and exports artifacts defined under `exports:` from the build
-  containers back to the host.
+- `install/get-samizdat/` -- the public release submodule. Holds
+  `.Samizdat.priv` (the publishing series private key, gitignored)
+  and `dist/` (the artifact tree the proxy serves).
+- `install/src/install.sh.template` -- the bootstrap shim served at
+  `~get-samizdat/<version>/install.sh`. Detects OS+arch, downloads
+  the right `samizdat-up` binary, places it in `/usr/local/bin/`.
+- `install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template`
+  -- the testbed's `proxy.toml` with `${DOMAIN}` and
+  `${PROXY_OWNER_EMAIL}` placeholders, applied by
+  `bootstrap-testbed.yaml` after `samizdat-up install proxy` writes
+  the default config.
+- `install/src/rust/MacOSX14.5.tar.xz` -- the macOS SDK used by
+  cargo-zigbuild for cross-compiling to `aarch64-apple-darwin` from
+  the GitHub Actions ubuntu-latest runner.
 
-Supported targets:
+What used to live here -- the Python+Docker builder, the per-role
+shell installers, the NSIS installer, the standalone
+`samizdat-service` SCM wrapper -- has all been subsumed into
+`samizdat-up`. See its `defaults/` (config templates) and `tests/golden/`
+(systemd unit + launchd plist snapshots).
 
-- `x86_64-unknown-linux-gnu`: node, hub, proxy. Each ships a
-  systemd unit and an `install.sh`.
-- `aarch64-apple-darwin`: node + cli, plus a Homebrew formula
-  template at `install/src/aarch64-apple-darwin/homebrew/Samizdat.rb`.
-- `x86_64-pc-windows-gnu`: node + cli + service wrapper +
-  `samizdat-installer.exe` (NSIS).
+### `samizdat-up/`
 
-The `install/get-samizdat/` directory is itself a Samizdat collection
-holding the build artifacts and a static install page. After a
-release build, `postbuild.sh` syncs the produced artifacts into that
-collection and pushes a new edition.
+Cross-platform installer + updater. Replaces three separate install
+codepaths with one Rust binary that has `cfg`-gated branches for
+systemd / launchd / SCM. The user-visible surface:
 
-### Cutting a release
+    sudo samizdat-up install <node|hub|proxy|cli|all> [--version V] [--no-service] [--from URL]
+    sudo samizdat-up uninstall <component> [--purge]
+    sudo samizdat-up update [<component>] [--to V]
+    samizdat-up list
+    samizdat-up versions [--remote]
+    sudo samizdat-up self-update
 
-The repo-root `release.sh` is the orchestrator. From a clean
-`stable` checkout:
+`install` places the binary at `/usr/local/bin/`, writes a default
+config (preserving any existing one), registers the daemon with the
+host's service manager, and starts it. The CLI (`samizdat`) ships
+alongside any daemon install -- it is the administrative tool the
+daemon's hooks call. Lifecycle (start/stop/restart/status) is the
+OS's job after install; samizdat-up does not re-implement those
+verbs.
 
-    ./release.sh 0.2.0           # bumps, commits, tags v0.2.0, pushes
-    ./release.sh --dry-run 0.2.0 # just print the steps
+Per-OS state is canonical for the platform:
 
-It bumps `workspace.package.version` in the root `Cargo.toml` (all
-crates inherit via `version.workspace = true`), commits the bump
-and the refreshed `Cargo.lock`, tags `vX.Y.Z`, pushes, and
-dispatches `build-artifacts.yaml` against the new tag via
-`gh workflow run`. The GitHub Action then runs the python builder,
-which propagates `VERSION` into the builder containers (the NSIS
-installer picks it up via `/DVERSION=$VERSION` and writes
-`DisplayVersion` to Add/Remove Programs), builds all artifacts, and
-finally `postbuild.sh` syncs them into the `get-samizdat`
-submodule and pushes the release commit there.
+| Path | Linux + macOS | Windows |
+|---|---|---|
+| data | `/var/lib/samizdat/<role>` | `C:\ProgramData\Samizdat\<role>` |
+| config | `/etc/samizdat/<role>.toml` | `C:\ProgramData\Samizdat\<role>.toml` |
+| binary | `/usr/local/bin/samizdat-<role>` | `C:\Program Files\Samizdat\samizdat-<role>.exe` |
+| unit | `/etc/systemd/system/...` or `/Library/LaunchDaemons/com.samizdat.<role>.plist` | SCM (no on-disk unit) |
 
-The cargo registry + git index are cached across CI runs via
-`actions/cache` + a bind-mount into the rust builder container, so
-warm rebuilds skip dep downloads.
-
-### `install/src/x86_64-pc-windows-gnu/` (the Windows path)
-
-`samizdat-service` is a small Rust binary that registers with the
-Service Control Manager (SCM) and supervises `samizdat-node.exe`.
-
-Lifecycle:
-
-1. `installer.nsi` runs `sc.exe create SamizdatNode binPath= "...
-   samizdat-service.exe --data=..."`.
-2. SCM launches `samizdat-service.exe` with that argv.
-3. `main()` parses `--data=<dir>` from argv, then hands control to
-   `service_dispatcher::start`.
-4. `service_main` registers a control handler, reports `Running`,
-   and enters a supervise-loop. Each iteration spawns
-   `samizdat-node.exe` (resolved relative to the wrapper, not via
-   PATH), waits for it to exit OR for a `Stop`/`Shutdown` from
-   SCM, restarts if the child exited on its own, exits cleanly
-   otherwise.
-
-The installer also writes an `Add/Remove Programs` entry pointing at
-`$INSTDIR\uninstall.exe`. The uninstaller stops + deletes the service,
-removes the binaries, and asks the user before wiping
-`C:\ProgramData\Samizdat\Node` (which holds series keys and
-bookmarks).
-
-`install/src/x86_64-pc-windows-gnu/node/build.sh` is a standalone
-helper for iterating on the `.nsi` locally; the canonical end-to-end
-build is `install/src/rust/build.sh` (run inside the Docker image),
-which produces the binaries and then invokes `makensis` to package
-them.
+The render functions for unit files / plists live in
+`samizdat-up/src/daemons.rs` as pure functions, snapshot-tested
+against `samizdat-up/tests/golden/`. The side-effectful parts
+(`fs::write`, `systemctl`, `launchctl`, `sc.exe`) live in the
+per-OS modules under `samizdat-up/src/install/`.
 
 ### `simulate-net/`
 
@@ -180,27 +164,28 @@ Required variables (set in TF Cloud workspace or local `.tfvars`):
 
 ### `.github/workflows/`
 
-Four workflows, all `workflow_dispatch`:
+Three workflows, all `workflow_dispatch`:
 
-- **`build-artifacts.yaml`**: cuts release artifacts for all targets
-  via the Python builder pipeline and pushes them into the
-  `get-samizdat` submodule.
-- **`bootstrap-testbed.yaml`**: one-shot post-`terraform apply` job
-  that builds Linux x86_64 binaries, scp's them + systemd units +
-  configs + the `samizdat-self-update` script onto the droplet,
-  enables the three services, and subscribes the testbed's node to
-  the `get-samizdat` and `samizdat-blog` collections. Run this once
-  per droplet creation.
-- **`update-testbed.yaml`**: trivial follow-up that ssh's into the
-  droplet and runs `samizdat-self-update`. The script pulls the
-  latest binaries from the testbed's own subscription to
-  `get-samizdat` (the network feeds itself) and atomically restarts
-  the services. Run this after publishing a new `get-samizdat`
-  edition from your laptop.
-- (Historically there was a `deploy-testbed.yaml` that tried to do
-  rsync-from-CI deploys on push-to-stable. It was 100 lines of
-  commented-out aspirational code; it has been deleted in favor of
-  the bootstrap + update split above.)
+- **`publish-get-samizdat.yaml`** (the "release" workflow): cross-
+  compiles all five binaries (samizdat-up, samizdat, samizdat-node,
+  samizdat-hub, samizdat-proxy) for the four supported targets
+  (linux x86_64, windows x86_64, darwin aarch64; hub + proxy linux
+  only) via cargo-zigbuild on `ubuntu-latest`. Lays them into the
+  `install/get-samizdat/dist/<version|latest>/<triple>/<component>/`
+  tree, also writes a `install.sh` bootstrap shim per version, then
+  signs + announces a fresh edition of the `get-samizdat` series
+  using the `GET_SAMIZDAT_PRIV` secret. Waits until the testbed has
+  eager-fetched the new content.
+- **`bootstrap-testbed.yaml`**: one-shot post-`terraform apply`. Builds
+  samizdat-up + daemons locally on the runner, scp's them to the
+  testbed as a `file://` dist tree, runs `samizdat-up install` for
+  each role, overlays the testbed-specific proxy.toml (https=true,
+  real domain), subscribes the testbed's node to `get-samizdat` and
+  `samizdat-blog`. Run once per droplet creation.
+- **`update-testbed.yaml`**: trivial follow-up. ssh's into the droplet
+  and runs `samizdat-up update`, which pulls the latest binaries
+  from the testbed's own copy of the get-samizdat collection and
+  restarts services. Run after a successful `publish-get-samizdat`.
 
 ### Releasing end-to-end
 
@@ -208,23 +193,21 @@ A complete release goes roughly:
 
 1. `./release.sh 0.2.0` from a clean `stable` checkout. Bumps the
    workspace version, commits, tags, pushes, dispatches
-   `build-artifacts.yaml`.
-2. Wait for the action: it rebuilds all targets and pushes the new
-   artifacts into the `get-samizdat` submodule on `main`.
-3. Publish a new edition of the `get-samizdat` collection from your
-   laptop (the `.Samizdat.priv` key lives in
-   `install/get-samizdat/`, gitignored): `samizdat collection update`
-   inside that directory.
-4. Wait for the testbed's subscription to refresh (or force it), then
-   run `update-testbed.yaml`. The droplet pulls the new binaries
-   from itself via samizdat and restarts.
+   `publish-get-samizdat.yaml`.
+2. The publish workflow cross-compiles every target, signs the new
+   edition, announces it. The testbed eager-fetches and starts
+   serving the new binaries.
+3. `gh workflow run update-testbed.yaml` upgrades the testbed itself
+   onto the binaries it now serves.
 
-### `.github/workflows/`
+End users on Linux/macOS get the new version next time they run:
 
-Two workflows: `build-artifacts.yaml` (release artifacts) and
-`deploy-testbed.yaml` (testbed deploy on push-to-stable, mostly
-commented out). Both run on `workflow_dispatch`, no `pull_request`
-exposure.
+    sudo samizdat-up update
+
+or, for a fresh install:
+
+    curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/install.sh | sudo bash
+    sudo samizdat-up install node
 
 ## Findings landed against the extras
 

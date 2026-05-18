@@ -11,14 +11,14 @@ The testbed is a single DigitalOcean droplet running three Samizdat
 daemons (hub, node, proxy) plus an opinionated cloud-init. It serves
 two roles at once:
 
-1. **The federation seed.** Every Linux `install.sh` does
-   `samizdat hub new testbed.hubfederation.com UseBoth`, so every new
-   node in the wild peers with this box.
+1. **The federation seed.** Every install hits
+   `samizdat hub new testbed.hubfederation.com UseBoth` at first run,
+   so every new node in the wild peers with this box.
 2. **The release-distribution origin.** The testbed's node holds the
    `get-samizdat` collection (series key
    `r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM`). The proxy at
-   `proxy.hubfederation.com` exposes that collection over HTTPS, which
-   is where the install scripts curl their binaries from.
+   `proxy.hubfederation.com` exposes that collection over HTTPS,
+   which is where `samizdat-up` fetches binaries from.
 
 Releases and updates are dogfooded: after first bootstrap, the testbed
 itself updates by pulling new binaries from the very `get-samizdat`
@@ -33,17 +33,18 @@ can run. After that single seed, the testbed participates in its own
 distribution and can self-update.
 
 - **`bootstrap-testbed.yaml`** is the one-shot out-of-band seed. It
-  builds Linux x86_64 binaries on a GitHub runner, scp's them onto
-  the droplet with configs and systemd units, starts the services,
-  and subscribes the testbed's node to both `get-samizdat` and the
-  `samizdat-blog` collections. Run after `terraform apply`, once per
-  droplet recreation.
+  builds `samizdat-up` + the four daemon binaries on a GitHub runner,
+  uploads them to the droplet as a `file://` dist tree, and runs
+  `samizdat-up install` for each role. samizdat-up handles the
+  systemd unit registration. Finally the workflow subscribes the
+  testbed's node to `get-samizdat` and the `samizdat-blog`
+  collections. Run after `terraform apply`, once per droplet
+  recreation.
 - **`update-testbed.yaml`** is the recurring update. It ssh's into
-  the droplet and runs `samizdat-self-update`, which pulls binaries
-  from `localhost:4510/~get-samizdat/latest/...` (i.e. from the
-  testbed's own copy of the collection) and atomically restarts
-  the services. Run after publishing a new edition of `get-samizdat`
-  from your laptop.
+  the droplet and runs `samizdat-up update`, which pulls binaries
+  from the get-samizdat collection (served by the testbed itself
+  through the proxy) and atomically restarts the services. Run
+  after a new `get-samizdat` edition has been published.
 
 That asymmetry is on purpose. Resist the urge to make bootstrap also
 "pull from the net" -- you'd just be moving the chicken-and-egg
@@ -112,11 +113,16 @@ purpose), here is the full ceremony:
    - `nc -uz testbed.hubfederation.com 4511` (UDP) should succeed.
    - `ssh root@testbed.hubfederation.com 'systemctl is-active samizdat-hub samizdat-node samizdat-proxy'`
      should print `active` three times.
-7. From your laptop, publish a fresh edition of `get-samizdat`:
-   `cd install/get-samizdat && samizdat collection update`. The
-   testbed's subscription picks it up on the next refresh tick.
-8. Once the edition is in, run `gh workflow run update-testbed.yaml`
-   to flip the testbed onto its own published binaries.
+7. Publish a fresh edition of `get-samizdat`:
+   `gh workflow run publish-get-samizdat.yaml --ref <branch> -f ref=<branch>`.
+   This cross-compiles all targets, signs an edition with the
+   `GET_SAMIZDAT_PRIV` secret, announces over the federation, and
+   polls until the testbed serves the new content. After this, the
+   public URLs at `proxy.hubfederation.com/~get-samizdat/...` serve
+   real binaries.
+8. To upgrade the testbed itself to the binaries it now serves
+   (instead of the local-build copies from bootstrap):
+   `gh workflow run update-testbed.yaml`.
 
 If anything in step 5 fails, the failure mode is usually one of the
 gotchas in the next section.
@@ -168,8 +174,8 @@ gotchas in the next section.
   the `GET_SAMIZDAT_DEPLOY_KEY` secret is installed into the SSH
   agent before checkout. `bootstrap-testbed.yaml` doesn't need it
   (it builds from the workspace and skips submodules);
-  `build-artifacts.yaml` does need it (postbuild.sh pushes new
-  releases into get-samizdat).
+  `publish-get-samizdat.yaml` does need it (it commits and pushes
+  new editions into the get-samizdat submodule).
 
 ## Firewall ports
 
@@ -195,11 +201,11 @@ If you need it, tunnel via SSH:
   testing. `journalctl -u samizdat-proxy | grep -i acme` for Let's
   Encrypt errors. Rate limits and ACME state live under
   `/var/lib/samizdat/proxy/acme/`.
-- **install.sh fails on a user's machine**: confirm
-  `curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/node/samizdat-node | wc -c`
+- **`samizdat-up install` fails on a user's machine**: confirm
+  `curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up | wc -c`
   returns a binary-sized number. If 0/HTML/404, the testbed's node
-  doesn't have the current edition -- republish from your laptop or
-  refresh the subscription on the testbed.
+  doesn't have the current edition. Run `samizdat-up update` from the
+  publishing machine or check the publish workflow.
 - **Workflow can't dispatch**: it isn't on `main`. Cherry-pick the
   workflow file onto main.
 - **terraform apply 401s on DO**: token expired. Rotate via DO
