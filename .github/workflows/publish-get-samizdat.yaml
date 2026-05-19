@@ -66,14 +66,40 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-apple-darwin
 
-      - name: Install zig + cargo-zigbuild
+      # Cache zig itself (extracted tarball) and the cargo-zigbuild
+      # binary separately from the cargo target dir. Both are
+      # invariant to our code: zig is keyed on ZIG_VERSION, the
+      # cargo-zigbuild binary on a bump-on-purpose tag.
+      - name: Cache zig
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: ~/zig
+          key: zig-linux-${{ env.ZIG_VERSION }}
+
+      - name: Install zig
+        if: steps.cache-zig.outputs.cache-hit != 'true'
         run: |
           set -e
+          mkdir -p ~/zig
           curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
-            | sudo tar -xJf - -C /opt
-          sudo ln -sf "/opt/zig-linux-x86_64-${ZIG_VERSION}/zig" /usr/local/bin/zig
-          zig version
-          cargo install cargo-zigbuild --locked
+            | tar -xJf - -C ~/zig --strip-components=1
+
+      - name: Put zig on PATH
+        run: |
+          echo "$HOME/zig" >> "$GITHUB_PATH"
+          "$HOME/zig/zig" version
+
+      - name: Cache cargo-zigbuild binary
+        id: cache-zigbuild
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-zigbuild
+          key: cargo-zigbuild-${{ runner.os }}-v1
+
+      - name: Install cargo-zigbuild
+        if: steps.cache-zigbuild.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked
 
       - name: Extract macOS SDK
         run: |
@@ -83,13 +109,29 @@ jobs:
           ls /opt/sdks
           echo "SDKROOT=/opt/sdks/MacOSX14.5.sdk" >> $GITHUB_ENV
 
+      # Cargo.lock fingerprint that ignores workspace-local entries.
+      # A version-only bump on `[workspace.package].version` rewrites
+      # the version lines of every workspace member's `[[package]]`
+      # block in Cargo.lock, but those blocks have no `source = ...`
+      # line (they are path deps). Hashing only blocks WITH `source`
+      # gives a key that is invariant to workspace version bumps and
+      # changes only when an actual external dep moves.
+      - name: Compute deps-only Cargo.lock fingerprint
+        id: deps_fp
+        run: |
+          set -e
+          fp=$(awk 'BEGIN{RS="\n\n";ORS="\n\n"} /^\[\[package\]\]/ && /source = / {print}' Cargo.lock \
+               | sha256sum | cut -d' ' -f1)
+          echo "fp=$fp" >> "$GITHUB_OUTPUT"
+          echo "deps fingerprint: $fp"
+
       - name: Cache cargo registry + git
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ steps.deps_fp.outputs.fp }}
           restore-keys: |
             cargo-${{ runner.os }}-
 
@@ -97,7 +139,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: target-publish-multi-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: target-publish-multi-${{ runner.os }}-${{ steps.deps_fp.outputs.fp }}
           restore-keys: |
             target-publish-multi-${{ runner.os }}-
 
@@ -136,7 +178,14 @@ jobs:
 
           REPO_ROOT="${{ github.workspace }}"
           DIST="$REPO_ROOT/install/get-samizdat/dist"
-          rm -rf "$DIST"
+          # Wipe only the `latest/` alias and the current-version
+          # slot (in case of a re-publish of the same version);
+          # prior `dist/<version>/` subtrees are kept so they remain
+          # in the next signed edition and stay installable from the
+          # network. The submodule's git history is the authoritative
+          # backup if anything ever goes missing locally.
+          rm -rf "$DIST/latest" "$DIST/$VERSION"
+          mkdir -p "$DIST"
 
           # place(triple, ext, component, file_basename) -> places into
           # dist/<version>/<triple>/<component>/<file_basename><ext> AND
