@@ -131,10 +131,8 @@ pub async fn post_object(
         super::redact_if_sensitive("/_objects", &text)
     );
 
-    let content: Result<String, ApiError> = serde_json::from_str(&text)
-        .with_context(|| format!("error deserializing response from POST /_objects: {text}"))?;
-
-    Ok(content?)
+    super::bail_on_http_error("POST", "/_objects", status, &text)?;
+    super::deserialize_api_response("POST", "/_objects", status, &text)
 }
 
 /// Retrieves an object from the network and executes a fallible callback for each chunk.

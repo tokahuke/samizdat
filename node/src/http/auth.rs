@@ -373,21 +373,25 @@ impl IntoResponse for AuthenticationRejection {
     }
 }
 
-/// Combines multiple authentication rejection types into a single response.
+/// Picks the most actionable rejection when both auth methods fail.
 ///
-/// This function handles cases where both security scope and authorization checks fail,
-/// prioritizing certain rejection types over others to provide the most relevant error
-/// response to the client.
+/// The two auth methods are independent: entity-rights via the
+/// `Referer` header (browser apps) and bearer token (CLI). A request
+/// passes if EITHER succeeds; this function runs only when BOTH
+/// failed. The rule:
 ///
-/// # Arguments
-/// * `security_scope_rejection` - The security scope rejection
-/// * `authorization_rejection` - The authorization rejection
-///
-/// # Returns
-/// A Response with appropriate status code and error message based on the rejection types:
-/// - Returns the security scope rejection if authorization is just missing
-/// - Returns the authorization rejection if security scope is just missing
-/// - Returns a 400 Bad Request if both checks actively failed
+/// * If only one method was *presented* (the other's "missing")
+///   surface the rejection from the method that was actually
+///   attempted; the caller almost certainly cares about why it
+///   didn't work, not why the other one was absent.
+/// * If both methods were presented and both failed substantively,
+///   surface the bearer-token rejection. The bearer path is what
+///   CLI users can directly affect (retry under sudo, switch
+///   tokens); the entity-rights path requires configuring
+///   `/_register` access for a browser entity. Telling a CLI user
+///   "the entity has insufficient privilege" when their problem is
+///   really "this token has read scope on an admin route" buries
+///   the actionable signal.
 fn merge_rejections(
     security_scope_rejection: SecurityScopeRejection,
     authorization_rejection: AuthenticationRejection,
@@ -403,10 +407,7 @@ fn merge_rejections(
     ) {
         authorization_rejection.into_response()
     } else {
-        Response::builder()
-            .status(400)
-            .body("mulitple authorization methods supplied and all failed".into())
-            .expect("can build error response")
+        authorization_rejection.into_response()
     }
 }
 
