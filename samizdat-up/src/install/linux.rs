@@ -17,11 +17,11 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::cli::Component;
+use crate::cli::{AdminAction, Component};
 use crate::daemons::{self, Daemon};
 use crate::fetch::{self, DEFAULT_ORIGIN};
 
-use super::{InstallOpts, UninstallOpts};
+use super::{InstallOpts, UninstallOpts, ADMIN_GROUP};
 
 pub(super) fn install(opts: InstallOpts) -> Result<()> {
     require_root()?;
@@ -30,7 +30,14 @@ pub(super) fn install(opts: InstallOpts) -> Result<()> {
     let origin = opts.from.clone().unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
     let target = fetch::host_target_triple();
 
+    // Ensure the admin group exists before any data-dir work, so the
+    // setgid-bit-on-dir scheme can take effect on the very first
+    // install of this box (otherwise the daemon's first
+    // admin-token write would land with the wrong group).
+    ensure_admin_group()?;
+
     let daemons = opts.component.daemons();
+    let as_user = opts.as_user.as_deref();
 
     // Place the daemon binaries first (and their default configs +
     // unit files). The CLI rides along with any daemon install -- it
@@ -38,8 +45,8 @@ pub(super) fn install(opts: InstallOpts) -> Result<()> {
     for name in &daemons {
         let d = daemons::by_name(name).expect("known component name");
         install_daemon_binary(&origin, &version, target, d)?;
-        ensure_config(d)?;
-        write_unit_file(d)?;
+        ensure_config(d, as_user)?;
+        write_unit_file(d, as_user)?;
     }
 
     // The CLI is also pulled in when only `cli` was requested.
@@ -151,22 +158,13 @@ pub(super) fn list() -> Result<()> {
 }
 
 pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
-    let mut out = Vec::new();
-    for d in daemons::ALL {
-        let p = PathBuf::from(format!("/usr/local/bin/{}", d.bin));
-        if p.exists() {
-            out.push((d.bin, p));
-        }
-    }
-    let cli = PathBuf::from("/usr/local/bin/samizdat");
-    if cli.exists() {
-        out.push(("samizdat", cli));
-    }
-    let up = PathBuf::from("/usr/local/bin/samizdat-up");
-    if up.exists() {
-        out.push(("samizdat-up", up));
-    }
-    out
+    crate::daemons::KNOWN_BINARIES
+        .iter()
+        .filter_map(|name| {
+            let p = PathBuf::from(format!("/usr/local/bin/{name}"));
+            p.exists().then_some((*name, p))
+        })
+        .collect()
 }
 
 pub(super) fn self_update() -> Result<()> {
@@ -291,20 +289,32 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
     Ok(())
 }
 
-fn ensure_config(d: &Daemon) -> Result<()> {
+fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
     let data_dir = format!("/var/lib/samizdat/{}", d.name);
     fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating {data_dir}"))?;
-    // 0755 so the world-readable `read-token` the node drops here is
-    // actually reachable without sudo. Admin secrets (admin-token,
-    // series private keys) stay 0600 in the node, so widening the
-    // directory traversal bit does not expose them. Without this, any
-    // non-root shell hits "permission denied" on `samizdat ls`
-    // because the parent directory blocks the open.
+    // Mode 2755 (setgid bit on, world-traversable): the setgid bit
+    // makes every file the daemon writes here inherit the
+    // `samizdat` group, so admin-token (0640) is readable by group
+    // members without per-file chgrp. World-traversable so the
+    // 0644 read-token is reachable from any uid.
     let mut perms = fs::metadata(&data_dir)?.permissions();
-    perms.set_mode(0o755);
+    perms.set_mode(0o2755);
     fs::set_permissions(&data_dir, perms)?;
+    chgrp_recursive(&data_dir, ADMIN_GROUP)?;
+    // If admin-token already exists from a prior install, fix its
+    // mode and group so existing installs get the new sharing model
+    // without restarting the daemon.
+    let admin_token = format!("{data_dir}/admin-token");
+    if Path::new(&admin_token).exists() {
+        let mut p = fs::metadata(&admin_token)?.permissions();
+        p.set_mode(0o640);
+        fs::set_permissions(&admin_token, p)?;
+    }
+    if let Some(user) = as_user {
+        chown_recursive(&data_dir, user)?;
+    }
     let path = PathBuf::from(format!("/etc/samizdat/{}.toml", d.name));
     if path.exists() {
         // Preserve user edits. The original install.sh used
@@ -321,9 +331,9 @@ fn ensure_config(d: &Daemon) -> Result<()> {
     Ok(())
 }
 
-fn write_unit_file(d: &Daemon) -> Result<()> {
+fn write_unit_file(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     let path = PathBuf::from(format!("/etc/systemd/system/samizdat-{}.service", d.name));
-    let content = daemons::render_systemd_unit(d);
+    let content = daemons::render_systemd_unit(d, as_user);
     fs::write(&path, content)
         .with_context(|| format!("writing systemd unit to {}", path.display()))?;
     println!("samizdat-up: wrote unit file -> {}", path.display());
@@ -362,6 +372,111 @@ fn systemctl(args: &[&str]) -> Result<()> {
         .with_context(|| format!("running `systemctl {}`", args.join(" ")))?;
     if !status.success() {
         bail!("`systemctl {}` exited with {}", args.join(" "), status);
+    }
+    Ok(())
+}
+
+/// Shell out to `chown -R user:user path`. The `:user` form sets group
+/// to the user's primary group (`chown user:` would do the same on
+/// most Linuxes, but the explicit `user:user` is portable). The user
+/// must already exist; we surface chown's error verbatim if not.
+fn chown_recursive(path: &str, user: &str) -> Result<()> {
+    let target = format!("{user}:{user}");
+    let status = Command::new("chown")
+        .args(["-R", target.as_str(), path])
+        .status()
+        .with_context(|| format!("running chown -R {target} {path}"))?;
+    if !status.success() {
+        bail!("chown -R {target} {path} exited with {status}");
+    }
+    Ok(())
+}
+
+fn chgrp_recursive(path: &str, group: &str) -> Result<()> {
+    let status = Command::new("chgrp")
+        .args(["-R", group, path])
+        .status()
+        .with_context(|| format!("running chgrp -R {group} {path}"))?;
+    if !status.success() {
+        bail!("chgrp -R {group} {path} exited with {status}");
+    }
+    Ok(())
+}
+
+/// Idempotent group creation. `groupadd -r` makes a system group
+/// (low GID, no home dir, no aging). If the group already exists,
+/// groupadd exits 9 ("group already exists"); we treat that as
+/// success.
+fn ensure_admin_group() -> Result<()> {
+    // Check first via getent so we do not run a side-effectful
+    // command when the group already exists.
+    if Command::new("getent")
+        .args(["group", ADMIN_GROUP])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let status = Command::new("groupadd")
+        .args(["-r", ADMIN_GROUP])
+        .status()
+        .with_context(|| format!("running groupadd -r {ADMIN_GROUP}"))?;
+    // Exit code 9 = group exists. Race with another tool creating
+    // it between our getent and groupadd; not an error.
+    if !status.success() && status.code() != Some(9) {
+        bail!("groupadd -r {ADMIN_GROUP} exited with {status}");
+    }
+    println!("samizdat-up: created system group `{ADMIN_GROUP}`");
+    Ok(())
+}
+
+pub(super) fn admin(action: AdminAction) -> Result<()> {
+    match action {
+        AdminAction::Add { user } => {
+            require_root()?;
+            ensure_admin_group()?;
+            let status = Command::new("usermod")
+                .args(["-aG", ADMIN_GROUP, &user])
+                .status()
+                .with_context(|| format!("running usermod -aG {ADMIN_GROUP} {user}"))?;
+            if !status.success() {
+                bail!("usermod -aG {ADMIN_GROUP} {user} exited with {status}");
+            }
+            println!(
+                "samizdat-up: added `{user}` to `{ADMIN_GROUP}`. \
+                 Log out + back in (or `newgrp {ADMIN_GROUP}`) for it to take effect."
+            );
+        }
+        AdminAction::Rm { user } => {
+            require_root()?;
+            let status = Command::new("gpasswd")
+                .args(["-d", &user, ADMIN_GROUP])
+                .status()
+                .with_context(|| format!("running gpasswd -d {user} {ADMIN_GROUP}"))?;
+            if !status.success() {
+                bail!("gpasswd -d {user} {ADMIN_GROUP} exited with {status}");
+            }
+            println!("samizdat-up: removed `{user}` from `{ADMIN_GROUP}`.");
+        }
+        AdminAction::List => {
+            let out = Command::new("getent")
+                .args(["group", ADMIN_GROUP])
+                .output()
+                .with_context(|| format!("running getent group {ADMIN_GROUP}"))?;
+            if !out.status.success() {
+                println!("samizdat-up: `{ADMIN_GROUP}` group does not exist yet.");
+                return Ok(());
+            }
+            let line = String::from_utf8_lossy(&out.stdout);
+            // getent line: "samizdat:x:GID:user1,user2,..."
+            let members = line.trim().rsplit(':').next().unwrap_or("");
+            if members.is_empty() {
+                println!("samizdat-up: `{ADMIN_GROUP}` has no members.");
+            } else {
+                println!("samizdat-up: `{ADMIN_GROUP}` members: {members}");
+            }
+        }
     }
     Ok(())
 }

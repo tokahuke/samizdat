@@ -55,7 +55,7 @@ pub(super) fn redact_if_sensitive<'a>(route: &str, body: &'a str) -> &'a str {
 /// plain string from axum's own deserialization layer for malformed
 /// requests. Keeps callers from accidentally trying to deserialize an
 /// error body as a success payload.
-fn bail_on_http_error(
+pub(super) fn bail_on_http_error(
     method: &str,
     route: &str,
     status: reqwest::StatusCode,
@@ -85,7 +85,7 @@ fn bail_on_http_error(
 /// node's wire format for success payloads). Failure here means the
 /// node sent us a 2xx with a body that does not match the expected
 /// shape -- a CLI/node mismatch, not a user error.
-fn deserialize_api_response<Q>(
+pub(super) fn deserialize_api_response<Q>(
     method: &str,
     route: &str,
     status: reqwest::StatusCode,

@@ -96,12 +96,18 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     let data: PathBuf = cli().data.clone();
 
     let admin_path = data.join("admin-token");
+    // 0640 (owner rw, group r) instead of 0600: admin scope is shared
+    // among members of the daemon's group (typically `samizdat`),
+    // managed at the OS level by `samizdat-up admin add/rm`. The
+    // setgid bit on the data dir, set by samizdat-up at install
+    // time, ensures the file's group matches the dir's group so the
+    // group-read bit is actually meaningful.
     let admin = read_or_create_token(
         admin_path
             .to_str()
             .expect("admin-token path is not a string"),
         #[cfg(unix)]
-        0o600,
+        0o640,
     )?;
     let read_path = data.join("read-token");
     let read = read_or_create_token(

@@ -106,11 +106,10 @@ fn strip_file_scheme(url: &str) -> Option<PathBuf> {
 
 /// `samizdat-up versions [--remote]`.
 ///
-/// Local listing: print our own version, then run `--version` on each
-/// Samizdat binary we find under the platform's install paths. There
-/// is no separate "versions manifest" on disk; the binaries themselves
-/// are the source of truth (clap's `--version` reports the version
-/// baked in at build time).
+/// Local listing: run `--version` on each Samizdat binary we find
+/// under the platform's install paths. There is no separate "versions
+/// manifest" on disk; the binaries themselves are the source of truth
+/// (clap's `--version` reports the version baked in at build time).
 ///
 /// Remote listing: fetch the collection's signed `_inventory` (a JSON
 /// object mapping every published path to its content hash) and pull
@@ -120,18 +119,11 @@ fn strip_file_scheme(url: &str) -> Option<PathBuf> {
 pub fn list_versions(remote: bool) -> Result<()> {
     // version -> binary names at that version. Used in the remote
     // section to annotate a published version with EXACTLY which
-    // local binaries are pinned to it -- different binaries can be at
+    // local binaries are pinned to it: different binaries can be at
     // different versions (e.g. samizdat-up updated but daemons not
     // yet), and lumping them into a single "installed" tag would lie.
-    // version -> binary names at that version. Populated from
-    // `installed_binary_paths()`; the running samizdat-up's own
-    // version is reported on the header line below and does not get
-    // its own entry (the installed samizdat-up at the platform's
-    // standard path is enumerated like any other binary).
     let mut bins_at: std::collections::BTreeMap<String, Vec<&'static str>> =
         std::collections::BTreeMap::new();
-
-    println!("samizdat-up {} (this binary)", env!("CARGO_PKG_VERSION"));
 
     let installed = crate::install::installed_binary_paths();
     if installed.is_empty() {

@@ -19,11 +19,11 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::cli::Component;
+use crate::cli::{AdminAction, Component};
 use crate::daemons::{self, Daemon, launchd_label};
 use crate::fetch::{self, DEFAULT_ORIGIN};
 
-use super::{InstallOpts, UninstallOpts};
+use super::{InstallOpts, UninstallOpts, ADMIN_GROUP};
 
 pub(super) fn install(opts: InstallOpts) -> Result<()> {
     require_root()?;
@@ -32,13 +32,16 @@ pub(super) fn install(opts: InstallOpts) -> Result<()> {
     let origin = opts.from.clone().unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
     let target = fetch::host_target_triple();
 
+    ensure_admin_group()?;
+
     let names = opts.component.daemons();
+    let as_user = opts.as_user.as_deref();
 
     for name in &names {
         let d = daemons::by_name(name).expect("known component name");
         install_daemon_binary(&origin, &version, target, d)?;
-        ensure_config(d)?;
-        write_plist(d)?;
+        ensure_config(d, as_user)?;
+        write_plist(d, as_user)?;
     }
 
     let install_cli = matches!(
@@ -189,22 +192,13 @@ pub(super) fn list() -> Result<()> {
 }
 
 pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
-    let mut out = Vec::new();
-    for d in daemons::ALL {
-        let p = PathBuf::from(format!("/usr/local/bin/{}", d.bin));
-        if p.exists() {
-            out.push((d.bin, p));
-        }
-    }
-    let cli = PathBuf::from("/usr/local/bin/samizdat");
-    if cli.exists() {
-        out.push(("samizdat", cli));
-    }
-    let up = PathBuf::from("/usr/local/bin/samizdat-up");
-    if up.exists() {
-        out.push(("samizdat-up", up));
-    }
-    out
+    crate::daemons::KNOWN_BINARIES
+        .iter()
+        .filter_map(|name| {
+            let p = PathBuf::from(format!("/usr/local/bin/{name}"));
+            p.exists().then_some((*name, p))
+        })
+        .collect()
 }
 
 pub(super) fn self_update() -> Result<()> {
@@ -268,17 +262,28 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
     Ok(())
 }
 
-fn ensure_config(d: &Daemon) -> Result<()> {
+fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
     let data_dir = format!("/var/lib/samizdat/{}", d.name);
     fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating {data_dir}"))?;
-    // 0755 so the world-readable `read-token` is reachable without
-    // sudo. Admin secrets stay 0600 in the node; widening the
-    // directory's traversal bit alone doesn't expose them.
+    // Mode 2755 (setgid bit on, world-traversable): setgid forces
+    // every file the daemon creates here to inherit the data dir's
+    // group (samizdat), so admin-token (0640) is group-readable by
+    // group members without per-file chgrp dance.
     let mut perms = fs::metadata(&data_dir)?.permissions();
-    perms.set_mode(0o755);
+    perms.set_mode(0o2755);
     fs::set_permissions(&data_dir, perms)?;
+    chgrp_recursive(&data_dir, ADMIN_GROUP)?;
+    let admin_token = format!("{data_dir}/admin-token");
+    if Path::new(&admin_token).exists() {
+        let mut p = fs::metadata(&admin_token)?.permissions();
+        p.set_mode(0o640);
+        fs::set_permissions(&admin_token, p)?;
+    }
+    if let Some(user) = as_user {
+        chown_recursive(&data_dir, user)?;
+    }
     let path = PathBuf::from(format!("/etc/samizdat/{}.toml", d.name));
     if path.exists() {
         return Ok(());
@@ -294,9 +299,9 @@ fn ensure_config(d: &Daemon) -> Result<()> {
     Ok(())
 }
 
-fn write_plist(d: &Daemon) -> Result<()> {
+fn write_plist(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     let path = plist_path(d);
-    let content = daemons::render_launchd_plist(d);
+    let content = daemons::render_launchd_plist(d, as_user);
     fs::write(&path, content)
         .with_context(|| format!("writing launchd plist to {}", path.display()))?;
     // launchd refuses to load plists that are not owned by root or are
@@ -345,6 +350,158 @@ fn launchctl(args: &[&str]) -> Result<()> {
         .with_context(|| format!("running `launchctl {}`", args.join(" ")))?;
     if !status.success() {
         bail!("`launchctl {}` exited with {}", args.join(" "), status);
+    }
+    Ok(())
+}
+
+/// Shell out to `chown -R user:staff path`. Group is `staff` because
+/// that's the default primary group for interactive users on macOS;
+/// matches what `Finder`/`stat` show for files in `~`. The user must
+/// already exist.
+fn chown_recursive(path: &str, user: &str) -> Result<()> {
+    let target = format!("{user}:staff");
+    let status = Command::new("chown")
+        .args(["-R", target.as_str(), path])
+        .status()
+        .with_context(|| format!("running chown -R {target} {path}"))?;
+    if !status.success() {
+        bail!("chown -R {target} {path} exited with {status}");
+    }
+    Ok(())
+}
+
+fn chgrp_recursive(path: &str, group: &str) -> Result<()> {
+    let status = Command::new("chgrp")
+        .args(["-R", group, path])
+        .status()
+        .with_context(|| format!("running chgrp -R {group} {path}"))?;
+    if !status.success() {
+        bail!("chgrp -R {group} {path} exited with {status}");
+    }
+    Ok(())
+}
+
+/// Idempotent group creation via `dscl`. Picks the next free GID
+/// >= 500 (the user-range floor on macOS) to avoid colliding with
+/// system groups. If the group already exists, returns early.
+fn ensure_admin_group() -> Result<()> {
+    // dscl returns non-zero when the record does not exist; success
+    // means "found", so we treat success as "already there".
+    let exists = Command::new("dscl")
+        .args([".", "-read", &format!("/Groups/{ADMIN_GROUP}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if exists {
+        return Ok(());
+    }
+
+    let gid = next_free_gid()?;
+    let path = format!("/Groups/{ADMIN_GROUP}");
+    let dscl = |args: &[&str]| -> Result<()> {
+        let status = Command::new("dscl")
+            .args(args)
+            .status()
+            .with_context(|| format!("running dscl {}", args.join(" ")))?;
+        if !status.success() {
+            bail!("dscl {} exited with {status}", args.join(" "));
+        }
+        Ok(())
+    };
+    dscl(&[".", "-create", &path])?;
+    dscl(&[".", "-create", &path, "PrimaryGroupID", &gid.to_string()])?;
+    dscl(&[".", "-create", &path, "RealName", "Samizdat admins"])?;
+    dscl(&[".", "-create", &path, "Password", "*"])?;
+    println!("samizdat-up: created group `{ADMIN_GROUP}` (gid {gid})");
+    Ok(())
+}
+
+/// Walk existing groups and pick the lowest unused GID >= 500.
+/// 500-1000 is the conventional user-group range on macOS; we sit
+/// inside it so the group is distinct from Apple's system groups
+/// (which use GIDs < 500).
+fn next_free_gid() -> Result<u32> {
+    let out = Command::new("dscl")
+        .args([".", "-list", "/Groups", "PrimaryGroupID"])
+        .output()
+        .context("listing /Groups for next-free-gid scan")?;
+    if !out.status.success() {
+        bail!(
+            "dscl . -list /Groups PrimaryGroupID exited with {}",
+            out.status
+        );
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let used: std::collections::BTreeSet<u32> = text
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1)?.parse::<u32>().ok())
+        .collect();
+    for candidate in 500u32..u32::MAX {
+        if !used.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    bail!("no free GID found")
+}
+
+pub(super) fn admin(action: AdminAction) -> Result<()> {
+    match action {
+        AdminAction::Add { user } => {
+            require_root()?;
+            ensure_admin_group()?;
+            let status = Command::new("dseditgroup")
+                .args(["-o", "edit", "-a", &user, "-t", "user", ADMIN_GROUP])
+                .status()
+                .with_context(|| {
+                    format!("running dseditgroup -o edit -a {user} -t user {ADMIN_GROUP}")
+                })?;
+            if !status.success() {
+                bail!("dseditgroup add {user} exited with {status}");
+            }
+            println!(
+                "samizdat-up: added `{user}` to `{ADMIN_GROUP}`. \
+                 Log out + back in (or `newgrp {ADMIN_GROUP}`) for it to take effect."
+            );
+        }
+        AdminAction::Rm { user } => {
+            require_root()?;
+            let status = Command::new("dseditgroup")
+                .args(["-o", "edit", "-d", &user, "-t", "user", ADMIN_GROUP])
+                .status()
+                .with_context(|| {
+                    format!("running dseditgroup -o edit -d {user} -t user {ADMIN_GROUP}")
+                })?;
+            if !status.success() {
+                bail!("dseditgroup rm {user} exited with {status}");
+            }
+            println!("samizdat-up: removed `{user}` from `{ADMIN_GROUP}`.");
+        }
+        AdminAction::List => {
+            let out = Command::new("dscl")
+                .args([".", "-read", &format!("/Groups/{ADMIN_GROUP}"), "GroupMembership"])
+                .output()
+                .with_context(|| format!("reading membership of {ADMIN_GROUP}"))?;
+            if !out.status.success() {
+                println!("samizdat-up: `{ADMIN_GROUP}` group does not exist yet.");
+                return Ok(());
+            }
+            let text = String::from_utf8_lossy(&out.stdout);
+            // `dscl . -read /Groups/<g> GroupMembership` prints:
+            //   "GroupMembership: user1 user2 ..."
+            // or "No such key: GroupMembership" if empty.
+            let members = text
+                .lines()
+                .find_map(|l| l.strip_prefix("GroupMembership:"))
+                .map(str::trim)
+                .unwrap_or("");
+            if members.is_empty() {
+                println!("samizdat-up: `{ADMIN_GROUP}` has no members.");
+            } else {
+                println!("samizdat-up: `{ADMIN_GROUP}` members: {members}");
+            }
+        }
     }
     Ok(())
 }

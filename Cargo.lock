@@ -4480,7 +4480,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "askama",
@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat-common"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes-gcm-siv",
  "base64-url",
@@ -4546,7 +4546,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat-hub"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "bincode",
@@ -4575,7 +4575,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat-node"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes-gcm-siv",
  "askama",
@@ -4617,7 +4617,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat-proxy"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "askama",
@@ -4645,7 +4645,7 @@ dependencies = [
 
 [[package]]
 name = "samizdat-up"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap 4.6.1",
