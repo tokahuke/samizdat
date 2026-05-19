@@ -293,8 +293,18 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
 
 fn ensure_config(d: &Daemon) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
-    fs::create_dir_all(format!("/var/lib/samizdat/{}", d.name))
-        .with_context(|| format!("creating /var/lib/samizdat/{}", d.name))?;
+    let data_dir = format!("/var/lib/samizdat/{}", d.name);
+    fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating {data_dir}"))?;
+    // 0755 so the world-readable `read-token` the node drops here is
+    // actually reachable without sudo. Admin secrets (admin-token,
+    // series private keys) stay 0600 in the node, so widening the
+    // directory traversal bit does not expose them. Without this, any
+    // non-root shell hits "permission denied" on `samizdat ls`
+    // because the parent directory blocks the open.
+    let mut perms = fs::metadata(&data_dir)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&data_dir, perms)?;
     let path = PathBuf::from(format!("/etc/samizdat/{}.toml", d.name));
     if path.exists() {
         // Preserve user edits. The original install.sh used
