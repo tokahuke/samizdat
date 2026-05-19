@@ -56,7 +56,7 @@ fn hub() -> Router {
             // Lists all hubs.
             "/",
             get(|| async move { readonly_tx(|tx| Hub::get_all(tx)) }.map(ApiResponse))
-                .layer(security_scope!(AccessRight::ManageHubs)),
+                .layer(security_scope!(read; AccessRight::ManageHubs)),
         )
         .route(
             // Lists a single hubs.
@@ -64,7 +64,7 @@ fn hub() -> Router {
             get(|Path(hub): Path<String>| {
                 async move { readonly_tx(|tx| Hub::get(tx, &hub)) }.map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::ManageHubs)),
+            .layer(security_scope!(read; AccessRight::ManageHubs)),
         )
         .route(
             "/{hub}",

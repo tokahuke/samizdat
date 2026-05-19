@@ -65,7 +65,7 @@ fn object() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             "/",
@@ -159,7 +159,7 @@ fn object_bookmark() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::ManageBookmarks)),
+            .layer(security_scope!(read; AccessRight::ManageBookmarks)),
         )
         .route(
             // Removes the bookmark from an object, allowing the vacuum daemon to gobble it up.
@@ -196,7 +196,7 @@ fn object_stats() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::GetObjectStats)),
+            .layer(security_scope!(read; AccessRight::GetObjectStats)),
         )
         .route(
             "/{hash}/stats",
@@ -204,7 +204,7 @@ fn object_stats() -> Router {
                 async move { readonly_tx(|tx| ObjectRef::new(hash).statistics(tx)) }
                     .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::GetObjectStats)),
+            .layer(security_scope!(read; AccessRight::GetObjectStats)),
         )
         .route(
             "/{hash}/stats/byte-usefulness",
@@ -220,6 +220,6 @@ fn object_stats() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::GetObjectStats)),
+            .layer(security_scope!(read; AccessRight::GetObjectStats)),
         )
 }

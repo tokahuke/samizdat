@@ -88,11 +88,11 @@ pub fn api() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!(AccessRight::ManageSubscriptions)),
+            .layer(security_scope!(read; AccessRight::ManageSubscriptions)),
         )
         .route(
             "/",
             get(|| async move { readonly_tx(|tx| SubscriptionRef::get_all(tx)) }.map(ApiResponse))
-                .layer(security_scope!(AccessRight::ManageSubscriptions)),
+                .layer(security_scope!(read; AccessRight::ManageSubscriptions)),
         )
 }

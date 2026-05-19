@@ -46,6 +46,6 @@ fn connections() -> Router {
             }
             .map(ApiResponse)
         })
-        .layer(security_scope!(AccessRight::ManageHubs)),
+        .layer(security_scope!(read; AccessRight::ManageHubs)),
     )
 }

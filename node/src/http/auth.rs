@@ -14,7 +14,7 @@ use serde_derive::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
-use crate::access::{access_token, AccessRight, Entity};
+use crate::access::{admin_token, read_token, AccessRight, Entity, TokenScope};
 use crate::db::Table;
 
 use super::ApiResponse;
@@ -71,7 +71,7 @@ fn get_auth_current() -> Router {
             }
             .map(ApiResponse)
         })
-        .layer(crate::security_scope!(AccessRight::Public)),
+        .layer(crate::security_scope!(read; AccessRight::Public)),
     )
 }
 
@@ -337,6 +337,13 @@ pub enum AuthenticationRejection {
     MissingAuthorization,
     /// The provided authentication token is invalid.
     BadToken,
+    /// The token presented is recognised but does not have a high
+    /// enough scope for this route (e.g. read-token on an admin-only
+    /// route). Surfaces as 403 with a body that names which token the
+    /// caller should swap to, so a CLI invoked without sudo can print
+    /// "try `sudo samizdat ...`" instead of a cryptic permission
+    /// failure.
+    InsufficientScope { required: TokenScope, presented: TokenScope },
 }
 
 impl IntoResponse for AuthenticationRejection {
@@ -351,6 +358,16 @@ impl IntoResponse for AuthenticationRejection {
             AuthenticationRejection::BadToken => response
                 .status(403)
                 .body("bad auth token".into())
+                .expect("can create error response"),
+            AuthenticationRejection::InsufficientScope { required, presented } => response
+                .status(403)
+                .body(
+                    format!(
+                        "token scope {presented:?} is below required scope {required:?}; \
+                         retry with the admin-token (it is in the data dir, mode 0600)"
+                    )
+                    .into(),
+                )
                 .expect("can create error response"),
         }
     }
@@ -393,9 +410,14 @@ fn merge_rejections(
     }
 }
 
-/// Authenticates a call using bearer authorization using the access token. This is
-/// intended for use of local applications (e.g, the Samizdat CLI).
-fn do_authenticate_authorization(request: &Request) -> Result<(), AuthenticationRejection> {
+/// Authenticate a bearer token and return its [`TokenScope`]. Tries
+/// the admin token first, then the read token; both comparisons are
+/// constant-time (`==` short-circuits on first mismatching byte and
+/// would turn the token into a byte-by-byte timing oracle).
+fn do_authenticate_authorization(
+    request: &Request,
+    required: TokenScope,
+) -> Result<TokenScope, AuthenticationRejection> {
     let authorization = String::from_utf8_lossy(
         request
             .headers()
@@ -408,33 +430,42 @@ fn do_authenticate_authorization(request: &Request) -> Result<(), Authentication
         .trim_start_matches("Bearer ")
         .trim_start_matches("bearer ");
 
-    // Constant-time comparison: a plain `==` short-circuits on the first mismatching byte
-    // and turns the access token into a timing oracle exfiltratable byte-by-byte over the
-    // local network or via a hostile browser timing the response.
-    if bool::from(token.as_bytes().ct_eq(access_token().as_bytes())) {
-        Ok(())
+    let token_bytes = token.as_bytes();
+    // Compare BOTH tokens before deciding, so a wrong-token request
+    // takes the same time as a right-token request regardless of
+    // which slot matches. Spending the extra CT comparison is cheap;
+    // letting a timing side-channel reveal "did you guess read or
+    // admin?" is not.
+    let admin_match = bool::from(token_bytes.ct_eq(admin_token().as_bytes()));
+    let read_match = bool::from(token_bytes.ct_eq(read_token().as_bytes()));
+
+    let presented = if admin_match {
+        TokenScope::Admin
+    } else if read_match {
+        TokenScope::Read
     } else {
-        Err(AuthenticationRejection::BadToken)
+        return Err(AuthenticationRejection::BadToken);
+    };
+
+    if presented >= required {
+        Ok(presented)
+    } else {
+        Err(AuthenticationRejection::InsufficientScope { required, presented })
     }
 }
 
-/// Authenticates a request using both security scope and authorization methods.
-///
-/// # Arguments
-/// * `required_rights` - Array of access rights required for the operation
-/// * `request` - The incoming HTTP request
-/// * `next` - The next middleware in the chain
-///
-/// # Returns
-/// Returns a rejection response if authentication fails, otherwise continues the
-/// middleware chain.
+/// Authenticate a request via security scope (entity-rights via
+/// `Referer`) OR bearer token. The route declares both the minimum
+/// [`TokenScope`] (for bearer auth) and the set of [`AccessRight`]s
+/// (for entity auth); the request succeeds if EITHER path passes.
 pub async fn authenticate_security_scope<const N: usize>(
+    min_scope: TokenScope,
     required_rights: [AccessRight; N],
     request: Request,
     next: Next,
 ) -> Response {
     let security_scope = do_authenticate_security_scope(required_rights, &request);
-    let authorization = do_authenticate_authorization(&request);
+    let authorization = do_authenticate_authorization(&request, min_scope);
 
     if let Some((security_scope_rejection, authorization_rejection)) =
         security_scope.err().zip(authorization.err())
@@ -445,14 +476,44 @@ pub async fn authenticate_security_scope<const N: usize>(
     next.run(request).await
 }
 
+/// Declare the middleware for a route. Forms:
+///   security_scope!(read; AccessRight::Public)   - bearer needs Read+,
+///                                                  OR entity has Public
+///   security_scope!(admin; AccessRight::ManageX) - bearer needs Admin,
+///                                                  OR entity has ManageX
+///   security_scope!(AccessRight::X)              - admin (default)
+///   security_scope!()                            - admin, no entity right
+///
+/// The unscoped form defaults to `admin` deliberately: opting into
+/// `read` for a route should be an explicit, reviewable change.
 #[macro_export]
 macro_rules! security_scope {
-    ($($right:expr),*) => {
+    (read; $($right:expr),* $(,)?) => {
         axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| {
-                $crate::http::auth::authenticate_security_scope([$($right,)*], request, next)
+                $crate::http::auth::authenticate_security_scope(
+                    $crate::access::TokenScope::Read,
+                    [$($right,)*],
+                    request,
+                    next,
+                )
             }
         )
+    };
+    (admin; $($right:expr),* $(,)?) => {
+        axum::middleware::from_fn(
+            |request: axum::extract::Request, next: axum::middleware::Next| {
+                $crate::http::auth::authenticate_security_scope(
+                    $crate::access::TokenScope::Admin,
+                    [$($right,)*],
+                    request,
+                    next,
+                )
+            }
+        )
+    };
+    ($($right:expr),* $(,)?) => {
+        $crate::security_scope!(admin; $($right),*)
     };
 }
 
@@ -506,9 +567,13 @@ fn do_authenticate_security_scope<const N: usize>(
 
 /// Middelware that authenticates a call using the `Referer` header to extract the entity
 /// and checking if the entity is a "trusted context" in the navigation of the site.
+///
+/// Bearer fallback requires the [`TokenScope::Admin`] token: trusted-
+/// context routes are the access-rights administration plane and a
+/// read-token must not be enough to grant new rights to entities.
 pub async fn authenticate_trusted_context(request: Request, next: Next) -> Response {
     let security_scope = do_authenticate_trusted_context(&request);
-    let authorization = do_authenticate_authorization(&request);
+    let authorization = do_authenticate_authorization(&request, TokenScope::Admin);
 
     if let Some((security_scope_rejection, authorization_rejection)) =
         security_scope.err().zip(authorization.err())

@@ -270,7 +270,15 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
 
 fn ensure_config(d: &Daemon) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
-    fs::create_dir_all(format!("/var/lib/samizdat/{}", d.name))?;
+    let data_dir = format!("/var/lib/samizdat/{}", d.name);
+    fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating {data_dir}"))?;
+    // 0755 so the world-readable `read-token` is reachable without
+    // sudo. Admin secrets stay 0600 in the node; widening the
+    // directory's traversal bit alone doesn't expose them.
+    let mut perms = fs::metadata(&data_dir)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&data_dir, perms)?;
     let path = PathBuf::from(format!("/etc/samizdat/{}.toml", d.name));
     if path.exists() {
         return Ok(());

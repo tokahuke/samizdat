@@ -19,6 +19,6 @@ fn editions() -> Router {
     Router::new().route(
         "/",
         get(|| async move { readonly_tx(|tx| Edition::get_all(tx)) }.map(ApiResponse))
-            .layer(security_scope!(AccessRight::ManageSeries)),
+            .layer(security_scope!(read; AccessRight::ManageSeries)),
     )
 }
