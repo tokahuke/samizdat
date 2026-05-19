@@ -229,22 +229,13 @@ pub(super) fn list() -> Result<()> {
 }
 
 pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
-    let mut out = Vec::new();
-    for d in daemons::ALL {
-        let p = binary_path(d);
-        if p.exists() {
-            out.push((d.bin, p));
-        }
-    }
-    let cli = cli_path();
-    if cli.exists() {
-        out.push(("samizdat", cli));
-    }
-    let up = wrapper_path();
-    if up.exists() {
-        out.push(("samizdat-up", up));
-    }
-    out
+    crate::daemons::KNOWN_BINARIES
+        .iter()
+        .filter_map(|name| {
+            let p = install_dir().join(format!("{name}.exe"));
+            p.exists().then_some((*name, p))
+        })
+        .collect()
 }
 
 pub(super) fn self_update() -> Result<()> {

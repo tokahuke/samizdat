@@ -46,6 +46,18 @@ pub const PROXY: Daemon = Daemon {
 
 pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY];
 
+/// Every Samizdat binary samizdat-up knows how to install or query.
+/// Includes the three daemons plus the CLI (`samizdat`) and
+/// samizdat-up itself. Order is the order `samizdat-up versions`
+/// prints them.
+pub const KNOWN_BINARIES: &[&str] = &[
+    "samizdat-node",
+    "samizdat-hub",
+    "samizdat-proxy",
+    "samizdat",
+    "samizdat-up",
+];
+
 pub fn by_name(name: &str) -> Option<&'static Daemon> {
     ALL.iter().copied().find(|d| d.name == name)
 }
@@ -59,6 +71,10 @@ pub fn launchd_label(d: &Daemon) -> String {
 /// Render the launchd plist for one daemon. Pure function; output is
 /// snapshot-tested against `tests/golden/com.samizdat.<name>.plist`.
 ///
+/// `as_user`: if `Some(name)`, emit `<key>UserName</key>` so launchd
+/// runs the daemon as that user instead of root (the LaunchDaemons
+/// default). The named user must already exist on the system.
+///
 /// Notes:
 ///   - `RunAtLoad` makes the service start the moment launchctl loads
 ///     the plist, mirroring systemd's `enable --now`.
@@ -66,8 +82,15 @@ pub fn launchd_label(d: &Daemon) -> String {
 ///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat,
 ///     /var/lib/samizdat) so users can administer a Mac install with
 ///     the same paths they would on a Linux box.
-pub fn render_launchd_plist(d: &Daemon) -> String {
+pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
     let label = launchd_label(d);
+    let user_block = match as_user {
+        Some(name) => format!(
+            "    <key>UserName</key>\n\
+             \x20   <string>{name}</string>\n"
+        ),
+        None => String::new(),
+    };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
@@ -76,6 +99,7 @@ pub fn render_launchd_plist(d: &Daemon) -> String {
          <dict>\n\
          \x20   <key>Label</key>\n\
          \x20   <string>{label}</string>\n\
+         {user_block}\
          \x20   <key>ProgramArguments</key>\n\
          \x20   <array>\n\
          \x20       <string>/usr/local/bin/{bin}</string>\n\
@@ -98,6 +122,7 @@ pub fn render_launchd_plist(d: &Daemon) -> String {
          </dict>\n\
          </plist>\n",
         label = label,
+        user_block = user_block,
         bin = d.bin,
         role = d.name,
     )
@@ -105,7 +130,13 @@ pub fn render_launchd_plist(d: &Daemon) -> String {
 
 /// Render the systemd unit file for one daemon. Pure function; output
 /// is snapshot-tested against `tests/golden/samizdat-<name>.service`.
-pub fn render_systemd_unit(d: &Daemon) -> String {
+///
+/// `as_user`: the value of `User=` in the [Service] section. Defaults
+/// to "root" when None. The user must already exist on the host; the
+/// caller (`install/linux.rs`) is responsible for chowning the data
+/// dir so the daemon can read its config and write its data.
+pub fn render_systemd_unit(d: &Daemon, as_user: Option<&str>) -> String {
+    let user = as_user.unwrap_or("root");
     format!(
         "[Unit]\n\
          Description={description}\n\
@@ -116,13 +147,14 @@ pub fn render_systemd_unit(d: &Daemon) -> String {
          Type=simple\n\
          Restart=always\n\
          RestartSec=1\n\
-         User=root\n\
+         User={user}\n\
          Environment=RUST_BACKTRACE=1\n\
          ExecStart=/usr/local/bin/{bin} --config /etc/samizdat/{role}.toml\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n",
         description = d.description,
+        user = user,
         bin = d.bin,
         role = d.name,
     )
@@ -134,7 +166,7 @@ mod tests {
 
     #[test]
     fn systemd_unit_for_node_matches_golden() {
-        let actual = render_systemd_unit(&NODE);
+        let actual = render_systemd_unit(&NODE, None);
         let golden = include_str!("../tests/golden/samizdat-node.service");
         assert_eq!(
             actual, golden,
@@ -144,35 +176,35 @@ mod tests {
 
     #[test]
     fn systemd_unit_for_hub_matches_golden() {
-        let actual = render_systemd_unit(&HUB);
+        let actual = render_systemd_unit(&HUB, None);
         let golden = include_str!("../tests/golden/samizdat-hub.service");
         assert_eq!(actual, golden);
     }
 
     #[test]
     fn systemd_unit_for_proxy_matches_golden() {
-        let actual = render_systemd_unit(&PROXY);
+        let actual = render_systemd_unit(&PROXY, None);
         let golden = include_str!("../tests/golden/samizdat-proxy.service");
         assert_eq!(actual, golden);
     }
 
     #[test]
     fn launchd_plist_for_node_matches_golden() {
-        let actual = render_launchd_plist(&NODE);
+        let actual = render_launchd_plist(&NODE, None);
         let golden = include_str!("../tests/golden/com.samizdat.node.plist");
         assert_eq!(actual, golden, "plist drift; update the golden if intentional");
     }
 
     #[test]
     fn launchd_plist_for_hub_matches_golden() {
-        let actual = render_launchd_plist(&HUB);
+        let actual = render_launchd_plist(&HUB, None);
         let golden = include_str!("../tests/golden/com.samizdat.hub.plist");
         assert_eq!(actual, golden);
     }
 
     #[test]
     fn launchd_plist_for_proxy_matches_golden() {
-        let actual = render_launchd_plist(&PROXY);
+        let actual = render_launchd_plist(&PROXY, None);
         let golden = include_str!("../tests/golden/com.samizdat.proxy.plist");
         assert_eq!(actual, golden);
     }
