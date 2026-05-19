@@ -94,7 +94,7 @@ fn collection() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             // Gets the contents of a collection item.
@@ -112,7 +112,7 @@ fn collection() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             "/{hash}",

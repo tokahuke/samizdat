@@ -84,7 +84,7 @@ pub fn api() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             "/~{identity}/",
@@ -96,7 +96,7 @@ pub fn api() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             "/~{identity}",

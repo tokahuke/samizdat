@@ -47,7 +47,7 @@ pub fn api() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             // Gets the content of a collection item using the series public key. This will give the
@@ -63,7 +63,7 @@ pub fn api() -> Router {
                     .map(PageResponse)
                 },
             )
-            .layer(security_scope!(AccessRight::Public)),
+            .layer(security_scope!(read; AccessRight::Public)),
         )
         .route(
             // Gets the content of a collection item using the series public key. This will give the
@@ -79,6 +79,6 @@ pub fn api() -> Router {
             // Lists all known public keys the node has seen, be they locally owned or not.
             "/",
             get(|| async move { readonly_tx(|tx| SeriesRef::get_all(tx)) }.map(ApiResponse))
-                .layer(security_scope!(AccessRight::ManageSeries)),
+                .layer(security_scope!(read; AccessRight::ManageSeries)),
         )
 }

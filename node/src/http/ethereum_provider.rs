@@ -59,6 +59,6 @@ pub fn api() -> Router {
                 }
                 .map(ApiResponse)
             })
-            .layer(security_scope!()),
+            .layer(security_scope!(read;)),
         )
 }
