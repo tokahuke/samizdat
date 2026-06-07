@@ -7,7 +7,11 @@
 //! module.
 
 use anyhow::Result;
+use std::net::TcpStream;
 use std::path::PathBuf;
+use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::cli::{AdminAction, Component};
 
@@ -15,6 +19,94 @@ use crate::cli::{AdminAction, Component};
 /// node's admin-token. Created at install time on Linux + macOS;
 /// ignored on Windows.
 pub const ADMIN_GROUP: &str = "samizdat";
+
+/// Default hubs registered on a fresh `samizdat-up install node`. Kept
+/// here (post-install, not in the node daemon) because seeding belongs
+/// to the install lifecycle, not every node start. The list is
+/// hardcoded; treat as necessary tech debt until there is a better
+/// place for it. Operators who do not want these can delete them with
+/// `samizdat hub rm <address>`.
+const DEFAULT_HUBS: &[(&str, &str)] = &[("testbed.hubfederation.com", "use-both")];
+
+/// TCP-ping the node's HTTP port until it accepts a connection or the
+/// timeout elapses. Used after enabling the service to know whether
+/// `samizdat hub new ...` can be safely invoked.
+fn wait_for_node_up(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let port = node_http_port();
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(
+            &format!("127.0.0.1:{port}").parse().expect("valid socket"),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+/// Default samizdat-node HTTP port. Mirrors the
+/// `default_value = "4510"` in `node/src/cli.rs`. If we ever support a
+/// non-default port at install time, this should pick it up from the
+/// effective config rather than hardcoding.
+fn node_http_port() -> u16 {
+    4510
+}
+
+/// Best-effort post-install seeding: register the hardcoded
+/// [`DEFAULT_HUBS`] on the just-installed node. Idempotent because the
+/// node's `Hubs::insert` dedupes by address; re-installs over an
+/// existing data dir are harmless. On failure (node didn't come up in
+/// time, `samizdat` CLI not on PATH, etc.) we print one warning and
+/// return Ok so the install does not fail.
+fn seed_default_hubs_best_effort() {
+    if !wait_for_node_up(Duration::from_secs(15)) {
+        eprintln!(
+            "samizdat-up: node did not accept TCP connections within 15s; \
+             skipping default-hub seeding. Run `samizdat hub new \
+             <address> <resolution-mode>` once it is up."
+        );
+        return;
+    }
+
+    let samizdat = installed_binary_paths()
+        .into_iter()
+        .find(|(name, _)| *name == "samizdat")
+        .map(|(_, path)| path);
+
+    let Some(samizdat) = samizdat else {
+        eprintln!(
+            "samizdat-up: cannot locate `samizdat` binary; skipping default-hub seeding."
+        );
+        return;
+    };
+
+    for (address, resolution_mode) in DEFAULT_HUBS {
+        match Command::new(&samizdat)
+            .args(["hub", "new", address, resolution_mode])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                println!("samizdat-up: seeded default hub {address} ({resolution_mode})");
+            }
+            Ok(status) => {
+                eprintln!(
+                    "samizdat-up: `samizdat hub new {address} {resolution_mode}` exited with \
+                     {status}. Re-run manually if you want this hub configured."
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "samizdat-up: could not spawn `samizdat hub new`: {err}. Re-run manually \
+                     if you want this hub configured."
+                );
+            }
+        }
+    }
+}
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -41,23 +133,30 @@ pub struct UninstallOpts {
 }
 
 pub fn install(opts: InstallOpts) -> Result<()> {
+    // Capture before move; seeding only matters when the node daemon
+    // was just enabled.
+    let installs_node = matches!(opts.component, Component::Node | Component::All);
+    let no_service = opts.no_service;
+
     #[cfg(target_os = "linux")]
-    {
-        return linux::install(opts);
-    }
+    let result = linux::install(opts);
     #[cfg(target_os = "macos")]
-    {
-        return macos::install(opts);
-    }
+    let result = macos::install(opts);
     #[cfg(target_os = "windows")]
-    {
-        return windows::install(opts);
-    }
+    let result = windows::install(opts);
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
+    let result: Result<()> = {
         let _ = opts;
         anyhow::bail!("samizdat-up does not support this OS yet")
+    };
+
+    result?;
+
+    if installs_node && !no_service {
+        seed_default_hubs_best_effort();
     }
+
+    Ok(())
 }
 
 pub fn uninstall(opts: UninstallOpts) -> Result<()> {
