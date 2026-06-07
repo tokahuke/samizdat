@@ -56,10 +56,24 @@ jobs:
       # git@github.com:`, which converts the submodule's SSH URL to
       # HTTPS and skips our deploy key. Drop the rewrite, fetch
       # manually.
+      #
+      # After init, fast-forward the submodule to its remote `main`
+      # HEAD. The parent repo's recorded submodule SHA only advances
+      # when someone explicitly commits the pointer here, which the
+      # publish workflow does NOT do (it commits + pushes the
+      # submodule's own main directly). Skipping this pull would
+      # check out a stale snapshot of dist/ that's missing every
+      # version published since the parent's submodule pointer was
+      # last touched, and the surgical wipe step would carry that
+      # stale state forward, silently dropping versions from the
+      # signed inventory.
       - name: Fetch get-samizdat submodule over SSH
         run: |
           git config --global --unset-all url.https://github.com/.insteadOf || true
           git submodule update --init --recursive
+          git -C install/get-samizdat fetch origin main
+          git -C install/get-samizdat checkout main
+          git -C install/get-samizdat pull --ff-only origin main
 
       - name: Install Rust toolchain + cross targets
         uses: dtolnay/rust-toolchain@nightly
