@@ -28,7 +28,11 @@ look first.
 6. **[docs/deferred.md](docs/deferred.md)** - the actionable backlog across all
    audit passes. Before opening a "should we also..." conversation, check
    whether it's already there with the rationale.
-7. **[.cursorrules](.cursorrules)** - file-level code style (indentation, naming,
+7. **[docs/upgrade-hazards.md](docs/upgrade-hazards.md)** - what can desync
+   between two versions in production (CLI/daemon swap window, bincode DB
+   structs, tarpc RPC, manifest schema, default configs). Read before
+   shipping a release that renames or reorders any wire-visible field.
+8. **[.cursorrules](.cursorrules)** - file-level code style (indentation, naming,
    docstring rules). The conventions doc complements it; do not duplicate.
 
 ## Working preferences (Pedro's, applied always)
