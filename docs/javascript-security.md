@@ -1,5 +1,26 @@
 # JavaScript security
 
+## How to read severities here
+
+Severities are rated against existing defenses, not in isolation. The rubric:
+
+- **critical**: a passive visit to a malicious series by an unprivileged user
+  fully owns the node or exfiltrates secrets, with no further user action.
+- **high**: same, but requires one ordinary prior action (subscribed to a
+  series, clicked a link from a friend), or breaks isolation between two
+  entities the user actively uses.
+- **medium**: requires the user to have explicitly granted the malicious entity
+  a sensitive right (e.g. `ManageSeries` via `/_register`), OR is a privacy/
+  fingerprinting attack with bounded yield, OR is a defense-in-depth gap
+  rather than a missing primary defense.
+- **low**: requires multiple coordinated user actions, OR is preempted by an
+  existing mitigation in all but corner cases, OR a covert-channel/timing
+  attack with low practical yield.
+
+A threat rated "medium" still matters: it is gated by an existing defense
+today and would become critical if that defense regressed. The Mitigation in
+place bullet under each threat names the specific defense it depends on.
+
 ## Scope and threat model
 
 The adversary modelled here is state-level (NSA-class): well-resourced, willing
@@ -16,14 +37,18 @@ boundaries (proxy stripping headers, `deny_outside_requests`, QUIC riddles,
 hub federation reflection, build-script symlink refusal) are covered in
 `docs/threat-model.md` and are not restated here.
 
-The honest framing: the browser is the most under-defended surface in
-Samizdat. The project's auth model assumes "loopback" is a trust boundary,
-which is sound against off-host network attackers but is *not* sound against
-a malicious page running in the user's own browser. That page is also "on
-loopback" as far as `deny_outside_requests` can tell. Every defence after
-that point relies on CORS preflight, the `Referer` header, and the absence
-of a same-origin grant for sensitive entities. CSP, framing, and resource
-isolation headers are absent today.
+The honest framing: the browser is the surface with the FEWEST
+defense-in-depth headers today. No CSP, no `X-Content-Type-Options: nosniff`,
+no `frame-ancestors`, no COOP/COEP, no `Permissions-Policy`. The primary
+defenses ARE in place per `docs/threat-model.md`: `deny_outside_requests` is
+the outer cordon (loopback is explicitly the OUTER boundary, not "trusted"),
+browser pages are handled separately via Referer-based trusted context, and
+CORS preflight blocks non-simple cross-origin requests (any `Authorization`
+header, any `application/json` body). The proxy strips `Authorization` and
+`Referer` so proxy-routed requests resolve as `entity = None` with
+`granted = [Public]`. What is missing is the second-layer hardening: header-
+level mitigations against fingerprinting, clickjacking, MIME confusion, and
+the structural single-origin lumping that web platform contracts care about.
 
 ## The single-origin problem
 
@@ -80,7 +105,16 @@ locate any service-worker-related code.
 samizdat-served page until the user manually unregisters the worker from
 browser devtools. The worker can rewrite responses for `/~bank/`,
 exfiltrate request bodies, mint fake `Authorization` failures.
-**Severity** -- critical: persistent, cross-entity, survives uninstall.
+**Severity** -- high: requires the user to have first navigated to (or
+subscribed to) the malicious series; not a passive-visit-no-precondition
+attack. The damage once triggered is persistent and cross-entity.
+**Mitigation in place** -- partial; the structural cause is the shared
+single origin (see `docs/threat-model.md` "Browser pages served by the
+node") and there is no service-worker-scope HTTP middleware today. The
+existing same-origin contract is what makes the worker cross-entity once
+registered; the Referer-based trusted-context check still prevents the
+worker from invoking admin endpoints unless the entity was granted the
+matching right.
 **Fix** -- In `node/src/http/mod.rs`, add a middleware that refuses to
 serve any response with `Service-Worker-Allowed` outside `/_series/<key>/`
 or `/~<handle>/` subtrees, and that always emits
@@ -108,8 +142,17 @@ themselves (`admin-token` mode 0640, `read-token` mode 0644 per
 `node/src/access.rs:99-117`) are NOT readable from the browser, but the
 admin capabilities reachable via entity rights are equivalent for many
 purposes.
-**Severity** -- critical: social-engineered grant of `ManageSeries`
-exfiltrates series secrets to attacker-controlled JS.
+**Severity** -- medium: the page only has the rights of its entity, granted
+via `/_register`, and cannot reach `/_series-owners` unless the user
+explicitly clicked through to grant `ManageSeries`. If the user does grant
+it, the flat-right semantics make the consequence systemic.
+**Mitigation in place** -- the Referer-based trusted-context check
+(`docs/threat-model.md` section "Browser pages served by the node") gates
+this. A page at `/~attacker/` cannot read `/_series-owners` by mere
+navigation; the user must complete a `/_register` flow first. The
+deferred per-entity `ManageSeries` item in `docs/audit-history.md` is what
+would convert this from "exfiltrates ALL series secrets" to "exfiltrates
+only the secrets the user granted access to".
 **Fix** -- Stop returning private key bytes in `/_series-owners`
 responses; require an explicit "reveal secret" route gated on
 `TokenScope::Admin` bearer ONLY (no entity-rights path). Mark
@@ -142,8 +185,18 @@ into `read; AccessRight::Public` is silently CSRF-able cross-origin.
 **What an attacker gets** -- Today, very little (the gated routes are
 guarded; vacuum is closed). Tomorrow, whatever new write route someone
 adds with `Public` rights becomes a cross-origin CSRF target.
-**Severity** -- medium: today's catalogue of `Public`-grant write routes
-is empty; the concern is regression.
+**Severity** -- low: CORS preflight blocks the dangerous shape (any
+`Authorization` header or `application/json` body triggers preflight); the
+remaining surface is "simple POST with `text/plain`", and the only
+catalogued route in that shape that mutates state (`/_vacuum/*`) is gated
+with `authenticate_trusted_context`. The risk is regression on a new
+route, not a present-day bug.
+**Mitigation in place** -- CORS preflight at the browser layer plus
+`authenticate_trusted_context` on `/_vacuum/*`; see `docs/threat-model.md`
+"Browser pages served by the node" and "A malicious local web page in the
+user's browser". This audit pass did not exhaustively enumerate every
+simple-POST route in `node/src/http/`; a route that accepts simple POST
+without `authenticate_trusted_context` would re-introduce the surface.
 **Fix** -- Add an origin/Host check to every state-mutating route, not
 just `_vacuum`. Centralise it in `deny_outside_requests` so that POST,
 PUT, PATCH, DELETE without a `Referer`-matching-loopback OR a bearer
@@ -162,7 +215,12 @@ serves objects with `Content-Type` and Samizdat-prefixed metadata; no
 user. Combined with the public IP visible to `attacker.example`, this
 deanonymises the user even if they only ever view content "anonymously"
 through Samizdat.
-**Severity** -- high: passive deanonymisation by mere page view.
+**Severity** -- high: passive deanonymisation by visiting a malicious
+series the user has subscribed to or been linked into.
+**Mitigation in place** -- none at the header layer; this is an unmitigated
+gap. The threat model does not claim browser fingerprinting is bounded by
+any existing primitive, and there is no CSP today (see "Defensive
+primitives to add" below).
 **Fix** -- Emit a strict CSP from the resolver. See "Defensive primitives".
 The relevant code is `node/src/http/resolvers.rs:68` (new objects) and
 `node/src/http/resolvers.rs:97` (existing objects); both build
@@ -181,8 +239,11 @@ locate a relevant header anywhere in `node/src/http/`.
 **What an attacker gets** -- LAN topology, public IP. With a VPN this is
 the VPN exit. Without, this is the user's home IP. Either way
 deanonymising.
-**Severity** -- critical against a state-level adversary whose objective
-is deanonymisation.
+**Severity** -- high: requires the user to have navigated to (or
+subscribed to) the malicious series, but once visited the deanonymisation
+is passive and complete against a state-level adversary.
+**Mitigation in place** -- none; no `Permissions-Policy` and no CSP today.
+This is an unmitigated gap at the header layer.
 **Fix** -- Emit `Permissions-Policy: ... camera=(), microphone=(),
 geolocation=(), gyroscope=(), payment=()` plus the CSP `connect-src
 'self'` (which alone blocks STUN/TURN to non-self). Browsers vary in
@@ -204,7 +265,13 @@ that takes a user action (a click, a form submit, a popup open). On the
 node side, the request looks like a same-origin click from the
 samizdat-served page, so trusted-context checks pass.
 **Severity** -- high: amplifies T2 (a "click to authorize" can be
-clickjacked into "ManageSeries granted").
+clickjacked into "ManageSeries granted"); requires the user to visit
+`attacker.example` first.
+**Mitigation in place** -- none at the header layer; no `X-Frame-Options`
+and no `frame-ancestors`. This is an unmitigated defense-in-depth gap.
+The Referer-trusted-context check still gates `/_register` so the
+clickjacked click must traverse the legitimate grant UI; that UI is the
+only line of defense today.
 **Fix** -- Emit `X-Frame-Options: DENY` (legacy) and CSP
 `frame-ancestors 'none'` from every response. Same site:
 `node/src/http/resolvers.rs:26` for objects, plus a global response
@@ -221,8 +288,13 @@ any content type the publisher named.
 where the publisher claimed it was inert (text, image, etc.). Critical
 when the storing entity is trusted by the victim but the *content* came
 from a third party (re-upload, mirror, subscription).
-**Severity** -- high: bypass of "this is just a text file" assumptions
-in linking/reference UIs.
+**Severity** -- medium: requires the user to navigate to a malicious
+object on a series they have already engaged with; the practical impact is
+HTML/JS execution under the samizdat origin, which is then bounded by the
+existing Referer-trusted-context grant model.
+**Mitigation in place** -- none at the header layer; no `nosniff`. This is
+an unmitigated defense-in-depth gap. The same-origin contract still
+applies, so any execution is bounded by the entity's existing rights.
 **Fix** -- Add `X-Content-Type-Options: nosniff` in the same
 `Resolved::into_response` path. One line.
 
@@ -235,7 +307,12 @@ SVG's origin (which is the samizdat origin).
 streams object bytes as-is.
 **What an attacker gets** -- Script execution under the samizdat
 origin from a "harmless image". Promotes any image hosting into T2/T4.
-**Severity** -- high.
+**Severity** -- medium: requires the user to navigate to the SVG URL or
+to a page that embeds it, on a series they have engaged with. The
+escalation paths (T2, T4) are themselves gated by Referer-trusted-context
+and by the absence of CSP respectively.
+**Mitigation in place** -- none specific to SVG; relies on the same
+Referer-trusted-context boundary as T2 for admin escalation.
 **Fix** -- Serve `image/svg+xml` with CSP `script-src 'none'` (the same
 CSP from T4 already does this if `script-src 'self'` and the SVG is
 inline-`<script>`-only; SVG embedded script is treated as inline). Or,
@@ -261,6 +338,10 @@ The damage is read-only-of-the-script-body, but the script body can
 itself contain secrets (config, baked-in tokens).
 **Severity** -- medium today (depends on what scripts contain),
 structurally high (any future per-entity browser session model breaks).
+**Mitigation in place** -- the Referer-the-node-sees is still
+`~attacker`'s page, so the attacker's later admin calls do NOT pick up the
+victim entity's rights (see `docs/threat-model.md` "Browser pages served
+by the node"). What leaks is the script body content only.
 **Fix** -- Per-series subdomain isolation. No header fix closes this.
 
 ### T10. Cache and Cache-Storage as persistent fingerprint
@@ -278,7 +359,11 @@ a page can fingerprint *the user's catalogue of seen content* via
 selective revalidation.
 **What an attacker gets** -- Long-lived per-browser identifier, plus an
 oracle for "has this user ever fetched this object hash before".
-**Severity** -- high for deanonymisation.
+**Severity** -- medium: a privacy/fingerprinting attack with bounded
+yield (one stable identifier per browser profile, plus a content-cache
+oracle); requires the user to revisit attacker-controlled content.
+**Mitigation in place** -- none; no `Clear-Site-Data` plumbing on
+unsubscribe, no per-entity storage partitioning today.
 **Fix** -- Send `Clear-Site-Data: "cache", "storage"` when the user
 "forgets" an entity (a new admin route invoked by the CLI / UI on
 unsubscribe). Per-subdomain isolation again helps: clearing storage for
@@ -297,8 +382,15 @@ the samizdat origin and can do everything T2 and T4 do.
 accepts arbitrary HTML. The proxy at `proxy/src/http.rs:107-109`
 rewrites HTML through `proxy_page` but the rewrite does not look at
 `<script src>`.
-**Severity** -- critical: long-lived back door planted by anyone the
-user subscribes to.
+**Severity** -- high: requires the user to have subscribed to (or
+otherwise visited) the malicious series first, but once subscribed the
+backdoor persists across visits and runs in the samizdat origin with
+whatever rights that entity has been granted.
+**Mitigation in place** -- none at the ingest layer or the serve layer
+(no CSP today). The Referer-trusted-context check still bounds the
+external script's reach into admin endpoints to the entity's existing
+rights, so without a prior `/_register` grant the damage is fingerprinting
++ content-impersonation rather than admin takeover.
 **Fix** -- Two layers. At ingest, refuse to commit HTML containing
 external `<script src>`, external `<link rel=stylesheet>`, or external
 `<iframe>` (warn user, require an opt-in flag). At serve, the CSP
@@ -320,31 +412,50 @@ to read memory across origins.
 After an accidental enabling: cross-process memory disclosure.
 **Severity** -- low today, high if the headers get enabled without the
 rest of the isolation contract.
+**Mitigation in place** -- the absence of COOP/COEP is itself the
+mitigation: without `crossOriginIsolated`, `SharedArrayBuffer` is
+unavailable. This is a regression-guard concern, not a present-day bug.
 **Fix** -- Document the dependency in `node/src/http/mod.rs` and add a
 test that asserts COOP/COEP combination is either both off or both on
 together with `Cross-Origin-Resource-Policy: same-origin`. If future
 work needs SAB (e.g. WASM threading for content rendering), do the full
 isolation contract; otherwise keep them off.
 
-### T13. Loopback as trust boundary
-**Vector** -- `deny_outside_requests` (`node/src/http/mod.rs:208-221`)
-treats 127.0.0.1 as "the local user". A page in the user's own browser
-*is* a request from 127.0.0.1: the connection's peer address is the
-loopback socket the browser opened. The middleware passes; everything
-after relies on `Referer`, `Origin`, CORS, and per-route auth.
-**Current state** -- This is by design and documented in
-`docs/threat-model.md`. The risk is that an agent reading the code may
-assume "loopback means trusted" and add a write route without further
-gating.
-**What an attacker gets** -- Whatever the next-most-permissive route
-exposes. See T3.
-**Severity** -- medium: structural risk of future regression rather
-than a present-day bug.
-**Fix** -- Rename `deny_outside_requests` to something like
-`require_loopback_peer` to dispel the "this means trusted" reading.
-Add a `// SECURITY:` comment block. Codify in `docs/conventions.md`
-that any new write route MUST add an `Origin`/`Referer` check or a
-bearer-token requirement, regardless of loopback.
+### T13. UI deception in the `/_register` grant flow
+**Vector** -- The Referer-based trusted-context model assumes the user
+understands what `/_register` grants when they click through. A malicious
+page on the samizdat origin can manipulate the surrounding UI (overlay,
+distract, race, or simply present misleading copy) to coax the user into
+completing a `/_register` flow that grants `ManageSeries` or another
+sensitive right to an entity the user did not mean to trust. The page
+cannot forge the grant itself (the popup is served by the node and shows
+the requesting entity), but it can shape the user's expectation around
+the click.
+**Current state** -- `deny_outside_requests`
+(`node/src/http/mod.rs:208-221`) is the outer cordon, explicitly the
+loopback boundary and NOT a trust assertion (see `docs/threat-model.md`
+"Trust boundaries at a glance" and "What is authenticated, and what
+isn't"). Browser pages are handled as a separate boundary via Referer-
+based trusted context plus CORS preflight. The remaining surface is the
+trustworthiness of the `/_register` UI itself: the user is the one
+asserting that the requesting entity should hold the right.
+**What an attacker gets** -- Whatever right the user can be convinced to
+grant. Today, that includes `ManageSeries` (flat across entities; see
+T2), which is the high-impact pivot.
+**Severity** -- low: requires a coordinated UI-deception attack
+culminating in an explicit user click through the `/_register` flow;
+preempted by the existing trusted-context UI in all but corner cases
+where the user misreads the popup.
+**Mitigation in place** -- Referer-based trusted context and CORS
+preflight (see `docs/threat-model.md` section "Browser pages served by
+the node"); plus the `/_register` popup is served by the node and names
+the requesting entity. The residual risk is purely user-comprehension
+under deception.
+**Fix** -- Harden the `/_register` template: name the requesting entity
+prominently, warn when the entity is not one the user has interacted
+with before, and consider a delay-then-confirm pattern for high-impact
+rights. Combined with the deferred per-entity `ManageSeries` change, the
+blast radius of any single misclick shrinks substantially.
 
 ### T14. Proxy origin vs local origin: header asymmetry
 **Vector** -- The same content is served at two origins:
@@ -363,8 +474,16 @@ The proxy DOES add `Content-Type` (`proxy/src/http.rs:91-93`) but
 nothing else.
 **What an attacker gets** -- A way to bypass node-side hardening by
 asking the user to visit the proxy URL instead of the local one.
-**Severity** -- high once node-side headers are added; today, no
-asymmetry because there is no header to strip.
+**Severity** -- medium: defense-in-depth gap rather than a missing primary
+defense; today no node-side headers exist for the proxy to strip, so the
+asymmetry has no present-day yield. Becomes high the moment node-side
+headers are added without updating the proxy allowlist.
+**Mitigation in place** -- partial; the proxy's input-side hardening
+(strips `Authorization`, strips `Referer`, GET only) per
+`docs/threat-model.md` "Proxy" still bounds what a proxy-routed page can
+trigger admin-wise: every proxy-forwarded request resolves as
+`granted = [Public]`. The response-side header asymmetry is the
+unmitigated piece.
 **Fix** -- Extend `PROXY_HEADERS` to include every security header.
 Better: when the proxy injects its own `proxy_page` rewrite
 (`proxy/src/http.rs:109`), inject the same security headers
@@ -395,7 +514,15 @@ the *origin* is still `127.0.0.1:4510`.
 `http://127.0.0.1:4510/~bank.example/login` while the page itself was
 loaded from `/~attacker/`. Combined with T9 (cross-series JS pull), the
 attacker can render a convincing forgery.
-**Severity** -- high for phishing.
+**Severity** -- medium: phishing requires the user to navigate to (or
+have subscribed to) the malicious entity first, and the deception is
+limited to URL-bar manipulation within the single origin.
+**Mitigation in place** -- partial; the same-origin policy still prevents
+`pushState` to a different ORIGIN, so the address bar always shows
+`127.0.0.1:4510`. The Referer-trusted-context check ensures admin
+operations the deceptive page initiates run with the attacker entity's
+rights, not the impersonated entity's. The residual gap is purely visual
+deception of the user.
 **Fix** -- Per-series subdomain isolation. Once each identity is on
 its own subdomain, `pushState` to another identity's path becomes a
 cross-origin operation and is blocked by the browser. No middleware
