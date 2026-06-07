@@ -1,8 +1,9 @@
 # Agent orientation
 
 Samizdat is a peer-to-peer, content-addressed publishing network with Ethereum-based
-identity. The workspace has five Rust crates: `common`, `node`, `hub`, `cli`, `proxy`.
-This file tells you (the agent) where to look first.
+identity. The workspace has six Rust crates: `common`, `node`, `hub`, `cli`, `proxy`,
+and `samizdat-up` (the installer/updater). This file tells you (the agent) where to
+look first.
 
 ## Read these before doing anything substantial
 
@@ -56,6 +57,23 @@ human's agent. The TL;DR for agents that don't have access to that memory:
   tests across `common`, `hub`, and `node`.
 - DB tests use the `samizdat-common` `test-helpers` feature. See
   `docs/conventions.md` for the `TestDb<T>` pattern.
+
+## Common commands
+
+- Build/check everything: `cargo check --workspace` (fast) or
+  `cargo build --workspace` (binaries land in `target/debug/`).
+- Run all tests: `cargo test --workspace`. Don't run this after every edit
+  (see Working preferences); the suite is slow, batch and validate once.
+- Run one crate's tests: `cargo test -p samizdat-node`.
+- Run a single test by name substring: `cargo test -p samizdat-node
+  <test_name>` (add `-- --nocapture` to see prints).
+- Format: `cargo fmt`. Lint: `cargo clippy --workspace`.
+- Release builds use `release.sh <new-version>` (bumps the workspace version,
+  tags, pushes, triggers the publish workflow). Read `docs/operations.md`
+  before cutting a release.
+- The `js/` library (SamizdatJS) is a separate npm project: `cd js && npm
+  install`, then `npm run build` (webpack) or `npm run serve` (dev server).
+  It has no test suite.
 
 ## Conventions that are easy to miss
 
