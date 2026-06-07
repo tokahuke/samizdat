@@ -168,12 +168,18 @@ pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
 }
 
 pub(super) fn self_update() -> Result<()> {
-    require_root()?;
+    // No `require_root()`: who needs root depends on who owns the
+    // currently-running samizdat-up binary. Brew installs land under
+    // a user-owned prefix (e.g. /opt/homebrew/bin); a bootstrap
+    // curl-pipe-sh install lands under /usr/local/bin (root-owned).
+    // We write back to wherever current_exe() resolves to and let
+    // the OS surface permission errors verbatim.
     let origin = DEFAULT_ORIGIN.to_owned();
     let target = fetch::host_target_triple();
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
-    let dest = PathBuf::from("/usr/local/bin/samizdat-up");
+    let dest = std::env::current_exe()
+        .context("locating current samizdat-up binary")?;
 
     // Stage the new binary in a sibling file, run `--version` on it,
     // and only swap if it answers cleanly. Catches mismatched-arch
