@@ -18,13 +18,13 @@ use crate::api::{self, Keypair};
 ///
 /// # Arguments
 ///
-/// * `series_name` - Name of the series to create
+/// * `nickname` - Node-local nickname for the series owner.
 /// * `is_draft` - Whether this is a draft series. Draft series are not published
 ///   to the network.
 /// * `public_key` - Optional public key for the series
 /// * `private_key_file` - Optional path to a file containing the private key
 pub async fn new(
-    series_name: String,
+    nickname: String,
     is_draft: bool,
     public_key: Option<String>,
     private_key_file: Option<PathBuf>,
@@ -56,7 +56,7 @@ pub async fn new(
         });
 
     api::post_series_owner(api::PostSeriesOwnerRequest {
-        series_owner_name: &series_name,
+        nickname: &nickname,
         keypair,
         is_draft,
     })
@@ -71,18 +71,18 @@ pub async fn new(
 /// already have. Prompts for confirmation unless `assume_yes` is true.
 ///
 /// # Arguments
-/// * `series_name` - Name of the series to remove
+/// * `nickname` - Node-local nickname of the series owner to remove.
 /// * `assume_yes` - Skip the interactive prompt (e.g. for non-interactive scripts)
-pub async fn rm(series_name: String, assume_yes: bool) -> Result<(), anyhow::Error> {
+pub async fn rm(nickname: String, assume_yes: bool) -> Result<(), anyhow::Error> {
     if !assume_yes {
         if !std::io::stdin().is_terminal() {
             anyhow::bail!(
-                "Refusing to remove series {series_name}: stdin is not a TTY and \
+                "Refusing to remove series {nickname}: stdin is not a TTY and \
                  --yes was not supplied. This is a destructive operation."
             );
         }
         print!(
-            "Permanently remove series owner {series_name}? \
+            "Permanently remove series owner {nickname}? \
              This destroys the series private key on the node. [y/N] "
         );
         std::io::stdout().flush().ok();
@@ -94,10 +94,10 @@ pub async fn rm(series_name: String, assume_yes: bool) -> Result<(), anyhow::Err
         }
     }
 
-    let removed = api::delete_series_owner(&series_name).await?;
+    let removed = api::delete_series_owner(&nickname).await?;
 
     if !removed {
-        println!("NOTE: series {series_name} does not exist.");
+        println!("NOTE: series {nickname} does not exist.");
     }
 
     Ok(())
@@ -106,21 +106,21 @@ pub async fn rm(series_name: String, assume_yes: bool) -> Result<(), anyhow::Err
 /// Shows information about a specific series.
 ///
 /// # Arguments
-/// * `series_name` - Name of the series to show
-pub async fn show(series_name: String) -> Result<(), anyhow::Error> {
-    api::get_series_owner(&series_name).await?;
+/// * `nickname` - Node-local nickname of the series owner to show.
+pub async fn show(nickname: String) -> Result<(), anyhow::Error> {
+    api::get_series_owner(&nickname).await?;
     Ok(())
 }
 
 /// Lists series owners, either all or for a specific series.
 ///
 /// # Arguments
-/// * `series_owner_name` - Optional name of the series owner to list
-pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> {
+/// * `nickname` - Optional nickname of the series owner to list.
+pub async fn ls(nickname: Option<String>) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     struct Row {
-        /// Name of the series owner
-        name: String,
+        /// Node-local nickname of the series owner.
+        nickname: String,
         /// Public key of the series
         public_key: Key,
         /// Private key of the series
@@ -129,11 +129,11 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
         default_ttl: String,
     }
 
-    async fn ls_series(series_owner_name: String) -> Result<(), anyhow::Error> {
-        let series_owner = api::get_series_owner(&series_owner_name).await?;
+    async fn ls_one(nickname: String) -> Result<(), anyhow::Error> {
+        let series_owner = api::get_series_owner(&nickname).await?;
 
         show_table(vec![Row {
-            name: series_owner.name,
+            nickname: series_owner.nickname,
             public_key: series_owner.keypair.verifying_key().into(),
             private_key: series_owner.keypair.to_scalar_bytes().into(),
             default_ttl: format!("{:?}", series_owner.default_ttl),
@@ -149,7 +149,7 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
             response
                 .into_iter()
                 .map(|series_owner| Row {
-                    name: series_owner.name,
+                    nickname: series_owner.nickname,
                     public_key: series_owner.keypair.verifying_key().into(),
                     private_key: series_owner.keypair.to_scalar_bytes().into(),
                     default_ttl: format!("{:?}", series_owner.default_ttl),
@@ -160,17 +160,14 @@ pub async fn ls(series_owner_name: Option<String>) -> Result<(), anyhow::Error> 
         Ok(())
     }
 
-    if let Some(series_owner_name) = series_owner_name {
-        ls_series(series_owner_name).await
+    if let Some(nickname) = nickname {
+        ls_one(nickname).await
     } else {
         ls_all().await
     }
 }
 
 /// Lists cached series information, either all or for a specific series.
-///
-/// # Arguments
-/// * `series_name` - Optional name of the series to list cached information for
 pub async fn ls_cached() -> Result<(), anyhow::Error> {
     async fn ls_cached_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_series().await?;

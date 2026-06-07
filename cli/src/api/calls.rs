@@ -10,7 +10,7 @@ use std::{str::FromStr, time::Duration};
 
 use samizdat_common::{Hash, Key, Signed};
 
-use super::{access_token, delete, get, patch, post, put, ApiError, CLIENT};
+use super::{access_token, delete, get, patch, post, put, CLIENT};
 
 // Hubs:
 
@@ -186,8 +186,8 @@ pub struct Keypair {
 /// Request parameters for creating a new series owner.
 #[derive(Debug, Serialize)]
 pub struct PostSeriesOwnerRequest<'a> {
-    /// Name of the series owner
-    pub series_owner_name: &'a str,
+    /// Node-local nickname for the series owner.
+    pub nickname: &'a str,
     /// Optional keypair for the series
     pub keypair: Option<Keypair>,
     /// Whether this is a draft series. Drafts are not exposed to the network
@@ -197,8 +197,8 @@ pub struct PostSeriesOwnerRequest<'a> {
 /// Response from creating a new series owner.
 #[derive(Deserialize)]
 pub struct PostSeriesOwnerResponse {
-    /// Name of the series owner
-    pub name: String,
+    /// Node-local nickname for the series owner.
+    pub nickname: String,
     /// Keypair for signing editions
     pub keypair: ed25519_dalek::SigningKey,
     /// Default time-to-live for editions
@@ -214,12 +214,12 @@ pub async fn post_series_owner(
     post("/_series-owners", request).await
 }
 
-pub async fn delete_series_owner(series_name: &str) -> Result<bool, anyhow::Error> {
-    delete(format!("/_series-owners/{series_name}")).await
+pub async fn delete_series_owner(nickname: &str) -> Result<bool, anyhow::Error> {
+    delete(format!("/_series-owners/{nickname}")).await
 }
 
-pub async fn get_series_owner(series_name: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
-    get(format!("/_series-owners/{series_name}")).await
+pub async fn get_series_owner(nickname: &str) -> Result<GetSeriesOwnerResponse, anyhow::Error> {
+    get(format!("/_series-owners/{nickname}")).await
 }
 
 pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyhow::Error> {
@@ -430,10 +430,10 @@ pub struct PostEditionResponse {
 
 /// Creates a new edition for a series.
 pub async fn post_edition(
-    series_name: &str,
+    nickname: &str,
     request: PostEditionRequest<'_>,
 ) -> Result<PostEditionResponse, anyhow::Error> {
-    post(format!("/_series-owners/{series_name}/editions",), request).await
+    post(format!("/_series-owners/{nickname}/editions",), request).await
 }
 
 /// Reference to a series.

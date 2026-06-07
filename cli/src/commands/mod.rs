@@ -76,9 +76,9 @@ pub async fn download(hash: String, timeout: u64) -> Result<(), anyhow::Error> {
 /// Initializes a new Samizdat project in the current directory.
 ///
 /// Creates both the Manifest.toml and .Samizdat.priv files with generated keys.
-pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
+pub async fn init(nickname: Option<String>) -> Result<(), anyhow::Error> {
     let pwd = env::current_dir()?;
-    let name = name.unwrap_or_else(|| {
+    let nickname = nickname.unwrap_or_else(|| {
         pwd.iter()
             .next_back()
             .expect("not empty")
@@ -86,10 +86,10 @@ pub async fn init(name: Option<String>) -> Result<(), anyhow::Error> {
             .to_string()
     });
 
-    let (manifest, private_key) = Manifest::create(&name)
+    let (manifest, private_key) = Manifest::create(&nickname)
         .await
         .context("failed to create `Manifest.toml`")?;
-    PrivateManifest::create(&manifest.debug.name, Some(&private_key))
+    PrivateManifest::create(&manifest.debug.nickname, Some(&private_key))
         .await
         .context("failed to create `.Samizdat.priv`")?;
 
@@ -128,14 +128,14 @@ pub async fn import(
                 Ok(raw.trim().parse::<PrivateKey>()?)
             })
             .transpose()?;
-        PrivateManifest::create(&manifest.debug.name, parsed_key.as_ref())
+        PrivateManifest::create(&manifest.debug.nickname, parsed_key.as_ref())
             .await
             .context("failed to create `.Samizdat.priv`")?
     };
 
     // Import debug series owner.
     api::post_series_owner(api::PostSeriesOwnerRequest {
-        series_owner_name: &manifest.debug.name,
+        nickname: &manifest.debug.nickname,
         keypair: Some(api::Keypair {
             private_key: private_manifest.private_key_debug,
             public_key: private_manifest.public_key_debug,
@@ -148,7 +148,7 @@ pub async fn import(
     // Import series owners if its private key present in the private manifest.
     if let Some(private_key) = private_manifest.private_key {
         api::post_series_owner(api::PostSeriesOwnerRequest {
-            series_owner_name: &manifest.series.name,
+            nickname: &manifest.series.nickname,
             keypair: Some(api::Keypair {
                 private_key,
                 public_key: manifest.series.public_key,
@@ -286,10 +286,10 @@ pub async fn commit(
 
     tracing::debug!("hashes: {:#?}", hashes);
 
-    let series_name = if is_release {
-        manifest.series.name
+    let nickname = if is_release {
+        manifest.series.nickname
     } else {
-        manifest.debug.name
+        manifest.debug.nickname
     };
     let ttl = ttl.clone().or(if is_release {
         manifest.series.ttl
@@ -298,7 +298,7 @@ pub async fn commit(
     });
 
     let edition = api::post_edition(
-        &series_name,
+        &nickname,
         api::PostEditionRequest {
             kind,
             ttl: ttl.as_deref(),
@@ -311,16 +311,14 @@ pub async fn commit(
 
     #[derive(Tabled)]
     struct Row {
-        series: String,
-        // public_key: Key,
+        nickname: String,
         collection: Hash,
         timestamp: chrono::DateTime<chrono::Utc>,
         ttl: String,
     }
 
     show_table([Row {
-        series: series_name.to_owned(),
-        // public_key: item.public_key,
+        nickname: nickname.to_owned(),
         collection: edition.signed.collection.hash,
         timestamp: edition.signed.timestamp,
         ttl: format!("{:?}", edition.signed.ttl),

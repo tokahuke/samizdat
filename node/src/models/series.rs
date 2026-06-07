@@ -32,8 +32,10 @@ const EDITION_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
 /// A public-private keypair that allows one to publish new collections
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SeriesOwner {
-    /// An _internal_ name to identify this keypair.
-    name: String,
+    /// Node-local nickname for this keypair. Used only as the lookup key in
+    /// this node's series-owner table and in CLI output. It carries no
+    /// network-wide meaning; the network only ever sees `public_key`.
+    nickname: String,
     /// The keypair that controls the series.
     keypair: SigningKey,
     /// The default time-to-leave. This is the recommended minimum period peers should
@@ -51,7 +53,7 @@ impl Droppable for SeriesOwner {
         // Bad idea to drop series and not really worth it space wise.
         // self.series().drop_if_exists_with(batch)?; // bad!
 
-        Table::SeriesOwners.delete(tx, self.name.as_str())?;
+        Table::SeriesOwners.delete(tx, self.nickname.as_str())?;
         Ok(())
     }
 }
@@ -63,7 +65,7 @@ impl SeriesOwner {
 
         Table::SeriesOwners.put(
             tx,
-            &self.name,
+            &self.nickname,
             bincode::serialize(&self).expect("can serialize"),
         )?;
         Table::Series.put(
@@ -77,12 +79,12 @@ impl SeriesOwner {
     /// Creates a new [`SeriesOwner`] and inserts it into the database.
     pub fn create(
         tx: &mut WritableTx,
-        name: &str,
+        nickname: &str,
         default_ttl: Duration,
         is_draft: bool,
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
-            name: name.to_owned(),
+            nickname: nickname.to_owned(),
             keypair: SigningKey::generate(&mut rand::rngs::OsRng {}),
             default_ttl,
             is_draft,
@@ -95,13 +97,13 @@ impl SeriesOwner {
     /// Creates a [`SeriesOwner`] from existing data and inserts it into the database.
     pub fn import(
         tx: &mut WritableTx,
-        name: &str,
+        nickname: &str,
         private_key: PrivateKey,
         default_ttl: Duration,
         is_draft: bool,
     ) -> Result<SeriesOwner, crate::Error> {
         let owner = SeriesOwner {
-            name: name.to_owned(),
+            nickname: nickname.to_owned(),
             keypair: private_key.into(),
             default_ttl,
             is_draft,
@@ -111,9 +113,9 @@ impl SeriesOwner {
         Ok(owner)
     }
 
-    /// Retrieves a series owner from the database using the internal series name.
-    pub fn get<Tx: TxHandle>(tx: &Tx, name: &str) -> Result<Option<SeriesOwner>, crate::Error> {
-        Table::SeriesOwners.get(tx, name.as_bytes(), |serialized| {
+    /// Retrieves a series owner from the database by its node-local nickname.
+    pub fn get<Tx: TxHandle>(tx: &Tx, nickname: &str) -> Result<Option<SeriesOwner>, crate::Error> {
+        Table::SeriesOwners.get(tx, nickname.as_bytes(), |serialized| {
             Ok(bincode::deserialize(serialized)?)
         })
     }

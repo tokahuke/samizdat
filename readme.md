@@ -79,16 +79,40 @@ On Windows, download `samizdat-up.exe` from the same location and run
 
 ## Quick start
 
-In the installation, the `samizdat` cli tool is included. You can run `samizdat init` to create a new Samizdat project in your current directory. This will create a manifest file `Samizdat.toml` and a private manifest `.Samizdat.priv`, which will be added to your `.gitignore`. This file contains private credentials that you have to backup elsewhere dearly.
+In the installation, the `samizdat` cli tool is included. Run `samizdat init`
+in an empty project directory and it will create a manifest (`Samizdat.toml`)
+and a private manifest (`.Samizdat.priv`, secrets only — add to `.gitignore`).
+You will be shown the private key once on stdout; back it up.
 
-In your local node, this will also create a new _series_, your very own microblog/directory in the Samizdat Network. To refresh the contents of your series, just do `samizdat commit` (or even better, `samizdat watch` for continuous refresh-on-save). Samizdat will run a build script that you supply in `Samizdat.toml`. Your content will be available in the URL:
+`samizdat init` also registers a new _series_ with your node. A series has a
+public key (which is what the network sees) and a node-local **nickname**
+(taken from the project directory name by default, overridable with
+`--nickname <x>`). The nickname is a label your own node uses to find the
+series; it carries no meaning to anyone else.
+
+To refresh the contents of your series, run `samizdat commit` (or
+`samizdat watch` for continuous refresh-on-save). It runs the build script
+declared in `Samizdat.toml` and publishes the result.
+
+**`samizdat commit` always publishes under your `[debug]` series, not your
+public one.** This is on purpose: the public series is a sign-once-and-it's-
+out-there operation. To push to the public series, pass `--release`.
+
+After a `commit`, the content is reachable at:
 
 ```
-http://localhost:4510/~<series name>/path/to/stuff
+http://localhost:4510/_series/<base64-public-key>/path/to/stuff
 ```
 
-Despite the `localhost`, this is a public URL. You can share it with friends that
-have Samizdat installed and they will be able to access it.
+The public key is what you copy out of `Samizdat.toml` (or `samizdat series ls`)
+and share with friends. Despite the `localhost`, the URL is fetchable from
+any node connected to the same hub federation.
+
+Samizdat also supports a friendlier URL form, `http://localhost:4510/~<identity>/`,
+but **identities are a separate concept** from series nicknames: an identity
+is a blockchain-registered name (Polygon, via `samizdat identity create`) that
+resolves to a public key. It costs gas to register, and it is global. Most
+projects skip it and just share the `_series/<key>/` URL.
 
 This is just the tip of the iceberg, however! Check out more under
 [docs/](docs/) in this repository.

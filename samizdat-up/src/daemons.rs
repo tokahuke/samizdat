@@ -15,8 +15,10 @@ pub struct Daemon {
     pub name: &'static str,
     /// Daemon binary basename ("samizdat-node" etc.).
     pub bin: &'static str,
-    /// Description for the systemd unit + launchd ProgramArguments
-    /// comments.
+    /// Description for the systemd unit. Used by `render_systemd_unit`
+    /// (Linux only); on macOS/Windows builds this is read only by the
+    /// platform-agnostic test harness, hence the `allow(dead_code)`.
+    #[allow(dead_code)]
     pub description: &'static str,
     /// Default TOML config content. Written only when the config does
     /// not already exist, so a user's local edits survive a reinstall.
@@ -82,6 +84,7 @@ pub fn launchd_label(d: &Daemon) -> String {
 ///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat,
 ///     /var/lib/samizdat) so users can administer a Mac install with
 ///     the same paths they would on a Linux box.
+#[allow(dead_code)]
 pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
     let label = launchd_label(d);
     let user_block = match as_user {
@@ -135,6 +138,12 @@ pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
 /// to "root" when None. The user must already exist on the host; the
 /// caller (`install/linux.rs`) is responsible for chowning the data
 /// dir so the daemon can read its config and write its data.
+///
+/// `allow(dead_code)` is here because the call site lives behind
+/// `cfg(target_os = "linux")`. On macOS/Windows host builds the
+/// function is only reachable through the platform-agnostic tests in
+/// this file, which the non-test build cannot see.
+#[allow(dead_code)]
 pub fn render_systemd_unit(d: &Daemon, as_user: Option<&str>) -> String {
     let user = as_user.unwrap_or("root");
     format!(

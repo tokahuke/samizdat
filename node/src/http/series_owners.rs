@@ -24,7 +24,7 @@ pub fn api() -> Router {
 
     #[derive(Deserialize)]
     struct PostSeriesOwnerRequest {
-        series_owner_name: String,
+        nickname: String,
         #[serde(default)]
         keypair: Option<Keypair>,
         #[serde(default)]
@@ -56,7 +56,7 @@ pub fn api() -> Router {
     // BUT: `ManageSeries` is flat (not per-entity), so a web page granted the right for
     // entity A can also list/read secrets of series owned by entity B. If you ever add
     // multi-tenant browser usage, scope `GET /_series-owners` per-entity AND introduce
-    // an explicit `/export-keypair/{name}` (bearer-only) for the backup flow.
+    // an explicit `/export-keypair/{nickname}` (bearer-only) for the backup flow.
     Router::new()
         .route(
             // Creates a new series owner, i.e., a public-private keypair that allows one to push new
@@ -68,7 +68,7 @@ pub fn api() -> Router {
                         if let Some(Keypair { private_key }) = request.keypair {
                             SeriesOwner::import(
                                 tx,
-                                &request.series_owner_name,
+                                &request.nickname,
                                 private_key.parse()?,
                                 Duration::from_secs(3_600),
                                 request.is_draft,
@@ -76,7 +76,7 @@ pub fn api() -> Router {
                         } else {
                             SeriesOwner::create(
                                 tx,
-                                &request.series_owner_name,
+                                &request.nickname,
                                 Duration::from_secs(3_600),
                                 request.is_draft,
                             )
@@ -89,10 +89,10 @@ pub fn api() -> Router {
         )
         .route(
             // Gets information associates with a series owner
-            "/{series_owner_name}",
-            get(|Path(series_owner_name): Path<String>| {
+            "/{nickname}",
+            get(|Path(nickname): Path<String>| {
                 async move {
-                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
+                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &nickname))?;
                     Ok(maybe_owner)
                 }
                 .map(ApiResponse)
@@ -101,10 +101,10 @@ pub fn api() -> Router {
         )
         .route(
             // Removes a series owner
-            "/{series_owner_name}",
-            delete(|Path(series_owner_name): Path<String>| {
+            "/{nickname}",
+            delete(|Path(nickname): Path<String>| {
                 async move {
-                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?;
+                    let maybe_owner = readonly_tx(|tx| SeriesOwner::get(tx, &nickname))?;
                     let existed = maybe_owner
                         .map(|owner| owner.drop_if_exists())
                         .transpose()?
@@ -122,16 +122,16 @@ pub fn api() -> Router {
         )
         .route(
             // Pushes a new collection to the series owner, creating a new edition.
-            "/{series_owner_name}/editions",
+            "/{nickname}/editions",
             post(
-                |Path(series_owner_name): Path<String>, Json(request): Json<PostEditionRequest>| {
+                |Path(nickname): Path<String>, Json(request): Json<PostEditionRequest>| {
                     async move {
                         let Some(series_owner) =
-                            readonly_tx(|tx| SeriesOwner::get(tx, &series_owner_name))?
+                            readonly_tx(|tx| SeriesOwner::get(tx, &nickname))?
                         else {
                             return Err(crate::Error::Message(format!(
                                 "Series owner {} not found",
-                                series_owner_name
+                                nickname
                             )));
                         };
 

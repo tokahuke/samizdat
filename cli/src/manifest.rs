@@ -18,8 +18,8 @@ use crate::api;
 #[derive(askama::Template)]
 #[template(path = "Samizdat.toml.txt")]
 pub struct ManifestTemplate<'a> {
-    /// Name of the series owner
-    pub name: &'a str,
+    /// Node-local nickname for the series owner.
+    pub nickname: &'a str,
     /// Public key for the series
     pub public_key: &'a Key,
     /// Time-to-live duration for series content
@@ -64,28 +64,28 @@ impl Manifest {
     /// Creates a new manifest and associated debug keypair.
     ///
     /// # Arguments
-    /// * `name` - The name of the series owner
-    pub async fn create(name: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
+    /// * `nickname` - Node-local nickname for the series owner.
+    pub async fn create(nickname: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
         if Manifest::find_opt()?.is_some() {
             anyhow::bail!("`Samizdat.toml` already exists.");
         }
 
-        // The name flows raw into a TOML template (Askama's `.txt` extension
+        // The nickname flows raw into a TOML template (Askama's `.txt` extension
         // uses the no-op `Text` escaper). Reject anything that would break the
         // resulting file or smuggle additional keys. Allowed: letters, digits,
         // `-`, `_`, `.`, `/`, space. Names without this restriction could
         // contain `"` to terminate the string, or newlines to inject sections.
-        validate_project_name(name)?;
+        validate_nickname(nickname)?;
 
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
-            series_owner_name: name,
+            nickname,
             keypair: None,
             is_draft: false,
         })
         .await?;
 
         let rendered = crate::manifest::ManifestTemplate {
-            name,
+            nickname,
             public_key: &Key::from(response.keypair.verifying_key()),
             ttl: &humantime::format_duration(response.default_ttl).to_string(),
         }
@@ -111,8 +111,8 @@ impl Manifest {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Series {
-    /// Name of the series
-    pub name: String,
+    /// Node-local nickname for this series owner.
+    pub nickname: String,
     /// Public key for the series
     pub public_key: String,
     /// Optional time-to-live duration for series content
@@ -123,8 +123,8 @@ pub struct Series {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Debug {
-    /// Series owner name used in debug mode
-    pub name: String,
+    /// Node-local nickname for the debug series owner.
+    pub nickname: String,
 }
 
 /// Returns the default shell path.
@@ -225,10 +225,10 @@ impl PrivateManifest {
     /// Creates a new private manifest with the specified keys.
     ///
     /// # Arguments
-    /// * `debug_name` - The name of the series owner
+    /// * `debug_nickname` - Node-local nickname for the debug series owner.
     /// * `private_key` - The private key for the series owner
     pub async fn create(
-        debug_name: &str,
+        debug_nickname: &str,
         private_key: Option<&PrivateKey>,
     ) -> Result<PrivateManifest, anyhow::Error> {
         if PrivateManifest::find_opt()?.is_some() {
@@ -236,7 +236,7 @@ impl PrivateManifest {
         }
 
         let response = api::post_series_owner(api::PostSeriesOwnerRequest {
-            series_owner_name: debug_name,
+            nickname: debug_nickname,
             keypair: None,
             is_draft: true,
         })
@@ -257,27 +257,27 @@ impl PrivateManifest {
     }
 }
 
-/// Validates a project name before it is rendered into `Samizdat.toml`.
+/// Validates a series-owner nickname before it is rendered into `Samizdat.toml`.
 ///
 /// The Askama template uses the no-op `Text` escaper because the output is
-/// TOML, not HTML; the name is dropped raw inside `name = "{{ name }}"`. If we
-/// let through `"`, `\`, or newlines we either produce a malformed file or
+/// TOML, not HTML; the nickname is dropped raw inside `nickname = "{{ nickname }}"`.
+/// If we let through `"`, `\`, or newlines we either produce a malformed file or
 /// allow an attacker (or a careless directory naming) to inject extra TOML
 /// keys. The allowed alphabet is the same one paths/URLs use, plus a few
 /// punctuation marks; anything more exotic is rejected.
-fn validate_project_name(name: &str) -> Result<(), anyhow::Error> {
-    if name.is_empty() {
-        anyhow::bail!("project name must not be empty");
+fn validate_nickname(nickname: &str) -> Result<(), anyhow::Error> {
+    if nickname.is_empty() {
+        anyhow::bail!("nickname must not be empty");
     }
-    if name.len() > 128 {
-        anyhow::bail!("project name is too long (max 128 chars)");
+    if nickname.len() > 128 {
+        anyhow::bail!("nickname is too long (max 128 chars)");
     }
-    for c in name.chars() {
+    for c in nickname.chars() {
         let ok = c.is_ascii_alphanumeric()
             || matches!(c, '-' | '_' | '.' | '/' | ' ');
         if !ok {
             anyhow::bail!(
-                "project name contains disallowed character {c:?}; \
+                "nickname contains disallowed character {c:?}; \
                  use letters, digits, '-', '_', '.', '/' or space"
             );
         }

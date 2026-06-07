@@ -11,3 +11,9 @@ data = "/var/lib/samizdat/node"
 # briefly exceed this while bookkeeping; values valuable to the operator
 # are not counted against this budget.
 max_storage = 1_000
+
+# On first start, samizdat-node seeds its hubs table from a hardcoded list
+# (currently: testbed.hubfederation.com). The seeding is idempotent and
+# tracked by `.default-hubs-seeded` inside the data dir; delete that file
+# to re-seed if you have removed the default hubs and want them back. Manage
+# hubs at runtime with `samizdat hub new/rm/ls`.

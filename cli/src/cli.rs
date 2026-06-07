@@ -63,9 +63,10 @@ pub enum Command {
 
     /// Starts a new project in this folder
     Init {
-        /// Optional name for the project
+        /// Node-local nickname for the project's series owner. If omitted, the
+        /// current directory name is used.
         #[structopt(long)]
-        name: Option<String>,
+        nickname: Option<String>,
     },
 
     /// Imports a series from a `Samizdat.toml` in the current directory
@@ -210,7 +211,7 @@ impl Command {
                 /* this is a no-op */
                 Ok(())
             }
-            Command::Init { name } => commands::init(name).await,
+            Command::Init { nickname } => commands::init(nickname).await,
             Command::Import { private_key_file } => commands::import(private_key_file).await,
             Command::Commit {
                 ttl,
@@ -358,8 +359,8 @@ impl CollectionCommand {
 pub enum SeriesCommand {
     /// Creates a new locally owned series
     New {
-        /// Name of the series owner
-        series_owner_name: String,
+        /// Node-local nickname for the series owner.
+        nickname: String,
         /// Whether the series is a draft
         #[structopt(long)]
         is_draft: bool,
@@ -376,8 +377,8 @@ pub enum SeriesCommand {
     /// its private key on the node; this is irreversible. Prompts for
     /// confirmation unless `--yes` is supplied.
     Rm {
-        /// Name of the series owner
-        series_owner_name: String,
+        /// Node-local nickname for the series owner.
+        nickname: String,
         /// Skip the interactive confirmation prompt. Required when stdin is not
         /// a terminal (e.g. in scripts) since there is no way to confirm.
         #[structopt(long, short = "y")]
@@ -385,13 +386,13 @@ pub enum SeriesCommand {
     },
     /// Shows details on a particular locally owned series
     Show {
-        /// Name of the series owner
-        series_owner_name: String,
+        /// Node-local nickname for the series owner.
+        nickname: String,
     },
     /// Lists all locally owned series
     Ls {
-        /// Optional series owner name filter
-        series_owner_name: Option<String>,
+        /// Optional series-owner nickname filter.
+        nickname: Option<String>,
     },
     /// Lists all known public keys
     LsCached {},
@@ -401,23 +402,23 @@ impl SeriesCommand {
     async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
             SeriesCommand::New {
-                series_owner_name,
+                nickname,
                 is_draft,
                 public_key,
                 private_key_file,
             } => {
-                commands::series::new(series_owner_name, is_draft, public_key, private_key_file)
+                commands::series::new(nickname, is_draft, public_key, private_key_file)
                     .await
             }
             SeriesCommand::Rm {
-                series_owner_name,
+                nickname,
                 r#yes,
-            } => commands::series::rm(series_owner_name, r#yes).await,
-            SeriesCommand::Show { series_owner_name } => {
-                commands::series::show(series_owner_name).await
+            } => commands::series::rm(nickname, r#yes).await,
+            SeriesCommand::Show { nickname } => {
+                commands::series::show(nickname).await
             }
-            SeriesCommand::Ls { series_owner_name } => {
-                commands::series::ls(series_owner_name).await
+            SeriesCommand::Ls { nickname } => {
+                commands::series::ls(nickname).await
             }
             SeriesCommand::LsCached {} => commands::series::ls_cached().await,
         }
