@@ -202,12 +202,18 @@ pub(super) fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
 }
 
 pub(super) fn self_update() -> Result<()> {
-    require_root()?;
+    // No `require_root()`: who needs root depends on who owns the
+    // currently-running samizdat-up binary. On Apple Silicon, brew
+    // installs land under /opt/homebrew/bin (user-owned); a
+    // bootstrap curl-pipe-sh install lands at /usr/local/bin
+    // (root-owned). Resolve the destination via current_exe() and
+    // let the OS surface permission errors verbatim.
     let origin = DEFAULT_ORIGIN.to_owned();
     let target = fetch::host_target_triple();
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
-    let dest = PathBuf::from("/usr/local/bin/samizdat-up");
+    let dest = std::env::current_exe()
+        .context("locating current samizdat-up binary")?;
 
     let staged = dest.with_extension("samizdat-up-new");
     atomic_write_executable(&staged, &fetched.bytes)
