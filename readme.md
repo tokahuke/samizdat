@@ -1,7 +1,7 @@
 # Samizdat: your content, available.
 
 [![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/test-samizdat-up.yaml/badge.svg?branch=main)](https://github.com/tokahuke/samizdat/actions/workflows/test-samizdat-up.yaml)
-![Version 0.3.1](https://img.shields.io/badge/version-0.3.1-informational)
+![Version 0.3.2](https://img.shields.io/badge/version-0.3.2-informational)
 
 ## Website
 
