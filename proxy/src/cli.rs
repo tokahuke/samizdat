@@ -50,6 +50,13 @@ pub struct Cli {
     #[structopt(long, default_value = "10")]
     #[serde_inline_default(10)]
     pub show_modal_every: u16,
+    /// Optional wildcard TLS configuration. When present the proxy
+    /// obtains a wildcard cert via ACME DNS-01 against the configured
+    /// provider and serves every series at its own subdomain origin.
+    /// Configured only via the TOML config file; no CLI flag.
+    #[structopt(skip)]
+    #[serde(default)]
+    pub dns: Option<crate::dns::DnsTopology>,
 }
 
 impl Cli {

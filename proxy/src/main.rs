@@ -1,7 +1,9 @@
 mod acme;
 mod cli;
+mod dns;
 mod html;
 mod http;
+mod wildcard;
 
 use std::net::Ipv4Addr;
 
@@ -18,24 +20,43 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Run server:
     if cli().https {
-        tracing::info!(
-            "Proxy mode is HTTPS for domain {} in port {}",
-            cli().domain()?,
-            cli().port.unwrap_or(443)
-        );
         samizdat_common::rustls::crypto::ring::default_provider()
             .install_default()
             .expect("failed to install crypto provider `ring`");
-        acme::serve(
-            cli().owner()?,
-            cli().domain()?,
-            &cli().acme_directory,
-            &format!("{}/acme", cli().data),
-            (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
-            cli().http_port.unwrap_or(80),
-            crate::http::api(),
-        )
-        .await?
+
+        if let Some(dns) = cli().dns.as_ref() {
+            tracing::info!(
+                "Proxy mode is HTTPS (wildcard) for *.{} in port {}",
+                dns.wildcard_root,
+                cli().port.unwrap_or(443)
+            );
+            wildcard::serve(
+                dns,
+                cli().owner()?,
+                &cli().acme_directory,
+                std::path::PathBuf::from(format!("{}/wildcard", cli().data)),
+                (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
+                cli().http_port.unwrap_or(80),
+                crate::http::wildcard_api(dns.wildcard_root.clone()),
+            )
+            .await?
+        } else {
+            tracing::info!(
+                "Proxy mode is HTTPS for domain {} in port {}",
+                cli().domain()?,
+                cli().port.unwrap_or(443)
+            );
+            acme::serve(
+                cli().owner()?,
+                cli().domain()?,
+                &cli().acme_directory,
+                &format!("{}/acme", cli().data),
+                (Ipv4Addr::UNSPECIFIED, cli().port.unwrap_or(443)).into(),
+                cli().http_port.unwrap_or(80),
+                crate::http::api(),
+            )
+            .await?
+        }
     } else {
         tracing::info!("Proxy mode is HTTP in port {}", cli().port.unwrap_or(8080));
         axum::serve(

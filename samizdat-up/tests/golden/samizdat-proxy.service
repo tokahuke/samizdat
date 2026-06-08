@@ -9,6 +9,7 @@ Restart=always
 RestartSec=1
 User=root
 Environment=RUST_BACKTRACE=1
+EnvironmentFile=-/etc/samizdat/proxy.env
 ExecStart=/usr/local/bin/samizdat-proxy --config /etc/samizdat/proxy.toml
 
 [Install]

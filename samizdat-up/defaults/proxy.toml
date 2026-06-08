@@ -13,3 +13,12 @@ target_node = "http://localhost:4510"
 https = false
 domain = "example.org"
 owner = "you@example.org"
+
+# Per-series subdomain wildcard cert via ACME DNS-01.
+# Uncomment, set provider + credentials in /etc/samizdat/proxy.env.
+#
+# [dns]
+# zone = "your-zone.example"
+# wildcard_root = "proxy.your-zone.example"
+# provider = "digitalocean"
+# # token_env = "DIGITALOCEAN_TOKEN"  # default; override only if you need a custom env-var name

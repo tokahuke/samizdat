@@ -97,3 +97,32 @@ fn redirect_to_https(domain: &str, addr: SocketAddr) -> axum::Router {
             }),
         )
 }
+
+/// Build a port-80 -> 443 redirector that does not allocate a per-process
+/// `OnceLock`. The wildcard cert path reuses this helper because its
+/// rustls handoff happens in a separate code path from the rustls-acme
+/// HTTP-01 path.
+pub fn redirect_to_https_for(domain: &str, addr: SocketAddr) -> axum::Router {
+    let base = if addr.port() == 443 {
+        format!("https://{domain}/")
+    } else {
+        format!("https://{domain}:{}/", addr.port())
+    };
+    let base_for_path = base.clone();
+    let base_for_root = base;
+    axum::Router::new()
+        .route(
+            "/{*path}",
+            any(move |Path(path): Path<String>| {
+                let base = base_for_path.clone();
+                async move { Redirect::permanent(&format!("{base}{path}")) }
+            }),
+        )
+        .route(
+            "/",
+            any(move || {
+                let base = base_for_root.clone();
+                async move { Redirect::permanent(&base) }
+            }),
+        )
+}

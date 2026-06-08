@@ -6,9 +6,9 @@
     <string>com.samizdat.proxy</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/samizdat-proxy</string>
-        <string>--config</string>
-        <string>/etc/samizdat/proxy.toml</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>. /etc/samizdat/proxy.env 2&gt;/dev/null; exec /usr/local/bin/samizdat-proxy --config /etc/samizdat/proxy.toml</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
