@@ -41,6 +41,37 @@ this file is the actionable backlog only.
    pointed at a remote node; loopback-only deployments do not need
    it.
 
+## Subscription eager-fetch is silent + non-bookmarked
+
+`Edition::refresh` in `node/src/models/series.rs` spawns
+`hubs().query_with_retry(...)` for each item in a new edition's
+inventory and discards the `JoinHandle` (`.map(|_| ())`). Two
+consequences seen in practice on the testbed:
+
+1. When the publisher node goes offline between announcement and the
+   eager fetch landing (e.g. a `publish-get-samizdat` CI run that
+   exits the moment its `Wait for testbed to mirror` step passes),
+   some objects never arrive at the subscriber. No log line marks
+   the per-item failure, so the partial mirror is invisible until a
+   client tries to fetch and the on-demand query also fails (no
+   peer has the bytes either).
+2. Subscription-fetched objects are not bookmarked. Vacuum keys its
+   keep-or-drop decision on `is_bookmarked`; once storage crosses
+   the `max_storage` budget, recently-mirrored content can be
+   dropped under usefulness pressure even though the subscription
+   is still active.
+
+Fixes worth doing together:
+- Log per-item eager-fetch outcomes (`Some(_)`/`None`) so partial
+  mirrors are visible in `journalctl -u samizdat-node`.
+- Add a `BookmarkType::Subscription` (or similar) and apply it to
+  each object the subscription fetches. Drop the bookmark when the
+  subscription is dropped or when an edition is superseded.
+
+Surfaced on 2026-06-08 while debugging intermittent 404s on
+`series-v5bk....hubfederation.com/latest/install.sh` after a
+publish-get-samizdat run.
+
 ## Second-pass deferred
 
 - **SP-D1 / Reset-trigger drops loser direction (silent candidate
