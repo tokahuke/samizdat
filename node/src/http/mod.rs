@@ -170,6 +170,21 @@ impl IntoResponse for PageResponse {
 ///   from content subdomains to admin endpoints. Tightening is a followup
 ///   (see `docs/javascript-security.md`).
 fn api() -> Router {
+    use http::HeaderValue;
+    use tower::ServiceBuilder;
+    use tower_http::set_header::SetResponseHeaderLayer;
+
+    // Admin-only protections. Refuse to be framed: admin endpoints (the
+    // welcome page, `/_register`, etc.) must not be embeddable by any
+    // other origin. Closes the clickjacking surface against the
+    // trusted-context grant flow.
+    let admin_layers = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            http::header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(axum::middleware::from_fn(require_bare_host));
+
     let admin = Router::new()
         .nest("/_kvstore", kvstore::api())
         .nest("/_objects", objects::api())
@@ -184,13 +199,43 @@ fn api() -> Router {
         .nest("/_connections", connections::api())
         .nest("/_peers", peers::api())
         .nest("/_vacuum", vacuum())
-        .layer(axum::middleware::from_fn(require_bare_host));
+        .layer(admin_layers);
 
     let content = Router::new()
         .route("/", get(content::content_root))
         .route("/{*name}", get(content::content_path));
 
-    admin.merge(content).layer(cors_layer())
+    // Global protections applied to admin + content.
+    //
+    // * `X-Content-Type-Options: nosniff` blocks MIME sniffing so a series
+    //   that uploads a file with a forged Content-Type cannot trick the
+    //   browser into executing it as HTML, JS, or SVG-with-script.
+    // * `Referrer-Policy: same-origin` strips Referer on cross-origin
+    //   requests, keeping it intact same-origin so the `/_register`
+    //   trusted-context check still works. Authors override per-document
+    //   via `<meta name="referrer">` or per-element via `referrerpolicy`.
+    // * `Permissions-Policy: interest-cohort=()` opts content out of
+    //   Chrome's Topics / FLoC behavioral cohort.
+    // * `cors_layer()` reflects any `Origin` whose host is `localhost` or
+    //   `*.localhost`, so the JS SDK can keep talking from content
+    //   subdomains to admin endpoints; tightening is a followup (see
+    //   `docs/javascript-security.md`).
+    let global_layers = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            http::header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            http::header::REFERRER_POLICY,
+            HeaderValue::from_static("same-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            http::header::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("interest-cohort=()"),
+        ))
+        .layer(cors_layer());
+
+    admin.merge(content).layer(global_layers)
 }
 
 /// Builds the CORS layer applied at the top of the node API. Reflects any

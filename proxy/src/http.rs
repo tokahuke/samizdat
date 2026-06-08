@@ -22,6 +22,12 @@ const PROXY_HEADERS: &[&str] = &[
     "X-Samizdat-Series",
     "X-Samizdat-Edition",
     "X-Samizdat-Query-Duration",
+    // Forward the node's security headers to external viewers so the
+    // proxied page gets the same protections as a local visit.
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "Permissions-Policy",
 ];
 
 pub fn api() -> axum::Router {
