@@ -515,42 +515,18 @@ rejected at registration and at runtime by
 **Fix** -- none required.
 
 ### T16. Proxy template writes a shared cross-series localStorage key
-**Vector** -- `proxy/templates/proxied-page.html.jinja:146-159` writes the
-integer counter `__samizdat_proxy_page_count` into `localStorage`.
-Because every series viewed through `hubfederation.com` shares one
-browser origin, that key is readable and writable by any series an
-attacker controls.
-**Current state** -- The counter exists to drive a donation modal every
-N page views; it was not intended as a cross-series surface.
-**What an attacker gets** -- A trivial shared identifier readable across
-series viewed via the proxy. A malicious series can overwrite the
-counter, read prior values, or use the key as a side-channel beacon.
-**Severity** -- low. Bounded yield (one integer per browser profile).
-The typed-subdomain refactor partitions `localStorage` per entity on
-the proxy too, so this counter now lives in a per-entity origin; the
-shared-key issue collapses to "every viewer of THIS series, this
-browser profile". Audit the template before relying on the new scoping.
-**Mitigation in place** -- none.
-**Fix** -- Move the counter into a sessionStorage entry namespaced by
-the request's entity, or drop the modal trigger entirely.
+**Closed.** The proxy no longer wraps proxied pages in a donation
+modal at all. The template, the page-wrap code path, and the counter
+are gone. The proxy is now a pure host-rewriting forwarder; what the
+node returns is what the browser sees.
 
 ### T17. Proxy template leaks viewer IP to Google Fonts on every view
 **Vector** -- The proxy page template at
-`proxy/templates/proxied-page.html.jinja` unconditionally embeds Google
-Fonts via `fonts.googleapis.com` and `fonts.gstatic.com`. Every viewer
-of any proxied page sends one or more requests to Google with the
-viewer's IP and `Referer` shape revealing they are reading samizdat
-content through the public proxy.
-**Current state** -- The references are in the proxy template chain;
-the audit could not exhaustively confirm they are the only third-party
-references. The reader should grep before relying on the absence.
-**What an attacker gets** -- (Passive Google) Per-viewer IP correlation
-tying the viewer to samizdat-via-proxy usage and to specific page views.
-**Severity** -- medium. Affects every proxy viewer, every page view, by
-default. No user action required.
-**Mitigation in place** -- none.
-**Fix** -- Self-host the fonts inside the proxy origin or drop the
-custom font from the template.
+**Closed at the proxy.** The page-wrap template that embedded the
+Google Fonts links is gone; the proxy no longer injects any
+third-party references of its own. Pages may still embed Google
+Fonts themselves (the blog templates do); that is the publisher's
+choice and lives in the published content, not in the proxy.
 
 ## Defensive primitives to add
 
@@ -610,7 +586,3 @@ Still open:
   (`<handle>.<root>`) more visibly? Is prior-grant history a useful
   signal? Is typed-confirmation acceptable on the three high-impact
   rights even though it slows down legitimate admin-tool installs?
-- Drop the donation modal counter (T16) from the proxy template, or
-  scope it per-entity?
-- Self-host the proxy template's fonts (T17), or accept the
-  third-party leak as the cost of nice typography?

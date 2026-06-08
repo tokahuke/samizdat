@@ -1,6 +1,5 @@
 mod cli;
 mod dns;
-mod html;
 mod http;
 mod wildcard;
 

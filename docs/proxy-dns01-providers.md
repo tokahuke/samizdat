@@ -372,10 +372,10 @@ script can scope the deletion if its DNS provider distinguishes
 records by value.
 
 The existing top-level keys in `Cli` (`data`, `node`, `https`,
-`port`, `http_port`, `domain`, `owner`, `acme_directory`,
-`show_modal_every`) are unchanged. The `Cli` struct gains an
-`Option<DnsConfig>` field with `#[serde(default)]`, so legacy configs
-without a `[dns]` block keep working with HTTP-01 only.
+`port`, `http_port`, `owner`, `acme_directory`) are unchanged. The
+`Cli` struct gains an `Option<DnsConfig>` field with
+`#[serde(default)]`, so legacy configs without a `[dns]` block keep
+working with HTTP-01 only.
 
 ## Integration
 

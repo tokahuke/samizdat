@@ -6,11 +6,9 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
-use mime::Mime;
 use samizdat_common::identity::check_servable_identity;
 
 use crate::cli::cli;
-use crate::html::proxy_page;
 
 const PROXY_HEADERS: &[&str] = &[
     "ETag",
@@ -128,8 +126,6 @@ async fn do_wildcard_dispatch(
         .map(|pq| pq.as_str())
         .unwrap_or_else(|| uri.path());
 
-    let (entity, content_hash) = entity_from_path(uri.path());
-
     // The proxy's `--node` URL is the node's bare admin origin
     // (e.g. `http://localhost:4510`). For host-form forwarding we
     // substitute the host label.
@@ -173,28 +169,11 @@ async fn do_wildcard_dispatch(
                 }
             }
 
-            let mime: Mime = content_type.to_str().unwrap_or_default().parse()?;
-
-            if mime.type_() == mime::TEXT && mime.subtype() == mime::HTML {
-                let body = response.bytes().await?;
-                response_builder.body(proxy_page(body.as_ref(), entity, content_hash).into())?
-            } else {
-                response_builder.body(response.bytes().await?.into())?
-            }
+            response_builder.body(response.bytes().await?.into())?
         }
     };
 
     Ok(response)
-}
-
-/// Best-effort path -> (entity, content_hash) extraction for the
-/// HTML rewriter's CSS namespace. Mirrors the logic in `do_proxy` but
-/// trimmed to what `proxy_page` actually consumes (both args are
-/// currently unused inside the rewriter; this keeps parity with the
-/// path-form code in case that changes).
-fn entity_from_path(path: &str) -> (&'static str, &'static str) {
-    let _ = path;
-    ("_identity", "")
 }
 
 /// Decomposed `--node` URL parts used to build upstream URLs. Parsed
