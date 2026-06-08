@@ -378,6 +378,11 @@ impl Drop for PerIpPermit {
             return;
         };
         if let Some(c) = guard.get_mut(&self.ip) {
+            // A count at this point should always be > 0 because we are
+            // the live token for that count. saturating_sub keeps us
+            // running in release; debug_assert flags a torn invariant
+            // (PerIpPermit constructed without a paired increment, etc.).
+            debug_assert!(*c > 0, "PerIpPermit dropped when count was already 0");
             *c = c.saturating_sub(1);
             if *c == 0 {
                 guard.remove(&self.ip);

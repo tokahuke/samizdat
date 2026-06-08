@@ -82,8 +82,12 @@ pub fn api() -> Router {
                         }
 
                         if let Some(edition) = series.get_last_edition(tx)? {
-                            let objects: Vec<_> =
-                                edition.collection().list_objects(tx)?.collect();
+                            // The Vec is forced: `list_objects` borrows `tx`
+                            // immutably for the iterator while
+                            // `.bookmark(...).unmark(tx)` needs &mut tx.
+                            // Collecting first releases the immutable borrow.
+                            let collection = edition.collection();
+                            let objects: Vec<_> = collection.list_objects(tx)?.collect();
                             for object in objects {
                                 object?.bookmark(BookmarkType::Reference).unmark(tx)?;
                             }

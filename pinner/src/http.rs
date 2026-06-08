@@ -14,6 +14,7 @@ use axum::{Json, Router};
 use chrono::{Duration, Utc};
 use samizdat_common::Key;
 use serde_derive::{Deserialize, Serialize};
+use std::num::NonZeroU32;
 
 use crate::cli::cli;
 use crate::{db, node_client};
@@ -33,8 +34,10 @@ struct PinRequest {
     series_key: String,
     /// Days from now until expiry. Re-POSTing extends the existing
     /// expiry to `max(existing, now + days)`, so a customer renews by
-    /// repeating the same request.
-    days: u32,
+    /// repeating the same request. `NonZeroU32` rejects `0` at the
+    /// type level so a "renew" request can never accidentally schedule
+    /// the subscription for immediate reaping.
+    days: NonZeroU32,
 }
 
 #[derive(Serialize)]
@@ -52,11 +55,10 @@ async fn pin(Json(req): Json<PinRequest>) -> Result<Json<PinResponse>, ApiError>
     node_client::get()
         .add_subscription(&key)
         .await
-        .map_err(|e| ApiError::Internal(format!("add_subscription: {e}")))?;
+        .map_err(ApiError::NodeAdmin)?;
 
-    let new_expires = Utc::now() + Duration::days(i64::from(req.days));
-    let effective_expires = db::upsert(&key, new_expires, None)
-        .map_err(|e| ApiError::Internal(format!("db upsert: {e}")))?;
+    let new_expires = Utc::now() + Duration::days(i64::from(req.days.get()));
+    let effective_expires = db::upsert(&key, new_expires, None).map_err(ApiError::Storage)?;
 
     Ok(Json(PinResponse {
         series_key: key.to_string(),
@@ -73,7 +75,7 @@ struct PinRow {
 }
 
 async fn list_pins() -> Result<Json<Vec<PinRow>>, ApiError> {
-    let rows = db::list().map_err(|e| ApiError::Internal(format!("db list: {e}")))?;
+    let rows = db::list().map_err(ApiError::Storage)?;
     Ok(Json(
         rows.into_iter()
             .map(|(key, row)| PinRow {
@@ -90,7 +92,7 @@ async fn get_pin(Path(series): Path<String>) -> Result<Json<Option<PinRow>>, Api
     let key: Key = series
         .parse()
         .map_err(|e| ApiError::BadRequest(format!("bad series key: {e}")))?;
-    let row = db::get(&key).map_err(|e| ApiError::Internal(format!("db get: {e}")))?;
+    let row = db::get(&key).map_err(ApiError::Storage)?;
     Ok(Json(row.map(|row| PinRow {
         series_key: key.to_string(),
         expires_at: row.expires_at,
@@ -107,16 +109,17 @@ async fn unpin(Path(series): Path<String>) -> Result<StatusCode, ApiError> {
     node_client::get()
         .drop_subscription(&key)
         .await
-        .map_err(|e| ApiError::Internal(format!("drop_subscription: {e}")))?;
+        .map_err(ApiError::NodeAdmin)?;
 
-    db::delete(&key).map_err(|e| ApiError::Internal(format!("db delete: {e}")))?;
+    db::delete(&key).map_err(ApiError::Storage)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn require_api_key(headers: HeaderMap, req: Request, next: Next) -> Response {
     let Some(configured) = cli().api_key.as_deref() else {
-        return ApiError::Internal("pinner has no api_key configured".into()).into_response();
+        return ApiError::Storage(anyhow::anyhow!("pinner has no api_key configured"))
+            .into_response();
     };
     let supplied = headers
         .get("x-api-key")
@@ -143,17 +146,31 @@ async fn require_api_key(headers: HeaderMap, req: Request, next: Next) -> Respon
 enum ApiError {
     BadRequest(String),
     Unauthorized,
-    Internal(String),
+    /// The local samizdat-node rejected the admin call (auth issue,
+    /// malformed key on the node side, 5xx from the node). The caller
+    /// usually wants to retry or have the operator rotate the admin
+    /// token; surface as 502 Bad Gateway so it's distinguishable from
+    /// a pinner-side failure.
+    NodeAdmin(anyhow::Error),
+    /// Pinner's own local persistence layer failed. Operator action
+    /// (restart, disk space) is required; 500 Internal Server Error.
+    Storage(anyhow::Error),
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, body) = match self {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "missing or wrong X-Api-Key".into()),
-            ApiError::Internal(msg) => {
-                tracing::error!("pinner internal error: {msg}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
+            ApiError::Unauthorized => {
+                (StatusCode::UNAUTHORIZED, "missing or wrong X-Api-Key".into())
+            }
+            ApiError::NodeAdmin(err) => {
+                tracing::warn!("pinner node-admin failure: {err:#}");
+                (StatusCode::BAD_GATEWAY, "node admin call failed".into())
+            }
+            ApiError::Storage(err) => {
+                tracing::error!("pinner storage failure: {err:#}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "storage error".into())
             }
         };
         (status, body).into_response()

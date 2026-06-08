@@ -44,9 +44,11 @@ struct PostSubscription<'a> {
 }
 
 impl NodeClient {
-    /// Idempotent: a 4xx because the subscription already exists is folded
-    /// into success, so the pinner can blindly re-call this on every pin
-    /// request without worrying about prior state.
+    /// Adds a `FullInventory` subscription. Idempotent on the node side
+    /// because the underlying `Table::Subscriptions.put` overwrites on
+    /// duplicate key (LMDB `WriteFlags::default()`), so re-POSTing the
+    /// same series is harmless. Any non-2xx is therefore a real failure
+    /// (4xx = bad key / wrong token; 5xx = node trouble) and propagated.
     pub async fn add_subscription(&self, key: &Key) -> Result<(), anyhow::Error> {
         let url = format!("{}/_subscriptions/", self.base);
         let body = PostSubscription {
@@ -61,16 +63,6 @@ impl NodeClient {
             .send()
             .await?;
         if resp.status().is_success() {
-            return Ok(());
-        }
-        // The node's POST returns an error on duplicate insert; treat any
-        // 4xx as "already there or not our problem to retry." 5xx still
-        // bubbles up.
-        if resp.status().is_client_error() {
-            tracing::debug!(
-                "add_subscription({key}) returned {}: treated as already-present",
-                resp.status()
-            );
             return Ok(());
         }
         let status = resp.status();

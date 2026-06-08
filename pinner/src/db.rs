@@ -87,11 +87,7 @@ pub fn upsert(
             },
         };
 
-        Table::PinnedSeries.put(
-            tx,
-            key.as_bytes(),
-            bincode::serialize(&row).expect("can serialize"),
-        )?;
+        Table::PinnedSeries.put(tx, key.as_bytes(), bincode::serialize(&row)?)?;
 
         Ok::<_, samizdat_common::Error>(row.expires_at)
     })
@@ -129,6 +125,25 @@ pub fn delete(key: &Key) -> Result<(), anyhow::Error> {
         Ok::<_, samizdat_common::Error>(())
     })
     .map_err(|e| anyhow::anyhow!("db delete: {e}"))
+}
+
+/// Atomic claim-and-delete for the expiry loop: re-read inside one
+/// writable_tx, and only delete if `row.expires_at <= now`. Returns
+/// `Ok(true)` if the row was actually deleted, `Ok(false)` if it was
+/// renewed in the race window between `list_expired` and the sweep call.
+/// Closes the TOCTOU where a renewal POST landing between the read and
+/// the delete would otherwise drop a still-paid pin.
+pub fn delete_if_expired(key: &Key, now: DateTime<Utc>) -> Result<bool, anyhow::Error> {
+    let deleted: Result<bool, samizdat_common::Error> = writable_tx(|tx| {
+        let row: Option<PinnedRow> = Table::PinnedSeries
+            .get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))?;
+        let still_expired = row.is_some_and(|row| row.expires_at <= now);
+        if still_expired {
+            Table::PinnedSeries.delete(tx, key.as_bytes())?;
+        }
+        Ok(still_expired)
+    });
+    deleted.map_err(|e| anyhow::anyhow!("db delete_if_expired: {e}"))
 }
 
 /// Returns keys + rows whose `expires_at` is in the past, for the expiry loop.

@@ -30,13 +30,34 @@ async fn sweep() -> Result<(), anyhow::Error> {
     let now = Utc::now();
     let expired = db::list_expired(now)?;
     for key in expired {
-        tracing::info!("expiring pin for {key}");
-        if let Err(err) = node_client::get().drop_subscription(&key).await {
-            tracing::warn!("dropping subscription for {key} failed: {err}; will retry next tick");
-            continue;
+        // Atomic re-check + delete inside a single writable_tx. If a
+        // customer renewed via `POST /pin` between the list_expired read
+        // and now, `delete_if_expired` returns Ok(false) and we leave
+        // the row alone.
+        match db::delete_if_expired(&key, now) {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::debug!("pin for {key} was renewed between list and sweep; skipping");
+                continue;
+            }
+            Err(err) => {
+                tracing::warn!("local db delete_if_expired for {key} failed: {err}");
+                continue;
+            }
         }
-        if let Err(err) = db::delete(&key) {
-            tracing::warn!("local db delete for expired {key} failed: {err}");
+        // DB-first ordering: we have already cleared our side. The node
+        // call is best-effort; if it fails the operator gets an orphaned
+        // subscription on the node (storage isn't freed) but no paid
+        // user loses content. Reverse ordering would risk the bigger
+        // bug -- dropping a renewed pin if the node call succeeded then
+        // the in-tx check rejected.
+        tracing::info!("expired pin for {key}; releasing node subscription");
+        if let Err(err) = node_client::get().drop_subscription(&key).await {
+            tracing::warn!(
+                "node drop_subscription({key}) failed after local delete: {err}; \
+                 the subscription is now orphaned on the node and storage will not be \
+                 reclaimed until a manual cleanup or the node is restarted"
+            );
         }
     }
     Ok(())
