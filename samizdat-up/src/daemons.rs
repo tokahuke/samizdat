@@ -94,6 +94,33 @@ pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
         ),
         None => String::new(),
     };
+    // launchd has no EnvironmentFile equivalent. The proxy needs to
+    // pick up secrets (ACME DNS-01 provider tokens) from
+    // /etc/samizdat/proxy.env without baking them into the plist
+    // (which is world-readable 0644 and lives in /Library, an awkward
+    // place to put secrets). Wrap the binary in `/bin/sh -c` so the
+    // shell sources the env file before exec'ing the daemon; the
+    // `2>/dev/null` keeps boot quiet when the file is absent, and
+    // `exec` preserves PID 1 semantics so KeepAlive/StandardOutPath
+    // still target the daemon process itself.
+    let program_args = if d.name == "proxy" {
+        format!(
+            "\x20       <string>/bin/sh</string>\n\
+             \x20       <string>-c</string>\n\
+             \x20       <string>. /etc/samizdat/proxy.env 2&gt;/dev/null; \
+exec /usr/local/bin/{bin} --config /etc/samizdat/{role}.toml</string>\n",
+            bin = d.bin,
+            role = d.name,
+        )
+    } else {
+        format!(
+            "\x20       <string>/usr/local/bin/{bin}</string>\n\
+             \x20       <string>--config</string>\n\
+             \x20       <string>/etc/samizdat/{role}.toml</string>\n",
+            bin = d.bin,
+            role = d.name,
+        )
+    };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
@@ -105,9 +132,7 @@ pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
          {user_block}\
          \x20   <key>ProgramArguments</key>\n\
          \x20   <array>\n\
-         \x20       <string>/usr/local/bin/{bin}</string>\n\
-         \x20       <string>--config</string>\n\
-         \x20       <string>/etc/samizdat/{role}.toml</string>\n\
+         {program_args}\
          \x20   </array>\n\
          \x20   <key>RunAtLoad</key>\n\
          \x20   <true/>\n\
@@ -126,8 +151,8 @@ pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
          </plist>\n",
         label = label,
         user_block = user_block,
+        program_args = program_args,
         bin = d.bin,
-        role = d.name,
     )
 }
 
@@ -146,6 +171,14 @@ pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
 #[allow(dead_code)]
 pub fn render_systemd_unit(d: &Daemon, as_user: Option<&str>) -> String {
     let user = as_user.unwrap_or("root");
+    // Only the proxy daemon picks up ACME DNS-01 provider secrets
+    // (DigitalOcean token etc.) from /etc/samizdat/proxy.env. Leading
+    // `-` makes systemd tolerant of the file being absent.
+    let env_file = if d.name == "proxy" {
+        "EnvironmentFile=-/etc/samizdat/proxy.env\n"
+    } else {
+        ""
+    };
     format!(
         "[Unit]\n\
          Description={description}\n\
@@ -158,12 +191,14 @@ pub fn render_systemd_unit(d: &Daemon, as_user: Option<&str>) -> String {
          RestartSec=1\n\
          User={user}\n\
          Environment=RUST_BACKTRACE=1\n\
+         {env_file}\
          ExecStart=/usr/local/bin/{bin} --config /etc/samizdat/{role}.toml\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n",
         description = d.description,
         user = user,
+        env_file = env_file,
         bin = d.bin,
         role = d.name,
     )

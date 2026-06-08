@@ -2,14 +2,19 @@
 # `systemctl restart samizdat-proxy` to apply changes. samizdat-up will
 # not overwrite this file on a reinstall.
 #
-# To run a public HTTPS proxy, set `https = true`, fill in `domain` with
-# the hostname your TLS cert is for, and put a real address in `owner`
-# (used as the Let's Encrypt contact email).
+# The [dns] block is mandatory: the proxy serves only host-form
+# (`<sub>.<wildcard_root>`). For a public HTTPS proxy, set `https =
+# true`, fill in `owner` (Let's Encrypt contact email), and configure
+# the provider's credentials in /etc/samizdat/proxy.env.
 
 data = "/var/lib/samizdat/proxy"
-acme_cache = "/var/lib/samizdat/proxy/acme"
 target_node = "http://localhost:4510"
 
 https = false
-domain = "example.org"
 owner = "you@example.org"
+
+[dns]
+zone = "your-zone.example"
+wildcard_root = "proxy.your-zone.example"
+provider = "digitalocean"
+# token_env = "DIGITALOCEAN_TOKEN"  # default; override only if you need a custom env-var name

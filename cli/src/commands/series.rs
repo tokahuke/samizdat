@@ -121,42 +121,37 @@ pub async fn ls(nickname: Option<String>) -> Result<(), anyhow::Error> {
     struct Row {
         /// Node-local nickname of the series owner.
         nickname: String,
-        /// Public key of the series
+        /// Public key of the series.
         public_key: Key,
-        /// Private key of the series
+        /// Subdomain label (base32 of the public key) used for local hosting.
+        host_label: String,
+        /// Private key of the series.
         private_key: PrivateKey,
-        /// Default time-to-live duration
+        /// Default time-to-live duration.
         default_ttl: String,
+    }
+
+    fn row_from(owner: api::PostSeriesOwnerResponse) -> Row {
+        let public_key: Key = owner.keypair.verifying_key().into();
+        let host_label = format!("series-{public_key}");
+        Row {
+            nickname: owner.nickname,
+            public_key,
+            host_label,
+            private_key: owner.keypair.to_scalar_bytes().into(),
+            default_ttl: format!("{:?}", owner.default_ttl),
+        }
     }
 
     async fn ls_one(nickname: String) -> Result<(), anyhow::Error> {
         let series_owner = api::get_series_owner(&nickname).await?;
-
-        show_table(vec![Row {
-            nickname: series_owner.nickname,
-            public_key: series_owner.keypair.verifying_key().into(),
-            private_key: series_owner.keypair.to_scalar_bytes().into(),
-            default_ttl: format!("{:?}", series_owner.default_ttl),
-        }]);
-
+        show_table(vec![row_from(series_owner)]);
         Ok(())
     }
 
     async fn ls_all() -> Result<(), anyhow::Error> {
         let response = api::get_all_series_owners().await?;
-
-        show_table(
-            response
-                .into_iter()
-                .map(|series_owner| Row {
-                    nickname: series_owner.nickname,
-                    public_key: series_owner.keypair.verifying_key().into(),
-                    private_key: series_owner.keypair.to_scalar_bytes().into(),
-                    default_ttl: format!("{:?}", series_owner.default_ttl),
-                })
-                .collect::<Vec<_>>(),
-        );
-
+        show_table(response.into_iter().map(row_from).collect::<Vec<_>>());
         Ok(())
     }
 

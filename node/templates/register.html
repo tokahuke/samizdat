@@ -22,14 +22,15 @@
       {% when AccessRight::ManageCollections %}
       Manage your local objects, including uploading whole new collections.
       {% when AccessRight::ManageSeries %}
-      Manage your locally owned series, including reading your private keys and uploading
-      new editions.
+      Read your locally owned series' private keys (full impersonation on the network)
+      and sign new editions on your behalf.
       {% when AccessRight::ManageSubscriptions %}
       Manage your subscriptions to series.
       {% when AccessRight::ManageIdentities %}
-      Manage your locally stored identities.
+      Read and rewrite your locally stored identities (rebind any identity to a key the
+      app chooses).
       {% when AccessRight::ManageHubs %}
-      Manage your connection to Samizdat Hubs.
+      Add, remove, and reconfigure the Samizdat hubs your node connects to.
       {% when AccessRight::Public %}
       Can access public content. <em>(note: this has no effect and is more likely a bug)</em>
       {% endmatch %}
@@ -42,9 +43,26 @@
   </p>
   <div>
     <button onclick="cancel()">Cancel</button>
-    <button onclick="allow()">Allow</button>
+    <button id="allow-button" onclick="allow()" disabled>Allow (3s)</button>
   </div>
   <script>
+    // Gate Allow behind a short delay so the user has to look at the page
+    // before clicking through. The countdown is visible.
+    (function () {
+      var btn = document.getElementById("allow-button");
+      var remaining = 3;
+      var timer = setInterval(function () {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearInterval(timer);
+          btn.textContent = "Allow";
+          btn.disabled = false;
+        } else {
+          btn.textContent = "Allow (" + remaining + "s)";
+        }
+      }, 1000);
+    })();
+
     console.log(`{ "granted_rights": {{ rights|json|safe }} }`);
     async function allow() {
       const response = await fetch("/_auth{{ entity|safe }}", {

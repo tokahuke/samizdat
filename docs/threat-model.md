@@ -116,17 +116,34 @@ Most admin routes are unreachable through the proxy by construction.
 
 ### Browser pages served by the node
 
-A page at `http://localhost:4510/<entity>/...` runs in its own
-same-origin context. Cross-origin pages can still issue requests to
-`http://localhost:4510` via CORS, but:
+Each series and each identity gets its own browser origin via a
+subdomain of `localhost`:
 
-- The node sets no CORS headers, so non-simple requests (PUT, DELETE,
-  PATCH, anything with `Authorization` or `Content-Type: application/json`)
-  are blocked at preflight.
-- Simple POSTs with `text/plain` body DO bypass preflight. This is why
-  `/_vacuum/*` was gated with `authenticate_trusted_context` (bearer or
-  the `/_register` trusted context); a malicious page CANNOT call it
-  cross-origin.
+- Series content lives at `http://<base32-key>.localhost:4510/<path>`.
+- Identity content lives at `http://<identity>.localhost:4510/<path>`.
+- All `/_*` admin routes plus the welcome page live at the bare
+  `http://localhost:4510/` origin.
+
+The HostScope extractor in `node/src/http/host_scope.rs` parses the
+`Host` header, validates trusted-host (only `localhost`, `127.0.0.1`,
+`::1` and `*.localhost` are accepted; anything else is 400), and
+classifies the subdomain into Series/Identity. The `require_bare_host`
+layer in `node/src/http/mod.rs` returns 404 if a `*.localhost` request
+ever hits an admin endpoint.
+
+Practical implication: localStorage, IndexedDB, Cache Storage, cookies,
+service workers and SharedWorker are per-origin and therefore per-series.
+A page on `<a>.localhost:4510` cannot read storage written by a page on
+`<b>.localhost:4510`.
+
+The node sets a permissive CORS layer (`tower_http::cors::CorsLayer`)
+that reflects any `Origin` whose host is `localhost` or `*.localhost`.
+This is the structural compromise made for the SDK transition; per-route
+CORS scoping is a deferred followup (see
+`docs/javascript-security.md`). The admin-endpoint defenses still apply
+inside that CORS umbrella: admin routes require either a bearer token or
+a `Referer`-trusted-context grant whose Entity (now derived from the
+Referer's HOST, not the path) has the necessary AccessRight.
 
 ## Attack surface by attacker location
 

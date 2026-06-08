@@ -1,25 +1,17 @@
-//! Command-line interface module for the Samizdat application.
-//!
-//! This module provides the command-line argument parsing and execution logic for all
-//! Samizdat commands.
-
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use structopt::StructOpt;
 
 use crate::{api::EditionKind, commands};
 
-/// Global CLI instance for the application
 static CLI: OnceLock<Cli> = OnceLock::new();
 
-/// Initializes the CLI by parsing command line arguments
 pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
     tracing::debug!("Arguments from command line: {:#?}", cli);
     cli
 }
 
-/// Returns a reference to the global CLI instance
 pub fn cli<'a>() -> &'a Cli {
     CLI.get_or_init(init_cli)
 }

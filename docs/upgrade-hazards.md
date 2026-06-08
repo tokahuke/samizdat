@@ -98,7 +98,16 @@ clear error. New keys that lack `serde(default)` and that the daemon
 unconditionally reads will crash old installs on first restart after the
 upgrade.
 
-## 6. Default-hub seeding is one-shot per install
+## 6. Identity-name DNS-safety filter is runtime-only
+
+The smart contract was tightened to refuse DNS-unsafe identity names but
+the on-chain bytecode is unchanged; the runtime
+[`samizdat_common::identity::check_servable_identity`](../common/src/identity.rs)
+is the only filter against pre-existing garbage until the deployment is
+rotated. See [`blockchain/REDEPLOY.md`](../blockchain/REDEPLOY.md) for the
+redeploy procedure.
+
+## 7. Default-hub seeding is one-shot per install
 
 [`samizdat-up/src/install/mod.rs::seed_default_hubs_best_effort`](../samizdat-up/src/install/mod.rs)
 runs only during `samizdat-up install node`, not during `samizdat-up
@@ -107,3 +116,40 @@ source has no effect on a host that has already gone through an
 `install node`; the host keeps whatever hub list it has. New default hubs
 have to either be added with an explicit migration step in `update()`, or
 documented as "operators must run `samizdat hub new ...` manually".
+
+## 8. Typed-subdomain dispatch replaces bare-key subdomains and admin reads
+
+Content now lives at five prefix-labelled subdomain classes:
+`object-<hash>.<root>`, `series-<key>.<root>`, `collection-<hash>.<root>`,
+`edition-<id>.<root>`, and `<identity>.<root>` (no prefix). Existing
+`<key>.<root>` series URLs and the node-side admin content read paths
+(`GET /_objects/<hash>`, `GET /_collections/<hash>/<path>`) return 404;
+the matching admin write paths (`POST /_objects`, etc.) stay. Bookmarks
+and links pinned to either shape break and need to be reissued in the new
+form. Cert and DNS are unchanged: one wildcard SAN, one wildcard A
+record, with the type prefix inside the single wildcard label.
+
+`Hash` and `Key` also gain a canonical RFC 4648 base32 lowercase
+no-padding string form; the legacy base64-url encoding is dropped. The
+on-chain identity entity strings stored on Polygon still carry the old
+encoding for already-registered handles, so the resolver needs to accept
+both base64 and base32 for one cycle. Tracked as a known migration knob;
+see the identity resolver follow-up.
+
+## 9. `/_kvstore/*` is gone
+
+The node-side key-value store and its three routes (`GET`, `PUT`, `DELETE`
+on `/_kvstore/{*tail}` and `DELETE /_kvstore/`) are no longer served. Pages
+that called `sz.kvstore.{get,put,delete,clear}` now hit 404. Per-series
+subdomain isolation makes the browser's own `localStorage`,
+`sessionStorage`, and `IndexedDB` partitioned per origin, so authors get
+the same key-value semantics without a round trip to the node; SamizdatJS
+no longer exposes a `kvstore` property.
+
+The `Table::KVStore` variant was also removed from the
+[`Table`](../node/src/db/mod.rs) enum. LMDB sub-databases are addressed
+by name (`Database::init` opens one handle per `Table::VARIANTS`
+entry), so the on-disk sub-database named `KVStore` is simply no longer
+opened on startup. Its bytes stay in the LMDB file as dead weight until
+the node is wiped; `samizdat vacuum` does not reclaim them. Operators
+upgrading an existing data directory should expect that residual size.

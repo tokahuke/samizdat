@@ -49,7 +49,7 @@ humantime-serde = "1.1.1"
 tracing = "0.1.44"
 toml = "0.8.19"
 serde-inline-default = "0.2.3"
-tower-http = { version = "0.6.10", features = ["trace"] }
+tower-http = { version = "0.6.10", features = ["trace", "cors", "set-header"] }
 aes-gcm-siv = "0.11.1"
 subtle = "2.6.1"
 

@@ -14,6 +14,9 @@ use serde_derive::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
+use samizdat_common::identity::check_servable_identity;
+use samizdat_common::Key;
+
 use crate::access::{admin_token, read_token, AccessRight, Entity, TokenScope};
 use crate::db::Table;
 
@@ -175,31 +178,43 @@ fn delete_auth() -> Router {
     )
 }
 
-/// Checks whether the request is _really_ coming from Samizdat. This is a complement
-/// to CORS.
+/// Checks whether the request is _really_ coming from Samizdat. The
+/// accepted origins are `localhost` (and any `*.localhost` subdomain),
+/// `127.0.0.1`, and `::1`. Cross-origin pages get filtered out before any
+/// entity-derivation logic runs.
 fn check_origin(referrer: &Url) -> Result<(), Origin> {
     let origin = referrer.origin();
 
-    // Find out if some cross-origin thing is trying ot trick you.
     match &origin {
-        url::Origin::Tuple(http, host, _) if http == "http" || http == "https" => match host {
-            Host::Domain(domain) if domain == "localhost" => return Ok(()),
-            Host::Ipv4(ip) if ip.is_loopback() => return Ok(()),
-            Host::Ipv6(ip) if ip.to_canonical().is_loopback() => return Ok(()),
-            _ => {}
-        },
+        url::Origin::Tuple(scheme, host, _) if scheme == "http" || scheme == "https" => {
+            match host {
+                Host::Domain(domain) if domain == "localhost" || domain.ends_with(".localhost") => {
+                    return Ok(())
+                }
+                Host::Ipv4(ip) if ip.is_loopback() => return Ok(()),
+                Host::Ipv6(ip) if ip.to_canonical().is_loopback() => return Ok(()),
+                _ => {}
+            }
+        }
         _ => {}
     }
 
     Err(origin)
 }
 
-/// Paths which are *always* trusted.
+/// Paths which are *always* trusted. Lives on the bare loopback admin host.
 fn is_trusted_context(referrer: &Url) -> bool {
     ["/_register"].contains(&referrer.path())
 }
 
-/// Returns `Ok(None)` when trusted context.
+/// Derives the [`Entity`] of a request by inspecting the `Referer` header's
+/// HOST. Content lives at `<base32-key>.localhost:<port>` or
+/// `<identity>.localhost:<port>`; cf. `docs/javascript-security.md`.
+///
+/// Returns `Err(NotAnEntity)` when the page is on the bare loopback admin
+/// host (no entity to grant), `Err(BadOrigin)` for cross-origin Referers,
+/// and `Err(TrustedContext)` when the page is `/_register` (the dedicated
+/// grant-administration page, gated by a different middleware).
 fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection> {
     check_origin(referrer).map_err(SecurityScopeRejection::BadOrigin)?;
 
@@ -207,13 +222,53 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
         return Err(SecurityScopeRejection::TrustedContext(referrer.to_owned()));
     }
 
-    let Some(entity) = Entity::from_path(referrer.path()) else {
-        return Err(SecurityScopeRejection::NotAnEntity(
-            referrer.path().to_owned(),
-        ));
-    };
+    let host = referrer.host_str().ok_or_else(|| {
+        SecurityScopeRejection::NotAnEntity(format!(
+            "referer has no host: {referrer}"
+        ))
+    })?;
+    let lowered = host.to_ascii_lowercase();
 
-    Ok(entity)
+    // Bare loopback host -> not an entity. The admin host has no
+    // entity-scoped grants by construction.
+    if matches!(lowered.as_str(), "localhost" | "127.0.0.1" | "::1") {
+        return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
+    }
+
+    if let Some(subdomain) = lowered.strip_suffix(".localhost") {
+        if subdomain.is_empty() {
+            return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
+        }
+
+        if let Some(key_str) = subdomain.strip_prefix("series-") {
+            let key: Key = key_str.parse().map_err(|err| {
+                SecurityScopeRejection::NotAnEntity(format!(
+                    "bad series key in subdomain `{subdomain}`: {err}"
+                ))
+            })?;
+            return Ok(Entity::new("_series", key.to_string()));
+        }
+
+        // Content-addressed subdomains (object-/collection-/edition-) have
+        // no per-entity admin scope; the page can read its own bytes but
+        // grants nothing.
+        if subdomain.starts_with("object-")
+            || subdomain.starts_with("collection-")
+            || subdomain.starts_with("edition-")
+        {
+            return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
+        }
+
+        check_servable_identity(subdomain)
+            .map_err(|reason| {
+                SecurityScopeRejection::NotAnEntity(format!(
+                    "identity subdomain `{subdomain}` is not servable: {reason}"
+                ))
+            })?;
+        return Ok(Entity::new("_identity", format!("~{subdomain}")));
+    }
+
+    Err(SecurityScopeRejection::NotAnEntity(host.to_owned()))
 }
 
 /// Extracts the Referer URL from a request.

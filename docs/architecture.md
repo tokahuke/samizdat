@@ -11,22 +11,43 @@ cross-cutting primitives (riddles, content addressing, transport, identity).
 ## 30-second mental model
 
 ```
-   publisher               consumer
-   (CLI + node)            (browser + node)
-        |                          |
-        +-----> samizdat-node <----+         (per-user, localhost)
-                    |  ^
-                    |  |  QUIC + tarpc, mutually-distrustful
-                    v  |
-                samizdat-hub                 (operator-run, public)
-                    |  ^
-                    |  |  QUIC + tarpc, hub-as-node federation
-                    v  |
-                samizdat-hub                 (other operators)
+   publisher           consumer (no node)        consumer (with node)
+   (CLI + node)        (browser)                 (browser + node)
+        |                  |                          |
+        |                  v                          |
+        |             samizdat-proxy <----------------+
+        |                  |   (HTTPS, wildcard cert)
+        |                  v
+        +-----------> samizdat-node                  (per-user, localhost)
+                          |  ^
+                          |  |  QUIC + tarpc, mutually-distrustful
+                          v  |
+                      samizdat-hub                   (operator-run, public)
+                          |  ^
+                          |  |  QUIC + tarpc, hub-as-node federation
+                          v  |
+                      samizdat-hub                   (other operators)
 ```
 
-For public web access without running a node, a `samizdat-proxy` serves the
-local node's HTTP API over HTTPS with Let's Encrypt certs.
+The proxy and the node both expose the same five-class URL surface to the
+browser, distinguished by a prefix label in the leftmost DNS component:
+
+- `object-<hash>.<root>` -- a single object by content hash.
+- `series-<key>.<root>` -- the latest edition of a series, keyed by its
+  Ed25519 public key.
+- `collection-<hash>.<root>` -- a collection by Patricia root.
+- `edition-<id>.<root>` -- a specific edition by signed-pointer id.
+- `<identity>.<root>` -- an on-chain identity handle (no prefix).
+
+`<root>` is `localhost:<port>` for the node and `proxy.hubfederation.com`
+for the public proxy. Each class gets its own browser origin, so storage,
+service workers, and same-origin reach are partitioned per entity. One
+wildcard cert (`*.<root>`) and one wildcard DNS A record cover the whole
+hierarchy; the type prefix lives inside the single wildcard label.
+
+Admin endpoints (`/_objects` writes, `/_series-owners`, `/_subscriptions`,
+etc.) live on the bare `<root>` origin and are not reachable through the
+proxy.
 
 ## Domain model
 
@@ -119,8 +140,11 @@ The per-user peer. Each samizdat user runs one. It:
 - Talks to one or more hubs over QUIC + tarpc (both directions:
   "node as client" for `query`/`get_edition`/`announce_edition`, "node as
   server" so the hub can push candidates back).
-- Serves a localhost HTTP API used by the CLI and by browser pages
-  (`/_objects`, `/_series-owners`, `/_subscriptions`, etc.).
+- Serves a localhost HTTP API used by the CLI and by browser pages:
+  admin write paths (`POST /_objects`, `/_series-owners`,
+  `/_subscriptions`, etc.) on the bare loopback origin; content reads
+  on the typed subdomains (`object-<hash>.<root>`, `series-<key>.<root>`,
+  `collection-<hash>.<root>`, `edition-<id>.<root>`, `<identity>.<root>`).
 - Authenticates browser clients via a `Referer`-based "trusted context" or a
   bearer access token; see `docs/threat-model.md`.
 - Runs a vacuum daemon that GCs objects whose `is_bookmarked` is false.
@@ -324,11 +348,39 @@ key works fine as an identifier on its own.
    opaque-encrypted) to every connected node whose subscription riddle
    matches the series public key.
 
+### URL forms
+
+Content is served at typed subdomains so each entity gets its own browser
+origin. The leftmost DNS label carries a type prefix (or none, for
+identities); five shapes share one wildcard cert and one wildcard A
+record:
+
+- `object-<hash>.<root>/<path>` -- a single object by content hash.
+- `series-<key>.<root>/<path>` -- the latest edition of a series.
+  `<key>` is RFC 4648 base32 lowercase no-padding of the 32-byte Ed25519
+  public key (52 chars).
+- `collection-<hash>.<root>/<path>` -- a collection by Patricia root.
+- `edition-<id>.<root>/<path>` -- a specific signed edition.
+- `<identity>.<root>/<path>` -- an on-chain identity handle, no prefix.
+
+`<hash>` is the canonical base32 form of a `Hash` (RFC 4648 lowercase,
+no padding). `<root>` is `localhost:<port>` for the node or
+`proxy.hubfederation.com` for the public proxy; the proxy and node speak
+the same prefix-label dispatch, so a URL works on either origin with
+only the root swapped.
+
+All `/_*` admin routes plus the welcome page live at the bare
+`http://<root>/` origin, which is a different origin from any
+typed subdomain and is not reachable through the proxy.
+
 ### Resolving
 
-1. Browser requests `http://localhost:<port>/<series-name>/<path>`.
-2. Node resolves `<series-name>` (either a raw pubkey or an identity-dapp
-   lookup), looks up the latest edition, finds the locator hash for `<path>`.
+1. Browser requests `http://series-<key>.<root>/<path>` (or one of the
+   other four typed-subdomain shapes).
+2. Dispatcher strips the type prefix, decodes `<key>` from base32 into the
+   series public key (or resolves an identity handle via the identity-dapp
+   lookup, or decodes `<hash>` for object/collection/edition lookups),
+   then finds the locator hash for `<path>`.
 3. If the object is locally cached, served directly. Otherwise:
 4. Node creates a `Query` with `content_riddles` derived from the locator,
    sends it to every connected hub.

@@ -17,21 +17,24 @@ pub struct Hash(pub [u8; HASH_LEN]);
 impl FromStr for Hash {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Hash, crate::Error> {
-        Ok(Hash(base64_url::decode(s)?.try_into().map_err(
-            |e: Vec<_>| format!("expected {HASH_LEN} bytes; got {}", e.len()),
-        )?))
+        let bytes = crate::encoding::base32_lc()
+            .decode(s.as_bytes())
+            .map_err(|err| format!("hash is not valid base32 lowercase: {err}"))?;
+        Ok(Hash(bytes.try_into().map_err(|e: Vec<_>| {
+            format!("expected {HASH_LEN} bytes; got {}", e.len())
+        })?))
     }
 }
 
 impl Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        write!(f, "{}", crate::encoding::base32_lc().encode(&self.0))
     }
 }
 
 impl Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        write!(f, "{}", crate::encoding::base32_lc().encode(&self.0))
     }
 }
 

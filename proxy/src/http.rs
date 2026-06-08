@@ -2,10 +2,12 @@ use std::sync::LazyLock;
 
 use axum::body::Body;
 use axum::extract::OriginalUri;
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use mime::Mime;
+use samizdat_common::identity::check_servable_identity;
 
 use crate::cli::cli;
 use crate::html::proxy_page;
@@ -19,17 +21,55 @@ const PROXY_HEADERS: &[&str] = &[
     "X-Samizdat-Series",
     "X-Samizdat-Edition",
     "X-Samizdat-Query-Duration",
+    // Forward the node's security headers to external viewers so the
+    // proxied page gets the same protections as a local visit.
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "Permissions-Policy",
 ];
 
-pub fn api() -> axum::Router {
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("failed to build HTTP client")
+});
+
+/// Build the host-form router. Dispatches purely on the `Host` header
+/// and forwards the request path verbatim.
+///
+/// Three classes of host are accepted:
+///
+/// - bare `<wildcard_root>`: forwards path verbatim to the node root.
+///   This serves the proxy's landing / welcome surface.
+/// - `<base32-key>.<wildcard_root>`: upstream is
+///   `<scheme>://<base32-key>.<node-host>:<node-port>/<path>`.
+/// - `<identity>.<wildcard_root>` where `<identity>` passes
+///   `check_servable_identity`: upstream is
+///   `<scheme>://<identity>.<node-host>:<node-port>/<path>`.
+///
+/// Anything else gets a 400.
+pub fn wildcard_api(wildcard_root: String) -> axum::Router {
+    let state = WildcardState { wildcard_root };
     Router::new()
-        .route("/{*path}", get(proxy))
-        .route("/", get(proxy))
+        .route("/{*path}", get(wildcard_dispatch))
+        .route("/", get(wildcard_dispatch))
         .layer(tower::ServiceBuilder::new().layer(tower_http::trace::TraceLayer::new_for_http()))
+        .with_state(std::sync::Arc::new(state))
 }
 
-pub async fn proxy(original_uri: OriginalUri) -> Response<Body> {
-    match do_proxy(original_uri).await {
+#[derive(Clone)]
+struct WildcardState {
+    wildcard_root: String,
+}
+
+async fn wildcard_dispatch(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<WildcardState>>,
+    headers: HeaderMap,
+    original_uri: OriginalUri,
+) -> Response<Body> {
+    match do_wildcard_dispatch(&state.wildcard_root, &headers, original_uri).await {
         Ok(response) => response,
         Err(err) => {
             tracing::error!("Server error: {err:?}");
@@ -41,35 +81,69 @@ pub async fn proxy(original_uri: OriginalUri) -> Response<Body> {
     }
 }
 
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("failed to build HTTP client")
-});
+async fn do_wildcard_dispatch(
+    wildcard_root: &str,
+    headers: &HeaderMap,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response<Body>, anyhow::Error> {
+    let raw_host = match headers.get("host").and_then(|h| h.to_str().ok()) {
+        Some(h) => h,
+        None => return Ok(bad_request("missing or malformed Host header")),
+    };
+    let host = match axum::http::uri::Authority::try_from(raw_host.trim()) {
+        Ok(authority) => authority.host().to_ascii_lowercase(),
+        Err(_) => return Ok(bad_request("malformed Host header")),
+    };
+    let wildcard_root_lc = wildcard_root.to_ascii_lowercase();
 
-pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, anyhow::Error> {
-    // Get entity and content hash from page path.
-    //
-    // `uri.path()` from axum always starts with `/`, so `split('/').next()` is
-    // always `Some("")`; the previous version had an `.expect()` and a
-    // `todo!()` arm for impossible cases. Re-shape as concrete matches that
-    // return a clean 400 if a future routing change ever feeds us an
-    // unexpected path, rather than panicking the request thread.
-    let path = uri.path();
-    let mut split = path.split('/');
-    split.next(); // leading empty segment from the `/`
-    let (entity, content_hash) = match (split.next(), split.next()) {
-        // Root request, no entity. Treat as the "samizdat home" path.
-        (None, _) | (Some(""), None) => ("_identity", ""),
-        (Some(entity), Some(content_hash)) if entity.starts_with('_') => (entity, content_hash),
-        // Otherwise the first segment is an identity name (no leading `_`).
-        (Some(identity), _) => ("_identity", identity),
+    let sub = if host == wildcard_root_lc {
+        None
+    } else if let Some(prefix) = host.strip_suffix(&format!(".{wildcard_root_lc}")) {
+        if prefix.is_empty() || prefix.contains('.') {
+            return Ok(bad_request("untrusted host"));
+        }
+        Some(prefix)
+    } else {
+        return Ok(bad_request("untrusted host"));
     };
 
-    // Query node for the web page:
-    let translated = format!("{}{}", cli().node, path);
-    let response = CLIENT.get(translated).send().await?;
+    // Validate the subdomain shape: bare, one of the four type-prefix
+    // forms, or a servable identity. The label itself is forwarded
+    // verbatim; the node's own classifier re-parses the prefix.
+    if let Some(label) = sub {
+        let known_prefix = label.starts_with("series-")
+            || label.starts_with("object-")
+            || label.starts_with("collection-")
+            || label.starts_with("edition-");
+        if !known_prefix && check_servable_identity(label).is_err() {
+            return Ok(bad_request("untrusted host"));
+        }
+    }
+
+    // Path + query (axum's `OriginalUri.path()` does NOT include the
+    // query string; reconstruct from `path_and_query`).
+    let path_and_query = uri
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or_else(|| uri.path());
+
+    let (entity, content_hash) = entity_from_path(uri.path());
+
+    // The proxy's `--node` URL is the node's bare admin origin
+    // (e.g. `http://localhost:4510`). For host-form forwarding we
+    // substitute the host label.
+    let node = node_base()
+        .ok_or_else(|| anyhow::anyhow!("invalid --node URL: {}", cli().node))?;
+
+    let upstream = match sub {
+        None => format!("{}{}", cli().node, path_and_query),
+        Some(label) => format!(
+            "{}://{}.{}{}{}",
+            node.scheme, label, node.host, node.port_part, path_and_query
+        ),
+    };
+
+    let response = CLIENT.get(upstream).send().await?;
 
     let response = match response.status().as_u16() {
         status @ 300..=399 => axum::response::Response::builder()
@@ -98,10 +172,6 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
                 }
             }
 
-            // If web page, do your shenanigans. Compare on `type_`/`subtype`
-            // rather than `==`-against `mime::TEXT_HTML_UTF_8` so that
-            // `text/html; charset=utf-8`, `text/html; charset=US-ASCII`,
-            // `text/html` (no charset) all take the HTML path.
             let mime: Mime = content_type.to_str().unwrap_or_default().parse()?;
 
             if mime.type_() == mime::TEXT && mime.subtype() == mime::HTML {
@@ -114,6 +184,51 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
     };
 
     Ok(response)
+}
+
+/// Best-effort path -> (entity, content_hash) extraction for the
+/// HTML rewriter's CSS namespace. Mirrors the logic in `do_proxy` but
+/// trimmed to what `proxy_page` actually consumes (both args are
+/// currently unused inside the rewriter; this keeps parity with the
+/// path-form code in case that changes).
+fn entity_from_path(path: &str) -> (&'static str, &'static str) {
+    let _ = path;
+    ("_identity", "")
+}
+
+/// Decomposed `--node` URL parts used to build upstream URLs. Parsed
+/// once at first use and cached for the life of the process.
+struct NodeBase {
+    scheme: &'static str,
+    host: &'static str,
+    port_part: &'static str,
+}
+
+fn node_base() -> Option<NodeBase> {
+    static PARSED: LazyLock<Option<(String, String, String)>> = LazyLock::new(|| {
+        let url = url::Url::parse(&cli().node).ok()?;
+        let host = url.host_str()?.to_owned();
+        let scheme = url.scheme().to_owned();
+        let port_part = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+        Some((scheme, host, port_part))
+    });
+    let (scheme, host, port_part) = PARSED.as_ref()?;
+    // Safe to leak to &'static because PARSED is a `LazyLock` itself
+    // already 'static; `as_str` on the inner String gives us a
+    // reference with the same lifetime.
+    Some(NodeBase {
+        scheme: scheme.as_str(),
+        host: host.as_str(),
+        port_part: port_part.as_str(),
+    })
+}
+
+fn bad_request(msg: &'static str) -> Response<Body> {
+    Response::builder()
+        .status(400)
+        .header("Content-Type", "text/plain")
+        .body(bytes::Bytes::from_static(msg.as_bytes()).into())
+        .expect("can build 400 response")
 }
 
 /// Tests if the node is live at the URL supplied to the CLI.

@@ -128,7 +128,7 @@ fn server_config() -> ServerConfig {
 
     let cert = rcgen::generate_simple_self_signed(vec![DEFAULT_SERVER_NAME.into()]).unwrap();
     let cert_der = CertificateDer::from(cert.cert);
-    let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+    let priv_key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
 
     let mut server_config = quinn::ServerConfig::with_single_cert(vec![cert_der], priv_key.into())
         .expect("can build server config");

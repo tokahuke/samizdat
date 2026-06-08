@@ -37,6 +37,11 @@ pub enum Table {
     Series,
     /// The list of all most common association between collections and series.
     Editions,
+    /// Reverse index: edition canonical id (`Hash` of the bincode-serialized
+    /// signed envelope) to the `Table::Editions` primary key (public key +
+    /// timestamp). Lets host-form `edition-<id>.<root>` lookups resolve
+    /// without a full table scan.
+    EditionsByHash,
     /// The last refresh dates from each series.
     SeriesFreshnesses,
     /// The list of series owners: pieces of information which allows the
@@ -50,8 +55,6 @@ pub enum Table {
     RecentNonces,
     /// Access rights granted for each entity to the local Samizdat node.
     AccessRights,
-    /// General key-value store for application (because `LocalStorage` is broken in Samizdat).
-    KVStore,
     /// Specification on which hubs to connect to.
     Hubs,
 }

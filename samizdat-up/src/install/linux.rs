@@ -321,6 +321,14 @@ fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     if let Some(user) = as_user {
         chown_recursive(&data_dir, user)?;
     }
+    // Proxy picks up ACME DNS-01 provider secrets from
+    // /etc/samizdat/proxy.env (sourced via systemd EnvironmentFile=).
+    // Touch the file on first install with mode 0640 root:samizdat so
+    // operators can group-read but not world-read; never overwrite an
+    // existing file.
+    if d.name == "proxy" {
+        ensure_proxy_env_file()?;
+    }
     let path = PathBuf::from(format!("/etc/samizdat/{}.toml", d.name));
     if path.exists() {
         // Preserve user edits. The original install.sh used
@@ -332,6 +340,38 @@ fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     println!(
         "samizdat-up: wrote default config -> {} \
          (edit and `systemctl restart` to apply changes)",
+        path.display()
+    );
+    Ok(())
+}
+
+/// Create /etc/samizdat/proxy.env mode 0640 root:samizdat if absent.
+/// Holds secrets (ACME DNS-01 provider tokens) that systemd reads via
+/// EnvironmentFile=. Never overwrites an existing file.
+fn ensure_proxy_env_file() -> Result<()> {
+    let path = Path::new("/etc/samizdat/proxy.env");
+    if path.exists() {
+        return Ok(());
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o640)
+        .open(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_mode(0o640);
+    fs::set_permissions(path, perms)?;
+    let status = Command::new("chgrp")
+        .args([ADMIN_GROUP, path.to_str().expect("ascii path")])
+        .status()
+        .with_context(|| format!("running chgrp {ADMIN_GROUP} {}", path.display()))?;
+    if !status.success() {
+        bail!("chgrp {ADMIN_GROUP} {} exited with {status}", path.display());
+    }
+    println!(
+        "samizdat-up: created {} (mode 0640, owner root:{ADMIN_GROUP}). \
+         Put ACME DNS-01 secrets here.",
         path.display()
     );
     Ok(())

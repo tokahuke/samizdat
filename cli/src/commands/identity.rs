@@ -1,6 +1,8 @@
 //! Identity management commands for interacting with the identity service.
 //! Provides functionality to set/get providers and manage identity-entity mappings.
 
+use samizdat_common::identity::check_servable_identity;
+
 use crate::api::{get_polygon_provider, put_polygon_provider};
 
 /// Sets the Polygon provider endpoint for identity operations.
@@ -23,7 +25,7 @@ pub async fn create(
     ttl: u64,
     endpoint: Option<String>,
 ) -> Result<(), anyhow::Error> {
-    // Check if entity is a well-formed Samizdat public key.
+    check_servable_identity(&identity)?;
     anyhow::ensure!(
         entity.parse::<samizdat_common::Key>().is_ok(),
         "Entity is not a valid series"
@@ -39,7 +41,7 @@ pub async fn update(
     ttl: u64,
     endpoint: Option<String>,
 ) -> Result<(), anyhow::Error> {
-    // Check if entity is a well-formed Samizdat public key.
+    check_servable_identity(&identity)?;
     anyhow::ensure!(
         entity.parse::<samizdat_common::Key>().is_ok(),
         "Entity is not a valid series"

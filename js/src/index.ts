@@ -1,6 +1,18 @@
 import { call, callRaw } from "./api";
 import { authenticate } from "./auth";
 
+/// Build the origin for a typed-subdomain entity, derived from the page's
+/// current origin. `<root>` is whatever follows the first label of
+/// `window.location.hostname`; if the page is on the bare loopback host
+/// (no `.`), the entity origin is `<prefix>-<id>.<hostname>`.
+function originForType(prefix: string, id: string): string {
+  const port = window.location.port ? `:${window.location.port}` : "";
+  const proto = window.location.protocol;
+  const host = window.location.hostname;
+  const root = host.includes(".") ? host.replace(/^[^.]+\./, "") : host;
+  return `${proto}//${prefix}-${id}.${root}${port}`;
+}
+
 export enum AccessRight {
   ManageObjects = "ManageObjects",
   GetObjectStats = "GetObjectStats",
@@ -81,12 +93,10 @@ export interface Subscription {
 export class Samizdat {
   accessRights: Array<AccessRight>;
   isAuthenticated: boolean;
-  kvstore: KVStore;
 
   constructor(accessRights?: Array<AccessRight>) {
     this.accessRights = accessRights ?? [];
     this.isAuthenticated = false;
-    this.kvstore = new KVStore();
   }
 
   /**
@@ -141,7 +151,7 @@ export class Samizdat {
   }
 
   async getObject(object: string) {
-    const response = await call("GET", `/_objects/${object}`);
+    const response = await fetch(originForType("object", object) + "/");
     return await response.blob();
   }
 
@@ -209,7 +219,7 @@ export class Samizdat {
   }
 
   async getItem(collection: string, path: string) {
-    const response = await call("GET", `/_collections/${collection}${path}`);
+    const response = await fetch(originForType("collection", collection) + path);
     return await response.blob();
   }
 
@@ -305,30 +315,6 @@ export class Samizdat {
   async deleteSubscription(seriesKey: string) {
     await this._ensureRights([AccessRight.ManageSubscriptions]);
     const response = await call("DELETE", `/_subscriptions/${seriesKey}`);
-    return (await response.json())["Ok"] as null;
-  }
-}
-
-export class KVStore {
-  constructor() {}
-
-  async get(key: string) {
-    const response = await call("GET", `/_kvstore/${key}`);
-    return (await response.json())["Ok"] as string | null;
-  }
-
-  async put(key: string, value: string) {
-    const response = await call("PUT", `/_kvstore/${key}`, { value });
-    return (await response.json())["Ok"] as null;
-  }
-
-  async delete(key: string) {
-    const response = await call("DELETE", `/_kvstore/${key}`);
-    return (await response.json())["Ok"] as null;
-  }
-
-  async clear() {
-    const response = await call("DELETE", `/_kvstore`);
     return (await response.json())["Ok"] as null;
   }
 }

@@ -169,6 +169,27 @@ gotchas in the next section.
   issued for `PROXY_DOMAIN` because that's where install scripts
   point; SSH targets `TESTBED_HOST`. Easy to conflate; the workflow
   uses both deliberately.
+- **Per-series subdomain TLS is HTTP-01 on demand.** The proxy
+  obtains a Let's Encrypt cert per `<x>.proxy.hubfederation.com` the
+  first time a request for that SNI arrives, via standard HTTP-01.
+  The only operator-facing requirement is a wildcard DNS record
+  (`*.proxy.<domain>` -> proxy host IP), which `terraform/domain.tf`
+  provisions for the testbed. No DNS-API access is required at
+  runtime; the proxy holds no DigitalOcean credentials. Operators
+  hosting their own samizdat-proxy do the same: set one wildcard
+  A/AAAA record and start the proxy. Let's Encrypt rate-limits to 50
+  certs per registered domain per week; a personal proxy is
+  comfortably under that.
+- **DigitalOcean token scope.** The `do_token` Terraform variable is
+  the account-wide PAT that provisions the droplet, DNS records, SSH
+  keys, etc. The proxy itself does not need it; only Terraform does.
+  If a future feature ever requires the proxy to write DNS records
+  (e.g. DNS-01 wildcard cert path for high-volume operators), create
+  a separate DigitalOcean PAT with custom scope `domain:create,
+  domain:update, domain:delete` restricted to `hubfederation.com`
+  (the equivalent of an AWS IAM role narrowed to one resource), and
+  pass it through as a distinct Terraform variable. Do NOT reuse
+  the account-wide token on the droplet.
 - **The `get-samizdat` submodule clone needs the deploy key.**
   Workflows that recursively check out submodules will 404 unless
   the `GET_SAMIZDAT_DEPLOY_KEY` secret is installed into the SSH

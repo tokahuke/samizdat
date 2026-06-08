@@ -140,10 +140,12 @@ pub async fn get_object<F>(hash: &str, timeout: u64, mut each_chunk: F) -> Resul
 where
     F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>,
 {
-    let url = format!("{}/_objects/{}", crate::server()?, hash);
+    let url = format!(
+        "http://object-{hash}.localhost:{port}/",
+        port = crate::access_token::port()?
+    );
     let response = CLIENT
         .get(&url)
-        .header("Authorization", format!("Bearer {}", access_token()?))
         .header("X-Samizdat-Timeout", timeout)
         .send()
         .await
