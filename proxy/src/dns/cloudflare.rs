@@ -231,10 +231,22 @@ fn first_error_message(errors: &[CfError]) -> String {
 
 #[derive(Debug, Deserialize)]
 struct ZoneListResponse {
+    // Cloudflare returns `"result": null` (not an empty array) when
+    // `success` is false. Treat null as an empty list so the error path
+    // can still read `success` + `errors` to build a useful message.
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     result: Vec<ZoneEntry>,
     success: bool,
     #[serde(default)]
     errors: Vec<CfError>,
+}
+
+fn deserialize_null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    Ok(<Option<T> as serde::Deserialize>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]

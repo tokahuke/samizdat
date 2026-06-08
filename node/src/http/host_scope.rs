@@ -134,7 +134,15 @@ impl<S: Send + Sync> FromRequestParts<S> for HostScope {
 pub fn classify(raw: &str) -> Result<HostScope, HostScopeRejection> {
     let authority = http::uri::Authority::try_from(raw.trim())
         .map_err(|_| HostScopeRejection::Malformed(raw.to_owned()))?;
-    let host = authority.host().to_ascii_lowercase();
+    // `Authority::host()` returns IPv6 literals with the brackets included
+    // (`[::1]`, not `::1`). Strip them once here so downstream string
+    // comparisons see the canonical literal.
+    let raw_host = authority.host().to_ascii_lowercase();
+    let host = raw_host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .map(str::to_owned)
+        .unwrap_or(raw_host);
 
     if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         return Ok(HostScope::BareLoopback);
