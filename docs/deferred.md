@@ -15,31 +15,22 @@ this file is the actionable backlog only.
 
 ## Priority order (core protocol + hub)
 
-1. **Cryptographic `ChannelId` binding.** HMAC over
-   `(client_addr, peer_id, server_secret)`. Closes the
-   `recv_candidate` injection on `hub/src/rpc/hub_server.rs` and
-   `hub/src/rpc/hub_as_node.rs` in one stroke (H9 / SP federation).
-2. **Hub admin token middleware** (`SAMIZDAT_HUB_ADMIN_TOKEN`).
-   Closes H4 (`/blacklisted-ips` unauth). Add the matching DELETE
-   route for blacklist removal while you are there.
-3. **Per-IP connection cap in hub QUIC accept** (H11) and move
-   `try_acquire` ahead of `accept_bincode_transports` (H12). A flood
-   currently allocates transports before being rejected.
-4. **Replay-resistance with signed timestamps.** Add an authenticated
-   timestamp to messages and verify freshness in `check`. Today the
-   only protection beyond the per-nonce dedup is the throttle.
-5. **`Riddle::riddle_for` padding (P14).** Leaks message length
-   (e.g. IPv4 vs IPv6). Wire-format-breaking; bundle with the next
-   protocol break. Existing `// TODO: ... Need padding!` in
-   `common/src/riddles.rs`.
-6. **`Matcher` cleanup-task bound (B13).** Each
-   `Matcher::{expect,arrive}` spawns a 10s cleanup task. Use
-   `tokio::time::DelayQueue` instead. Perf, not correctness.
-7. **Per-entity scoping of `ManageSeries` (B15 root cause).** Then
-   strip private-key bytes from list responses.
-8. **Hub HTTP body size cap.** Only matters if the proxy is ever
-   pointed at a remote node; loopback-only deployments do not need
-   it.
+1. **Per-IP connection cap in hub QUIC accept.** The only item from
+   the original audit's hub queue that survives the three-axes
+   pass as a real today-bug. A flood from one IP fills the global
+   `max_connections` pool pre-throttle; the connection-level
+   defenses do not get a chance to apply. Default cap of 64
+   trades NAT tolerance against the worst case (a botnet of 32
+   distinct IPs still fills the 2048 pool). Hygiene, not full DoS
+   defense.
+
+(The original priority queue was eight items. Walking each through
+"is there an attacker who can do something not already bounded?"
+collapsed seven of them to no-ops -- their threats are already
+closed by content hashing, the Riddle scheme, the per-connection
+throttle, or the hub admin's loopback-only binding. The antibodies
+below preserve the trace so a future audit pass does not refile
+them.)
 
 ## Subscription eager-fetch is silent + non-bookmarked
 
@@ -72,19 +63,92 @@ Surfaced on 2026-06-08 while debugging intermittent 404s on
 `series-v5bk....hubfederation.com/latest/install.sh` after a
 publish-get-samizdat run.
 
-## Second-pass deferred
+## Antibodies: things that look like bugs and aren't
 
-- **SP-D1 / Reset-trigger drops loser direction (silent candidate
-  loss across reconnect).** `node/src/system/mod.rs`
-  `HubConnectionInner::connect` uses `future::select` on the two
-  reset receivers; when one fires, the surviving direction keeps
-  running on the dying QUIC connection. Same shape in
-  `hub_as_node::connect`. The naive fix (`connection.close()` on
-  either reset) regresses in flaky-network scenarios because it
-  forces a full re-handshake on every tarpc dispatch wobble. The
-  right fix has the new connection INHERIT the old
-  `candidate_channels` so in-flight queries see candidates while
-  new tarpc instances spin up. Non-trivial refactor.
+Each entry below summarises an audit-flagged item that does not
+survive a careful trace. Left in place so a future audit pass
+does not re-discover the apparent severity, file the same
+urgent-sounding entry, and spend a cycle on a real-but-bounded
+hygiene issue dressed up as a correctness or security bug.
+
+### Hub reconnect "silently drops queries on the surviving direction"
+
+The `future::select` on the two reset receivers in
+`node/src/system/mod.rs::HubConnectionInner::connect` (and the
+mirror in `hub/src/rpc/hub_as_node.rs::connect`) was flagged as
+silently dropping queries. Walking the code: receivers always
+resolve -- the asker gets either the value (if the old server
+task delivers before its transport dies) or `RecvError::Closed`
+when the last sender on the old `candidate_channels` map is
+dropped, and `query_with_retry` retries on backoff. The old
+server task lingers as an orphan holding the old QUIC
+connection but self-collects when its transport errors or
+quinn's idle timeout fires. "Full QUIC re-handshake on every
+tarpc wobble" is a real but unobserved cost. Resource hygiene
+at worst, not a correctness bug.
+
+### Cryptographic `ChannelId` binding
+
+The audit flagged that `recv_candidate` on both
+`hub/src/rpc/hub_server.rs` and `hub/src/rpc/hub_as_node.rs`
+accepts an unauthenticated channel id any connected peer can
+inject on. Sounds serious. But the per-connection
+`call_throttle` + `call_semaphore` already bound each
+connection's injection rate. HMAC-binding would not change that
+bound -- a malicious peer is throttle-limited whether they
+inject on a `cc` issued to them specifically or on a `cc`
+shared across broadcast targets. Same rate, same window.
+Content hashing closes the wrong-content axis; Riddle closes
+the privacy axis. Do NOT spend a wire-format break on this.
+
+### Hub admin token middleware (`/blacklisted-ips` unauth)
+
+The hub admin HTTP binds loopback only. The realistic attacker
+is a process on the hub host itself. On the testbed that means
+"anyone with SSH access" -- already game over. If you ever run
+a multi-tenant hub host, revisit; until then, no work to do.
+
+### Replay-resistance with signed timestamps
+
+Current protection is per-nonce dedup in a 10-minute window
+plus the per-connection throttle. A replayed message past the
+dedup window costs the hub one unit of throttle-bounded work.
+Messages cannot carry forged content (riddles + signatures).
+Signed timestamps would be pure defense-in-depth on top of an
+already-bounded attack.
+
+### `Riddle::riddle_for` padding
+
+"Leaks message length, e.g. IPv4 vs IPv6." The hub processes
+the candidate addresses to forward them; it already knows. The
+only attacker who could learn IPv4-vs-IPv6 from message length
+but otherwise not know it is an on-wire eavesdropper -- and
+QUIC encrypts message bytes, while packet-size traffic
+analysis carries many other signals that padding the riddle
+does not address. No concrete attacker who benefits.
+
+### `Matcher` cleanup-task bound
+
+Self-tagged "perf, not correctness." At max load (12 q/s/node
+x 2048 connections) tokio handles thousands of cleanup-task
+spawns per second. `DelayQueue` would be a real improvement
+but the current shape is not a bottleneck. Refile when you see
+it in a profile, not before.
+
+### Per-entity scoping of `ManageSeries`
+
+The OAuth-style consent UI is the *intended* boundary; a
+finer-grained scope set shifts the decision into a longer
+consent screen rather than into the API.
+`docs/threat-model.md` explicitly declares "local multi-tenant
+browser usage is not a supported configuration today." By
+design, not a bug.
+
+### Hub HTTP body size cap
+
+The entry self-flagged: "Only matters if the proxy is ever
+pointed at a remote node; loopback-only deployments do not
+need it." Today's only deployment is loopback-only.
 
 ## Under-audited areas (known unknowns)
 
