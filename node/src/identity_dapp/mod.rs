@@ -81,9 +81,13 @@ impl Identity {
         self.ttl == 0
     }
 
-    /// Attempts to parse the entity string as a SeriesRef.
+    /// Attempts to parse the entity string as a SeriesRef. Accepts both the
+    /// canonical base32 form and the legacy base64-url form so on-chain
+    /// registrations written before the base32 canonicalization keep
+    /// resolving.
     pub fn series(&self) -> Result<SeriesRef, crate::Error> {
-        self.entity.parse::<SeriesRef>()
+        let public_key = samizdat_common::Key::parse_legacy_or_canonical(&self.entity)?;
+        Ok(SeriesRef { public_key })
     }
 }
 

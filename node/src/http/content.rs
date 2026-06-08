@@ -12,10 +12,13 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use tokio::time::Instant;
 
+use samizdat_common::db::readonly_tx;
+use samizdat_common::Hash;
+
 use crate::http::host_scope::HostScope;
 use crate::http::resolvers::{resolve_identity, resolve_item, resolve_object, resolve_series};
 use crate::http::{PageResponse, SamizdatTimeout};
-use crate::models::{CollectionRef, ObjectRef, SeriesRef};
+use crate::models::{CollectionRef, Edition, ObjectRef, SeriesRef};
 
 /// Welcome HTML served at `GET /` on the bare-loopback admin host.
 const WELCOME_HTML: &str = include_str!("../index.html");
@@ -73,17 +76,37 @@ async fn serve(scope: HostScope, name: &str, timeout: std::time::Duration) -> Re
             let locator = collection.locator_for(name.into());
             PageResponse(resolve_item(locator, [], deadline).await).into_response()
         }
-        HostScope::Edition(_id) => {
-            // Edition-by-id resolution requires the canonical id encoding
-            // (likely `base32(SHA-256(signed-envelope))`) plus a database
-            // index from id to Edition. Tracked separately; for now the
-            // subdomain parses but the resolver returns 501.
-            (
-                StatusCode::NOT_IMPLEMENTED,
-                "edition-<id> dispatch is reserved; the resolver is not yet \
-                 wired",
-            )
-                .into_response()
+        HostScope::Edition(id) => {
+            let parsed = match id.parse::<Hash>() {
+                Ok(h) => h,
+                Err(err) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("edition id is not a valid hash: {err}"),
+                    )
+                        .into_response();
+                }
+            };
+            let edition = match readonly_tx(|tx| Edition::by_id(&parsed, tx)) {
+                Ok(Some(e)) => e,
+                Ok(None) => {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        format!("no edition with id `{parsed}` is indexed locally"),
+                    )
+                        .into_response();
+                }
+                Err(err) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("edition lookup failed: {err}"),
+                    )
+                        .into_response();
+                }
+            };
+            let collection = edition.collection();
+            let locator = collection.locator_for(name.into());
+            PageResponse(resolve_item(locator, [], deadline).await).into_response()
         }
     }
 }

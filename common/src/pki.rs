@@ -204,6 +204,19 @@ impl Key {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
+
+    /// Parses a public key string, accepting either the canonical base32
+    /// lowercase form (the new wire format) or the legacy base64-url form.
+    /// Used for reading on-chain identity registrations written before the
+    /// base32 canonicalization. New code should use `parse::<Key>()`
+    /// directly.
+    pub fn parse_legacy_or_canonical(s: &str) -> Result<Key, crate::Error> {
+        if let Ok(key) = s.parse::<Key>() {
+            return Ok(key);
+        }
+        let bytes = base64_url::decode(s)?;
+        Key::from_bytes(&bytes)
+    }
 }
 
 #[cfg(test)]

@@ -10,15 +10,13 @@ use samizdat_common::Hash;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
-use tokio::time::Instant;
 
 use crate::access::AccessRight;
 use crate::http::ContentType;
 use crate::models::{BookmarkType, ObjectHeader, ObjectRef};
 use crate::security_scope;
 
-use super::resolvers::resolve_object;
-use super::{ApiResponse, PageResponse, SamizdatTimeout};
+use super::ApiResponse;
 
 /// The entrypoint of the object API.
 pub fn api() -> Router {
@@ -54,19 +52,6 @@ fn object() -> Router {
     }
 
     Router::new()
-        .route(
-            "/{hash}",
-            get(
-                |Path(ObjectPath { hash }): Path<ObjectPath>,
-                 SamizdatTimeout(timeout): SamizdatTimeout| {
-                    async move {
-                        resolve_object(ObjectRef::new(hash), vec![], Instant::now() + timeout).await
-                    }
-                    .map(PageResponse)
-                },
-            )
-            .layer(security_scope!(read; AccessRight::Public)),
-        )
         .route(
             "/",
             post(

@@ -51,7 +51,7 @@ pub struct SubscriptionRef {
 
 impl Display for SubscriptionRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "subscription to {}", base64_url::encode(self.key()),)
+        write!(f, "subscription to {}", self.public_key)
     }
 }
 

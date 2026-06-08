@@ -191,6 +191,7 @@ impl SeriesOwner {
             edition.key(),
             bincode::serialize(&edition).expect("can serialize"),
         )?;
+        Table::EditionsByHash.put(tx, edition.id().as_ref(), edition.key())?;
 
         Ok(edition)
     }
@@ -205,7 +206,7 @@ pub struct SeriesRef {
 
 impl Display for SeriesRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(self.key()),)
+        Display::fmt(&self.public_key, f)
     }
 }
 
@@ -435,6 +436,7 @@ impl SeriesRef {
             edition.key(),
             bincode::serialize(&edition).expect("can serialize"),
         )?;
+        Table::EditionsByHash.put(tx, edition.id().as_ref(), edition.key())?;
 
         Ok(())
     }
@@ -544,6 +546,31 @@ impl Edition {
     #[inline(always)]
     pub fn timestamp(&self) -> chrono::DateTime<chrono::Utc> {
         self.signed.timestamp
+    }
+
+    /// Canonical id for `edition-<id>.<root>` host-form dispatch. Hashes
+    /// the bincode-serialized signed envelope, which uniquely identifies
+    /// the edition (the signature itself depends on the content, so two
+    /// distinct editions of the same series never collide here). The
+    /// public key and `is_draft` flag are not part of the hash: the same
+    /// signed envelope under both forms is the same edition.
+    pub fn id(&self) -> Hash {
+        let bytes = bincode::serialize(&self.signed).expect("can serialize signed envelope");
+        Hash::from_bytes(&bytes)
+    }
+
+    /// Look up an edition by its canonical id via the `EditionsByHash`
+    /// reverse index. Returns `Ok(None)` if no edition has been indexed
+    /// under that id; the host-form dispatch surfaces that as 404.
+    pub fn by_id<Tx: TxHandle>(id: &Hash, tx: &Tx) -> Result<Option<Edition>, crate::Error> {
+        let Some(primary_key) =
+            Table::EditionsByHash.get(tx, id.as_ref(), |v| Ok(v.to_vec()))?
+        else {
+            return Ok(None);
+        };
+        Table::Editions.get(tx, &primary_key, |v| {
+            bincode::deserialize::<Edition>(v).map_err(crate::Error::from)
+        })
     }
 
     /// Creates an announcement for this edition. Announcements can be shared with the
