@@ -155,8 +155,10 @@ Referer's HOST, not the path) has the necessary AccessRight.
 - The proxy's own admin: there is none. The proxy reads its config from
   CLI flags or a TOML file at startup and does not expose runtime
   configuration.
-- ACME endpoints (`/.well-known/acme-challenge/`) are part of the
-  `rustls-acme` flow; behave as expected.
+- The proxy obtains its TLS cert via ACME DNS-01 through the
+  configured DNS provider (`instant-acme` driver in
+  `proxy/src/wildcard.rs`). No HTTP-01 challenge endpoint is served;
+  `/.well-known/acme-challenge/` is unused.
 
 ### A peer hub or peer node over QUIC
 

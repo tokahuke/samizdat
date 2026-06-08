@@ -1,8 +1,9 @@
 //! Series admin API.
 //!
-//! Series content is served at `http://<base32-key>.localhost:<port>/<path>`
-//! by the dispatcher in `node/src/http/content.rs`. This module only carries
-//! the admin "list all known public keys" endpoint.
+//! Series content is served at
+//! `http://series-<base32-key>.localhost:<port>/<path>` by the dispatcher in
+//! `node/src/http/content.rs`. This module only carries the admin "list all
+//! known public keys" endpoint.
 
 use axum::routing::get;
 use axum::Router;

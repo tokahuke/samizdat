@@ -169,14 +169,6 @@ impl Node for HubAsNodeServer {
         .await
     }
 
-    // TODO(channel-id-binding): same class of bug as the client-facing
-    // `HubServer::recv_candidate`. Any connected partner hub can spray
-    // `recv_candidate` with random `ChannelId`s and inject candidates into the
-    // shared `candidate_channels` map, poisoning downstream client queries.
-    // The proper fix is to bind `channel_id` cryptographically (HMAC over
-    // `(client_addr, peer_id, server_secret)`) so peers can only deliver to
-    // channels they were legitimately assigned to. Tackled in a future pass
-    // alongside the equivalent client-facing path.
     async fn recv_candidate(
         self,
         _: context::Context,

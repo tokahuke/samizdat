@@ -442,9 +442,10 @@ async fn atomic_write(path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// HTTPS entrypoint for the wildcard-cert path. Mirrors
-/// `crate::acme::serve` but drives ACME DNS-01 through the configured
-/// provider instead of HTTP-01.
+/// HTTPS entrypoint for the wildcard-cert path. Drives ACME DNS-01
+/// through the configured provider to obtain a single wildcard cert
+/// covering `<root>` and `*.<root>`; the resulting cert is served via
+/// a `rustls::ServerConfig` on the TCP listener built below.
 pub async fn serve(
     dns: &crate::dns::DnsTopology,
     owner: &str,

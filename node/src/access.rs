@@ -195,8 +195,8 @@ impl Entity {
     /// in `entity_from_referrer` derive these from the Referer's HOST.
     ///
     /// Conventional values:
-    /// - `r#type = "_series"`, `identifier = "<base64-key>"`
-    /// - `r#type = "_identity"`, `identifier = "~<handle>"`
+    /// - `r#type = "_series"`, `identifier = "<base32-key>"`
+    /// - `r#type = "_identity"`, `identifier = "<handle>"`
     pub fn new(r#type: impl Into<String>, identifier: impl Into<String>) -> Entity {
         Entity {
             r#type: r#type.into(),
@@ -206,8 +206,8 @@ impl Entity {
 
     /// Parses an Entity from a path string used by the `/_auth/<tail>`
     /// admin routes. Admin scripts identify an entity by writing its
-    /// path-form (e.g. `_series/<key>` or `~handle`). Returns None if the
-    /// tail does not have at least one non-empty segment.
+    /// path-form (e.g. `_series/<base32-key>` or `<handle>`). Returns
+    /// None if the tail does not have at least one non-empty segment.
     pub fn from_path(path: &str) -> Option<Entity> {
         let mut split = path.split('/');
         let mut r#type = split.next()?;
