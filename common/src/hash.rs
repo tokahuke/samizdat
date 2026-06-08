@@ -17,9 +17,14 @@ pub struct Hash(pub [u8; HASH_LEN]);
 impl FromStr for Hash {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Hash, crate::Error> {
-        let bytes = crate::encoding::base32_lc()
-            .decode(s.as_bytes())
-            .map_err(|err| format!("hash is not valid base32 lowercase: {err}"))?;
+        // Canonical (base32 lowercase) first; fall back to base64-url
+        // for legacy on-network data (old inventories, pre-base32
+        // shared links). Both produce the same 28 bytes.
+        let bytes = match crate::encoding::base32_lc().decode(s.as_bytes()) {
+            Ok(b) => b,
+            Err(_) => base64_url::decode(s)
+                .map_err(|err| format!("hash is neither base32 lc nor base64-url: {err}"))?,
+        };
         Ok(Hash(bytes.try_into().map_err(|e: Vec<_>| {
             format!("expected {HASH_LEN} bytes; got {}", e.len())
         })?))
