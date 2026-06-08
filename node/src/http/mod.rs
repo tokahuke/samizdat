@@ -174,14 +174,35 @@ fn api() -> Router {
     use tower::ServiceBuilder;
     use tower_http::set_header::SetResponseHeaderLayer;
 
-    // Admin-only protections. Refuse to be framed: admin endpoints (the
-    // welcome page, `/_register`, etc.) must not be embeddable by any
-    // other origin. Closes the clickjacking surface against the
-    // trusted-context grant flow.
+    // Admin-only protections.
+    //
+    // * `X-Frame-Options: DENY` refuses to be framed; closes the
+    //   clickjacking surface against the consent grant flow.
+    // * `Content-Security-Policy` locks the admin origin to same-origin
+    //   resources only. The admin host serves samizdat's own UI
+    //   (welcome page, `/_register`, `/_doctor`, JSON APIs) -- no
+    //   author-uploaded content runs here -- so a strict policy costs
+    //   nothing. `'unsafe-inline'` is allowed for the inline scripts
+    //   and styles inside samizdat's own templates; tightening that to
+    //   hash- or nonce-based is a followup if those templates stop
+    //   being touched.
     let admin_layers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             http::header::X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            http::header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'none'; \
+                 script-src 'self' 'unsafe-inline'; \
+                 style-src 'self' 'unsafe-inline'; \
+                 connect-src 'self'; \
+                 img-src 'self' data:; \
+                 form-action 'self'; \
+                 frame-ancestors 'none'; \
+                 base-uri 'none'",
+            ),
         ))
         .layer(axum::middleware::from_fn(require_bare_host));
 
