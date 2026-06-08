@@ -130,41 +130,58 @@ impl WildcardCertManager {
 
     /// Run forever, renewing the cert when it approaches expiry. Spawn
     /// this into the runtime; never returns under normal operation.
+    ///
+    /// Check-then-sleep ordering: a proxy restarted with a cert already
+    /// inside the renewal window starts renewing immediately rather than
+    /// waiting `RENEWAL_TICK` (12h) first. Sleep has random jitter so a
+    /// fleet of proxies started together does not all hit Let's Encrypt
+    /// at the same wall-clock offset.
     pub async fn run_renewal(self: Arc<Self>) {
         loop {
-            sleep(RENEWAL_TICK).await;
             let _self_ref = &*self;
-            match self.read_meta().await {
+            let needs_renewal = match self.read_meta().await {
                 Ok(Some(meta)) => {
                     let remaining = meta.not_after.signed_duration_since(Utc::now());
                     let renewal_window = chrono::Duration::from_std(RENEWAL_WINDOW)
                         .expect("renewal window fits chrono duration");
                     if remaining > renewal_window {
-                        continue;
-                    }
-                    if remaining < chrono::Duration::days(7) {
-                        error!(
-                            "wildcard cert expires in {} days, renewal pending",
-                            remaining.num_days()
-                        );
+                        false
                     } else {
-                        info!(
-                            "wildcard cert expires in {} days, renewing now",
-                            remaining.num_days()
-                        );
+                        if remaining < chrono::Duration::days(7) {
+                            error!(
+                                "wildcard cert expires in {} days, renewal pending",
+                                remaining.num_days()
+                            );
+                        } else {
+                            info!(
+                                "wildcard cert expires in {} days, renewing now",
+                                remaining.num_days()
+                            );
+                        }
+                        true
                     }
                 }
                 Ok(None) => {
                     warn!("no wildcard cert metadata on disk; issuing now");
+                    true
                 }
                 Err(err) => {
                     error!("could not read wildcard cert metadata: {err}; renewing anyway");
+                    true
+                }
+            };
+
+            if needs_renewal {
+                if let Err(err) = self.run_issuance().await {
+                    error!("wildcard cert renewal failed: {err}; will retry next tick");
                 }
             }
 
-            if let Err(err) = self.run_issuance().await {
-                error!("wildcard cert renewal failed: {err}; will retry next tick");
-            }
+            // Jitter the wait so a fleet of proxies booted together
+            // does not stampede the ACME directory at the same wall-
+            // clock offset. Up to 1h of extra delay; cheap insurance.
+            let jitter = Duration::from_secs(rand::random::<u64>() % 3600);
+            sleep(RENEWAL_TICK + jitter).await;
         }
     }
 

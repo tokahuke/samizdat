@@ -61,8 +61,14 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
             loop {
                 tracing::info!("connection reset triggered");
 
+                // Publish "disconnected" so concurrent readers get
+                // `None` (and respond "Not yet connected" promptly)
+                // instead of parking on the writer while we sleep
+                // through backoff. The write is brief; subsequent
+                // attempts run without any lock held.
+                *task_current.write().await = None;
+
                 let mut backoff = backoff_factory();
-                let mut lock = task_current.write().await;
                 let (connection, reset) = 'inner: loop {
                     match connect().await {
                         Ok(success) => {
@@ -78,8 +84,11 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
                     }
                 };
 
-                *lock = Some(connection);
-                drop(lock);
+                // Briefly take the writer to publish the new
+                // connection, then drop it before awaiting reset so
+                // queries against the now-live connection get the
+                // read lock immediately.
+                *task_current.write().await = Some(connection);
                 reset.await;
                 task_status.store(ConnectionStatus::Reconnecting as u8, Ordering::Relaxed);
             }

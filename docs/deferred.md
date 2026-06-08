@@ -152,6 +152,65 @@ The entry self-flagged: "Only matters if the proxy is ever
 pointed at a remote node; loopback-only deployments do not
 need it." Today's only deployment is loopback-only.
 
+### `Message<T>.validation` field at `common/src/riddles.rs:13-18`
+
+The struct carries a `validation: u16` initialised to zero. A
+fresh-eyes audit will spot it, conclude it does nothing, and
+propose deletion. AES-GCM-SIV's AEAD already authenticates the
+payload; the constant-zero byte adds nothing. *But* deletion is
+a wire-format break (bincode is positional) for zero functional
+gain. Same shape as the H9 channel-id-binding antibody. Leave
+it in place across protocol breaks; only consider removing if a
+larger riddle redesign forces a wire bump anyway.
+
+### `ChannelId::random` / `Hash::rand` panic on `getrandom` failure
+
+`common/src/address.rs:36-40` and `common/src/hash.rs:96-100`
+both `.expect("getrandom failed")`. An audit will recommend
+returning `Result` for graceful degradation. But a failed
+`getrandom(2)` means the kernel CSPRNG is dead, in which case
+every other crypto primitive in the process is also unsafe to
+run. The panic is the correct shape; propagating would force
+unreachable error handling at every call site.
+
+### `node_server::LAST_REFRESH_ATTEMPT` GC polarity
+
+`node/src/system/node_server.rs:28-48`. An audit will claim
+"GC only fires on the accepted path; rejected attempts leak
+entries forever." Read the polarity: the map is only *inserted
+into* on the accepted path (line 41). Rejected attempts take
+the early `return false` at line 38 without writing. The GC
+covers every insertion path; there is no leak.
+
+### `IdentityProvider::set_endpoint` "race" with in-flight reads
+
+`node/src/identity_dapp/mod.rs:96-145`. The struct holds a
+`tokio::sync::RwLock<Contract<...>>`. An audit will worry that
+`set_endpoint` (writer) and a concurrent `get()` (reader) race
+on observability of the swap. `tokio::sync::RwLock` already
+guarantees the writer awaits all readers; the swap is atomic
+from any reader's perspective. Platform guarantee, not a bug.
+
+### `Statistics` lock ordering vs LMDB writes
+
+`hub/src/rpc/node_sampler.rs:158-177`. An audit will claim
+"RwLock writer is held across a blocking LMDB write," citing
+the `self.log()` call near `acquire-then-write`. Read the
+bracket order: `start_request` calls `self.log()` *before* the
+lock; `end_request_with_success` calls `drop(lock)` *before*
+`self.log()`. The LMDB write never runs under the lock. The
+comment at line 159 says so explicitly; trust it.
+
+### Route53 `wait_for_insync` "swallowing" timeout
+
+`proxy/src/dns/route53.rs:213-243`. The function logs a warn
+and returns on timeout instead of propagating an error. An
+audit will see this as a swallowed failure. The docstring
+declares it intentional: ACME's own outer poll loop catches
+the case where DNS never converges. Returning `Err` here
+would just bubble through to an outer retry that does the
+same thing. Cooperative timeout coordination, not a bug.
+
 ## Under-audited areas (known unknowns)
 
 The second pass mapped the node-hub lifecycle, the protocol, and

@@ -371,7 +371,6 @@ impl Droppable for ObjectRef {
 
         Table::ObjectStatistics.delete(tx, self.hash)?;
         Table::ObjectMetadata.delete(tx, self.hash)?;
-        Table::ObjectMetadata.delete(tx, self.hash)?;
         Table::Objects.delete(tx, self.hash)?;
 
         Ok(())
@@ -815,7 +814,7 @@ impl ObjectRef {
         writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(ContentStream {
-            hashes: Box::pin(stream::iter(metadata.hashes.clone().into_iter().map(Ok))),
+            hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
             is_error: false,
             skip_header,
         }))
