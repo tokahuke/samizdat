@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use anyhow::Context;
 use tabled::Tabled;
 
-use samizdat_common::host_label::encode_key_to_host_label;
 use samizdat_common::{Key, PrivateKey};
 
 use super::show_table;
@@ -134,7 +133,7 @@ pub async fn ls(nickname: Option<String>) -> Result<(), anyhow::Error> {
 
     fn row_from(owner: api::PostSeriesOwnerResponse) -> Row {
         let public_key: Key = owner.keypair.verifying_key().into();
-        let host_label = encode_key_to_host_label(&public_key);
+        let host_label = format!("series-{public_key}");
         Row {
             nickname: owner.nickname,
             public_key,

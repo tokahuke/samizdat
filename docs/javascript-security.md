@@ -52,12 +52,16 @@ the structural single-origin lumping that web platform contracts care about.
 
 ## The single-origin problem
 
-Every series, every identity, every page served by the node lives at one
-origin: `http://127.0.0.1:4510`. The routes are path-segmented (`/~bank/`,
-`/~news/`, `/_series/<key>/...`) but the *origin* is shared. The proxy
-flattens things similarly: every series and identity is reachable through
-`https://proxy.hubfederation.com/...`, so the proxy origin too lumps
-everything into one.
+The historical shape: every series, every identity, every page served by
+the node lived at one origin (`http://127.0.0.1:4510`), with the proxy
+mirroring the lumping under `https://proxy.hubfederation.com/...`.
+Inside one origin, web platform contracts treat the contents as one
+application. The typed-subdomain dispatcher closes this on both
+surfaces: each entity gets its own subdomain origin, and the storage,
+service-worker, cookie, and same-origin partitioning that the web
+platform provides per-origin now lines up with the access-control model
+Samizdat has in mind. T1, T9, T10, T15 below are the residual write-ups
+of the closed surface; the structural analysis is kept for context.
 
 Inside one origin, web platform contracts treat the contents as one
 application. Concretely, every Samizdat-served page sees the same:
@@ -78,15 +82,12 @@ resources without a cross-origin barrier. The path-based "entity" the auth
 layer extracts from the `Referer` is an authorization concept; it is *not*
 a same-origin policy.
 
-The redesign that closes this at the root is per-series subdomain
-isolation. A series at public key K could be served at
-`<base64(K)>.localhost:4510` and an identity at
-`<handle>.localhost:4510`. Browsers treat each subdomain of `localhost`
-as a separate origin for the purposes of storage, service workers,
-cookies, and CORS. This is a structural change to URL routing and to
-relative-link semantics in published content, but it is the only fix that
-makes the browser web platform agree with the access-control model
-Samizdat already has in mind.
+The typed-subdomain dispatcher lands that boundary: each entity is
+served at its own subdomain (`series-<key>.<root>`, `<identity>.<root>`,
+etc.) on both the node and the proxy. Browsers treat each subdomain as
+a separate origin for storage, service workers, cookies, and CORS, so
+the access-control model the auth layer always assumed now matches the
+web platform's contract.
 
 ## Threats
 
@@ -110,13 +111,11 @@ controlling their own series.
 (`node/src/http/host_scope.rs` + the host-based content router in
 `node/src/http/mod.rs`); admin endpoints live on a different origin
 (bare loopback) so the worker cannot reach them even with CORS open
-unless an explicit ManageSeries grant exists for that entity. **NB:
-reopened at the proxy**: `proxy.hubfederation.com` serves every series
-under one origin, so service workers there ARE cross-series. See
-`docs/proxy-app-divergence.md`.
-**Fix** -- no further action required for local browsing; the
-proxy-side reopen needs per-subdomain isolation at the proxy
-(wildcard cert + DNS), tracked in `docs/proxy-app-divergence.md`.
+unless an explicit ManageSeries grant exists for that entity.
+**Closed hierarchy-wide** by the typed-subdomain refactor: the proxy
+now speaks the same prefix-label dispatch as the node, so each entity
+has its own browser origin on both surfaces.
+**Fix** -- none required.
 
 ### T2. Page on samizdat-served origin reads admin/read tokens via fetch
 **Vector** -- A page on a series subdomain calls `fetch('/_register?
@@ -326,11 +325,11 @@ isolation landed; the attack is now no different from any cross-origin
 `<script src>` on the open web.
 **Mitigation in place** -- per-series origin isolation
 (`node/src/http/host_scope.rs`). Foreign scripts run opaque; no
-cross-series cookie or storage reach. **NB: reopened at the proxy**:
-under `proxy.hubfederation.com`, a sibling series' script is same-origin
-and DOES run with full access. See `docs/proxy-app-divergence.md`.
-**Fix** -- local browsing is structurally closed; the proxy-side reopen
-needs per-subdomain isolation at the proxy.
+cross-series cookie or storage reach.
+**Closed hierarchy-wide** by the typed-subdomain refactor: the proxy
+serves each series at its own subdomain, so a sibling series' script is
+cross-origin on the proxy as well.
+**Fix** -- none required.
 
 ### T10. Cache and Cache-Storage as persistent fingerprint
 **Vector** -- A page writes an entry to `caches.open('attacker').then(
@@ -346,12 +345,10 @@ cross-series correlation via this surface.
 **Severity** -- low. Reduced from medium once per-series origin
 isolation landed.
 **Mitigation in place** -- per-series origin isolation; cache and
-storage are partitioned per browser-origin. **NB: reopened at the
-proxy**: under `proxy.hubfederation.com` every series shares one
-Cache Storage and one localStorage, so cross-series correlation is
-trivial there. See `docs/proxy-app-divergence.md`.
-**Fix** -- local browsing is structurally closed; the proxy-side reopen
-needs per-subdomain isolation at the proxy.
+storage are partitioned per browser-origin.
+**Closed hierarchy-wide** by the typed-subdomain refactor: the proxy
+partitions cache and storage per entity too.
+**Fix** -- none required.
 
 ### T11. Persistent supply-chain via external `<script src=https://...>`
 **Vector** -- A subscribed series ships a page with
@@ -474,9 +471,10 @@ unmitigated piece.
 Better: when the proxy injects its own `proxy_page` rewrite
 (`proxy/src/http.rs:109`), inject the same security headers
 authoritatively so the proxy origin is hardened *independently* of what
-the node sent. The proxy origin is a single origin spanning all
-identities, which means single-origin problems (T1, T9) are even worse
-there; per-subdomain isolation at the proxy is essential too.
+the node sent. The per-entity origin split at the proxy
+(typed-subdomain refactor) removes the single-origin lumping that made
+T1/T9/T10/T15 worse on the proxy surface; the header-forwarding gap is
+the remaining piece of T14.
 
 ### T15. Identity vs path confusion
 **Vector** -- The address bar shows `~bank.example/login` while the
@@ -507,15 +505,14 @@ deception is the operator's own URL-bar manipulation within their own
 subdomain, which is what any web author can do on any website.
 **Mitigation in place** -- per-series origin isolation
 (`node/src/http/host_scope.rs`). `pushState` to a different
-`<key>.localhost` or `<identity>.localhost` is a cross-origin operation
-that the browser refuses. **NB: reopened at the proxy**: under
-`proxy.hubfederation.com` every series is same-origin, so `pushState`
-across entities works and identity-vs-path confusion returns. See
-`docs/proxy-app-divergence.md`.
-**Fix** -- local browsing is structurally closed; the proxy-side reopen
-needs per-subdomain isolation at the proxy. Phishing-styled identities
-are rejected at registration and at runtime by
+`series-<key>.<root>` or `<identity>.<root>` is a cross-origin operation
+that the browser refuses.
+**Closed hierarchy-wide** by the typed-subdomain refactor: the proxy
+also gives each entity its own subdomain, so cross-entity `pushState`
+is cross-origin on the proxy as well. Phishing-styled identities are
+rejected at registration and at runtime by
 `samizdat_common::identity::check_servable_identity`.
+**Fix** -- none required.
 
 ### T16. Proxy template writes a shared cross-series localStorage key
 **Vector** -- `proxy/templates/proxied-page.html.jinja:146-159` writes the
@@ -529,8 +526,10 @@ N page views; it was not intended as a cross-series surface.
 series viewed via the proxy. A malicious series can overwrite the
 counter, read prior values, or use the key as a side-channel beacon.
 **Severity** -- low. Bounded yield (one integer per browser profile).
-The proxy origin is already known to lump series (T1/T9/T10/T15
-reopens); this is a self-inflicted minor instance of that.
+The typed-subdomain refactor partitions `localStorage` per entity on
+the proxy too, so this counter now lives in a per-entity origin; the
+shared-key issue collapses to "every viewer of THIS series, this
+browser profile". Audit the template before relying on the new scoping.
 **Mitigation in place** -- none.
 **Fix** -- Move the counter into a sessionStorage entry namespaced by
 the request's entity, or drop the modal trigger entirely.
@@ -597,18 +596,15 @@ Still open:
   scope narrowing is not a fix because it would break legitimate
   Samizdat admin-tool web apps.
 - The proxy's GET-only / strip-Authorization / strip-Referer behaviour
-  is in `docs/threat-model.md` under "Proxy". The proxy-side
-  behavioural divergence from local browsing (T1/T9/T10/T15 reopens,
-  T16 shared key, T17 Google Fonts leak) is catalogued in
+  is in `docs/threat-model.md` under "Proxy". The remaining proxy-side
+  divergence from local browsing (HTTPS termination, donation-modal
+  template, Google Fonts) is catalogued in
   `docs/proxy-app-divergence.md`.
 - The hub-federation reflection primitive is `threat-model.md`'s "A
   peer node deep in the federation graph"; out of scope here.
 
 ## Open questions for Pedro
 
-- Wildcard cert at the proxy plus `*.proxy.hubfederation.com` DNS so
-  proxy-fronted pages also get per-series origin isolation. Closes
-  T1/T9/T10/T15 reopens and removes the lumping that drives T16.
 - Should the consent screen distinguish series-keyed entities
   (`_series/<base64-key>`) from identity-keyed entities
   (`_identity/~<handle>`) more visibly? Is prior-grant history a useful

@@ -311,12 +311,11 @@ pub async fn commit(
 
     let owner = api::get_series_owner(&nickname).await?;
     let public_key: samizdat_common::Key = owner.keypair.verifying_key().into();
-    let host_label = samizdat_common::host_label::encode_key_to_host_label(&public_key);
     let port = std::env::var("SAMIZDAT_PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(4510);
-    let url = format!("http://{host_label}.localhost:{port}/");
+    let url = format!("http://series-{public_key}.localhost:{port}/");
 
     #[derive(Tabled)]
     struct Row {

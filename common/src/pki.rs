@@ -135,7 +135,9 @@ pub struct Key(ed25519_dalek::VerifyingKey);
 impl FromStr for Key {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Key, crate::Error> {
-        let bytes = base64_url::decode(s)?;
+        let bytes = crate::encoding::base32_lc()
+            .decode(s.as_bytes())
+            .map_err(|err| format!("key is not valid base32 lowercase: {err}"))?;
 
         Ok(Key(ed25519_dalek::VerifyingKey::from_bytes(
             &bytes[..]
@@ -150,13 +152,13 @@ impl FromStr for Key {
 
 impl Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        write!(f, "{}", crate::encoding::base32_lc().encode(self.0.as_bytes()))
     }
 }
 
 impl Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", base64_url::encode(&self.0))
+        write!(f, "{}", crate::encoding::base32_lc().encode(self.0.as_bytes()))
     }
 }
 

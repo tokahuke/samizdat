@@ -7,7 +7,6 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use mime::Mime;
-use samizdat_common::host_label::is_base32_key_label;
 use samizdat_common::identity::check_servable_identity;
 
 use crate::cli::cli;
@@ -82,16 +81,6 @@ async fn wildcard_dispatch(
     }
 }
 
-/// Outcome of inspecting the `Host` header in wildcard mode.
-enum WildcardHost<'a> {
-    /// Host equals the configured wildcard root: forward verbatim to
-    /// the node's bare host.
-    Bare,
-    /// Host is `<sub>.<wildcard_root>`: forward to the matching
-    /// subdomain on the node.
-    Sub(&'a str),
-}
-
 async fn do_wildcard_dispatch(
     wildcard_root: &str,
     headers: &HeaderMap,
@@ -107,16 +96,29 @@ async fn do_wildcard_dispatch(
     };
     let wildcard_root_lc = wildcard_root.to_ascii_lowercase();
 
-    let classified = if host == wildcard_root_lc {
-        WildcardHost::Bare
+    let sub = if host == wildcard_root_lc {
+        None
     } else if let Some(prefix) = host.strip_suffix(&format!(".{wildcard_root_lc}")) {
         if prefix.is_empty() || prefix.contains('.') {
             return Ok(bad_request("untrusted host"));
         }
-        WildcardHost::Sub(prefix)
+        Some(prefix)
     } else {
         return Ok(bad_request("untrusted host"));
     };
+
+    // Validate the subdomain shape: bare, one of the four type-prefix
+    // forms, or a servable identity. The label itself is forwarded
+    // verbatim; the node's own classifier re-parses the prefix.
+    if let Some(label) = sub {
+        let known_prefix = label.starts_with("series-")
+            || label.starts_with("object-")
+            || label.starts_with("collection-")
+            || label.starts_with("edition-");
+        if !known_prefix && check_servable_identity(label).is_err() {
+            return Ok(bad_request("untrusted host"));
+        }
+    }
 
     // Path + query (axum's `OriginalUri.path()` does NOT include the
     // query string; reconstruct from `path_and_query`).
@@ -133,21 +135,12 @@ async fn do_wildcard_dispatch(
     let node = node_base()
         .ok_or_else(|| anyhow::anyhow!("invalid --node URL: {}", cli().node))?;
 
-    let upstream = match classified {
-        WildcardHost::Bare => format!("{}{}", cli().node, path_and_query),
-        WildcardHost::Sub(sub) => {
-            let label = if is_base32_key_label(sub) {
-                sub.to_owned()
-            } else if check_servable_identity(sub).is_ok() {
-                sub.to_owned()
-            } else {
-                return Ok(bad_request("untrusted host"));
-            };
-            format!(
-                "{}://{}.{}{}{}",
-                node.scheme, label, node.host, node.port_part, path_and_query
-            )
-        }
+    let upstream = match sub {
+        None => format!("{}{}", cli().node, path_and_query),
+        Some(label) => format!(
+            "{}://{}.{}{}{}",
+            node.scheme, label, node.host, node.port_part, path_and_query
+        ),
     };
 
     let response = CLIENT.get(upstream).send().await?;

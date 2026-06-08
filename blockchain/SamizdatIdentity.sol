@@ -190,6 +190,10 @@ contract SamizdatIdentityV1 {
     // Reserved labels rejected as identities. Match the list in
     // `common/src/identity.rs`. Stored as keccak256 digests so the lookup
     // is one hash per candidate rather than a string compare loop.
+    // The four type-marker words (`object`, `series`, `collection`,
+    // `edition`) are reserved because the proxy's typed-subdomain
+    // dispatch routes `<type>-<id>.<host>` to a content-typed origin;
+    // a bare `<type>` identity would shadow that namespace.
     function _isReservedLabel(bytes32 h) private pure returns (bool) {
         return
             h == keccak256("localhost") ||
@@ -200,7 +204,51 @@ contract SamizdatIdentityV1 {
             h == keccak256("invalid") ||
             h == keccak256("localhost4") ||
             h == keccak256("localhost6") ||
-            h == keccak256("samizdat");
+            h == keccak256("samizdat") ||
+            h == keccak256("object") ||
+            h == keccak256("series") ||
+            h == keccak256("collection") ||
+            h == keccak256("edition");
+    }
+
+    // Rejects identities whose bytes start with `<type>-` where `<type>`
+    // is one of the four content-type marker words and at least one more
+    // byte follows the hyphen. These shapes collide with the typed
+    // subdomain dispatch (`object-<hash>.<host>`, `series-<key>.<host>`,
+    // `collection-<hash>.<host>`, `edition-<hash>.<host>`). Hand-coded
+    // byte comparisons; Solidity has no regex.
+    function _hasReservedTypePrefix(bytes memory b) private pure returns (bool) {
+        uint256 n = b.length;
+        // "object-X": needs at least 8 bytes.
+        if (n >= 8 &&
+            b[0] == 0x6F && b[1] == 0x62 && b[2] == 0x6A &&
+            b[3] == 0x65 && b[4] == 0x63 && b[5] == 0x74 &&
+            b[6] == 0x2D) {
+            return true;
+        }
+        // "series-X": needs at least 8 bytes.
+        if (n >= 8 &&
+            b[0] == 0x73 && b[1] == 0x65 && b[2] == 0x72 &&
+            b[3] == 0x69 && b[4] == 0x65 && b[5] == 0x73 &&
+            b[6] == 0x2D) {
+            return true;
+        }
+        // "collection-X": needs at least 12 bytes.
+        if (n >= 12 &&
+            b[0] == 0x63 && b[1] == 0x6F && b[2] == 0x6C &&
+            b[3] == 0x6C && b[4] == 0x65 && b[5] == 0x63 &&
+            b[6] == 0x74 && b[7] == 0x69 && b[8] == 0x6F &&
+            b[9] == 0x6E && b[10] == 0x2D) {
+            return true;
+        }
+        // "edition-X": needs at least 9 bytes.
+        if (n >= 9 &&
+            b[0] == 0x65 && b[1] == 0x64 && b[2] == 0x69 &&
+            b[3] == 0x74 && b[4] == 0x69 && b[5] == 0x6F &&
+            b[6] == 0x6E && b[7] == 0x2D) {
+            return true;
+        }
+        return false;
     }
 
     // Refuses identities the node cannot serve at a `<identity>.localhost`
@@ -214,6 +262,8 @@ contract SamizdatIdentityV1 {
     //   - Not all digits (numeric host ambiguity).
     //   - Not a 52-char base32 key shape (a-z, 2-7 only); would shadow
     //     a series-key subdomain.
+    //   - Not a `<type>-<rest>` shape where `<type>` is one of the four
+    //     content-type marker words; would shadow typed subdomain dispatch.
     function _validateIdentity(string calldata identity) private pure {
         bytes memory b = bytes(identity);
         uint256 n = b.length;
@@ -259,6 +309,10 @@ contract SamizdatIdentityV1 {
         }
 
         require(!_isReservedLabel(keccak256(b)), "Identity is a reserved label");
+        require(
+            !_hasReservedTypePrefix(b),
+            "Identity must not start with a content-type marker followed by '-'"
+        );
     }
 
     // Register an association (or update an existing one) with a TTL of 1 hour.

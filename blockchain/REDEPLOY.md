@@ -5,6 +5,11 @@ identity registrations that no samizdat node can serve at a
 `<identity>.localhost:<port>` subdomain. The validation rules mirror the
 runtime helper at `common/src/identity.rs::check_servable_identity`.
 
+- Reserved: added the four content-type marker words (`object`, `series`,
+  `collection`, `edition`) to the reserved-label set and rejected any
+  identity starting with `<type>-` for any of those four words; mirrors
+  the typed-subdomain dispatch added on the proxy side.
+
 **The live deployment is unchanged.** New registrations on-chain are still
 accepted by the existing contract bytecode for any non-empty string not
 starting with `_`. Until this contract is redeployed, the runtime checks in

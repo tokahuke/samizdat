@@ -9,14 +9,16 @@
 //! to a series key by the node, but they cannot themselves be the host part
 //! of a content URL.
 //!
+//! Identities also cannot start with a typed-subdomain marker prefix
+//! (`object-`, `series-`, `collection-`, `edition-`); those collide with the
+//! prefix-label dispatch used to address entities by hash or key.
+//!
 //! `blockchain/SamizdatIdentity.sol` (the contract source) was tightened to
 //! reject the same shapes in `registerWithTtl`; the live deployment is
 //! unchanged until redeployed. See `blockchain/REDEPLOY.md`. Until that
 //! happens this module is the only line of defense against new garbage
 //! registrations, and it remains the only defense against pre-redeploy
 //! garbage forever.
-
-use crate::host_label::KEY_HOST_LABEL_LEN;
 
 /// Why a candidate identity handle is unservable as a subdomain.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -36,14 +38,13 @@ pub enum Reason {
     Reserved,
     #[error("identity is all digits; reserved against numeric host ambiguity")]
     AllNumeric,
-    /// Length and alphabet exactly match a 52-char base32 series-key label;
-    /// would collide with key-vs-identity dispatch in
-    /// `node/src/http/host_scope.rs`.
+    /// Carries the offending type-marker word so the error message tells the
+    /// user which prefix triggered the rejection.
     #[error(
-        "identity matches the 52-character base32 series-key shape and would \
-         collide with key-based subdomain dispatch"
+        "identity starts with the reserved type prefix '{0}-'; that namespace is \
+         used to address objects, series, collections, and editions by hash"
     )]
-    KeyShape,
+    TypePrefix(&'static str),
 }
 
 fn bad_byte_message(b: u8) -> String {
@@ -61,8 +62,8 @@ fn bad_byte_message(b: u8) -> String {
 }
 
 /// Labels that must never be registerable as identities because they would
-/// shadow or be confused with infrastructure / reserved-tld names. The list
-/// mirrors what the amended `SamizdatIdentity.sol` rejects on-chain.
+/// shadow or be confused with infrastructure / reserved-tld names, or with
+/// the typed-subdomain marker words used by the dispatch layer.
 const RESERVED_LABELS: &[&str] = &[
     "localhost",
     "local",
@@ -73,7 +74,16 @@ const RESERVED_LABELS: &[&str] = &[
     "localhost4",
     "localhost6",
     "samizdat",
+    "object",
+    "series",
+    "collection",
+    "edition",
 ];
+
+/// Type-marker prefixes used by the dispatch layer. An identity matching
+/// `<word>-<anything>` collides with the prefix-label hash/key dispatch and
+/// is rejected here.
+const RESERVED_TYPE_PREFIXES: &[&str] = &["object", "series", "collection", "edition"];
 
 /// Returns `Ok` iff `s` is a "servable identity" for subdomain hosting.
 /// Stricter than the smart contract; see the module docstring for the
@@ -110,12 +120,15 @@ pub fn check_servable_identity(s: &str) -> Result<(), Reason> {
         return Err(Reason::AllNumeric);
     }
 
-    // Collision with the 52-char base32 key shape. The base32 lowercase
-    // alphabet [a-z2-7] is a strict subset of the [a-z0-9-] we accept above,
-    // so the check is just length + digit-restriction.
-    if s.len() == KEY_HOST_LABEL_LEN && bytes.iter().all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'))
-    {
-        return Err(Reason::KeyShape);
+    for prefix in RESERVED_TYPE_PREFIXES {
+        // Match `<prefix>-<at least one more byte>`. The trailing-hyphen guard
+        // above already rejects `<prefix>-` with no body.
+        if s.len() > prefix.len() + 1
+            && s.as_bytes().starts_with(prefix.as_bytes())
+            && s.as_bytes()[prefix.len()] == b'-'
+        {
+            return Err(Reason::TypePrefix(prefix));
+        }
     }
 
     Ok(())
@@ -202,13 +215,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_key_shape_collision() {
-        // 52 chars, all in base32 lowercase alphabet [a-z2-7].
-        let collision = "a".repeat(KEY_HOST_LABEL_LEN);
-        assert_eq!(check_servable_identity(&collision), Err(Reason::KeyShape));
-        // 52 chars containing a digit outside [2-7] passes (8 is not base32).
-        let mut not_collision = "a".repeat(KEY_HOST_LABEL_LEN - 1);
-        not_collision.push('8');
-        assert!(check_servable_identity(&not_collision).is_ok());
+    fn accepts_52_char_base32_now_that_keyshape_is_gone() {
+        // The prefix-label dispatch keeps series keys under `series-<key>`,
+        // so a bare 52-char base32 string can register as an identity.
+        let s = "a".repeat(52);
+        assert!(check_servable_identity(&s).is_ok());
+    }
+
+    #[test]
+    fn rejects_type_prefix() {
+        for prefix in RESERVED_TYPE_PREFIXES {
+            let candidate = format!("{prefix}-something");
+            assert_eq!(
+                check_servable_identity(&candidate),
+                Err(Reason::TypePrefix(prefix)),
+                "expected TypePrefix rejection for {candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_type_prefix_without_hyphen() {
+        // `objectalike` does not collide with `object-<hash>` dispatch.
+        assert!(check_servable_identity("objectalike").is_ok());
     }
 }

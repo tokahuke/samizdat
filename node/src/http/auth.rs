@@ -14,8 +14,8 @@ use serde_derive::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
-use samizdat_common::host_label::{decode_host_label_to_key, is_base32_key_label};
 use samizdat_common::identity::check_servable_identity;
+use samizdat_common::Key;
 
 use crate::access::{admin_token, read_token, AccessRight, Entity, TokenScope};
 use crate::db::Table;
@@ -240,11 +240,23 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
             return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
         }
 
-        if is_base32_key_label(subdomain) {
-            let key = decode_host_label_to_key(subdomain).map_err(|err| {
-                SecurityScopeRejection::NotAnEntity(format!("bad key label `{subdomain}`: {err}"))
+        if let Some(key_str) = subdomain.strip_prefix("series-") {
+            let key: Key = key_str.parse().map_err(|err| {
+                SecurityScopeRejection::NotAnEntity(format!(
+                    "bad series key in subdomain `{subdomain}`: {err}"
+                ))
             })?;
             return Ok(Entity::new("_series", key.to_string()));
+        }
+
+        // Content-addressed subdomains (object-/collection-/edition-) have
+        // no per-entity admin scope; the page can read its own bytes but
+        // grants nothing.
+        if subdomain.starts_with("object-")
+            || subdomain.starts_with("collection-")
+            || subdomain.starts_with("edition-")
+        {
+            return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
         }
 
         check_servable_identity(subdomain)
