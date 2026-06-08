@@ -11,7 +11,9 @@ use samizdat_common::Key;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
-use crate::models::{Subscription, SubscriptionKind, SubscriptionRef};
+use crate::models::{
+    BookmarkType, SeriesRef, Subscription, SubscriptionKind, SubscriptionRef,
+};
 use crate::security_scope;
 
 /// The entrypoint of the subscriptions API.
@@ -62,14 +64,35 @@ pub fn api() -> Router {
             .layer(security_scope!(AccessRight::ManageSubscriptions)),
         )
         .route(
-            // Removes a subscription.
+            // Removes a subscription. Atomically releases the Reference
+            // bookmarks `SeriesRef::advance` placed on the subscribed
+            // series's last edition; without this the vacuum cannot
+            // reclaim the storage after an unsubscribe.
             "/{key}",
             delete(|Path(public_key): Path<String>| {
                 async move {
                     let public_key: Key = public_key.parse()?;
-                    let subscription = SubscriptionRef::new(public_key);
-                    let existed = readonly_tx(|tx| subscription.get(tx))?.is_some();
-                    subscription.drop_if_exists()?;
+                    let subscription = SubscriptionRef::new(public_key.clone());
+                    let series = SeriesRef::new(public_key);
+
+                    let existed = writable_tx(|tx| {
+                        let existed = subscription.exists(tx)?;
+                        if !existed {
+                            return Ok(false);
+                        }
+
+                        if let Some(edition) = series.get_last_edition(tx)? {
+                            let objects: Vec<_> =
+                                edition.collection().list_objects(tx)?.collect();
+                            for object in objects {
+                                object?.bookmark(BookmarkType::Reference).unmark(tx)?;
+                            }
+                        }
+
+                        subscription.drop_if_exists_with(tx)?;
+                        Ok(true)
+                    })?;
+
                     Ok(existed)
                 }
                 .map(ApiResponse)

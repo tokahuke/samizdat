@@ -32,32 +32,34 @@ throttle, or the hub admin's loopback-only binding. The antibodies
 below preserve the trace so a future audit pass does not refile
 them.)
 
-## Subscription eager-fetch is silent + non-bookmarked
+## Subscription eager-fetch is silent
 
 `Edition::refresh` in `node/src/models/series.rs` spawns
 `hubs().query_with_retry(...)` for each item in a new edition's
-inventory and discards the `JoinHandle` (`.map(|_| ())`). Two
-consequences seen in practice on the testbed:
+inventory and discards the `JoinHandle` (`.map(|_| ())`). When the
+publisher node goes offline between announcement and the eager fetch
+landing (e.g. a `publish-get-samizdat` CI run that exits the moment
+its `Wait for testbed to mirror` step passes), some objects never
+arrive at the subscriber. No log line marks the per-item failure, so
+the partial mirror is invisible until a client tries to fetch and the
+on-demand query also fails (no peer has the bytes either).
 
-1. When the publisher node goes offline between announcement and the
-   eager fetch landing (e.g. a `publish-get-samizdat` CI run that
-   exits the moment its `Wait for testbed to mirror` step passes),
-   some objects never arrive at the subscriber. No log line marks
-   the per-item failure, so the partial mirror is invisible until a
-   client tries to fetch and the on-demand query also fails (no
-   peer has the bytes either).
-2. Subscription-fetched objects are not bookmarked. Vacuum keys its
-   keep-or-drop decision on `is_bookmarked`; once storage crosses
-   the `max_storage` budget, recently-mirrored content can be
-   dropped under usefulness pressure even though the subscription
-   is still active.
+Fix: log per-item eager-fetch outcomes (`Some(_)` / `None`) so partial
+mirrors are visible in `journalctl -u samizdat-node`. Small.
 
-Fixes worth doing together:
-- Log per-item eager-fetch outcomes (`Some(_)`/`None`) so partial
-  mirrors are visible in `journalctl -u samizdat-node`.
-- Add a `BookmarkType::Subscription` (or similar) and apply it to
-  each object the subscription fetches. Drop the bookmark when the
-  subscription is dropped or when an edition is superseded.
+Vacuum protection is already handled: `SeriesRef::advance`
+Reference-bookmarks every inventory item of the new edition at
+advance time (`series.rs:414-426`, labelled "B4: Bookmark
+accounting"). Earlier framing of this entry claimed subscription
+content was non-bookmarked -- wrong. The `BookmarkType::Subscription`
+suggestion was overengineering a problem that doesn't exist.
+
+Related but separate gap, surfaced while re-reading: dropping a
+subscription does not release the Reference bookmarks placed by past
+advances. Without a subsequent advance, the bookmarks stay forever.
+Not a bug today (subscriptions are rarely dropped) but the pinner
+control plane will need a "drop subscription + walk last edition +
+unbookmark" admin action; see `docs/roadmap.md`.
 
 Surfaced on 2026-06-08 while debugging intermittent 404s on
 `series-v5bk....hubfederation.com/latest/install.sh` after a
