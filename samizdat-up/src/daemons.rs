@@ -46,16 +46,23 @@ pub const PROXY: Daemon = Daemon {
     default_config: include_str!("../defaults/proxy.toml"),
 };
 
-pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY];
+pub const PINNER: Daemon = Daemon {
+    name: "pinner",
+    bin: "samizdat-pinner",
+    description: "Samizdat Pinner",
+    default_config: include_str!("../defaults/pinner.toml"),
+};
+
+pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY, &PINNER];
 
 /// Every Samizdat binary samizdat-up knows how to install or query.
-/// Includes the three daemons plus the CLI (`samizdat`) and
-/// samizdat-up itself. Order is the order `samizdat-up versions`
-/// prints them.
+/// Includes the daemons plus the CLI (`samizdat`) and samizdat-up
+/// itself. Order is the order `samizdat-up versions` prints them.
 pub const KNOWN_BINARIES: &[&str] = &[
     "samizdat-node",
     "samizdat-hub",
     "samizdat-proxy",
+    "samizdat-pinner",
     "samizdat",
     "samizdat-up",
 ];
@@ -233,6 +240,13 @@ mod tests {
     }
 
     #[test]
+    fn systemd_unit_for_pinner_matches_golden() {
+        let actual = render_systemd_unit(&PINNER, None);
+        let golden = include_str!("../tests/golden/samizdat-pinner.service");
+        assert_eq!(actual, golden);
+    }
+
+    #[test]
     fn launchd_plist_for_node_matches_golden() {
         let actual = render_launchd_plist(&NODE, None);
         let golden = include_str!("../tests/golden/com.samizdat.node.plist");
@@ -254,9 +268,17 @@ mod tests {
     }
 
     #[test]
+    fn launchd_plist_for_pinner_matches_golden() {
+        let actual = render_launchd_plist(&PINNER, None);
+        let golden = include_str!("../tests/golden/com.samizdat.pinner.plist");
+        assert_eq!(actual, golden);
+    }
+
+    #[test]
     fn launchd_label_uses_reverse_dns() {
         assert_eq!(launchd_label(&NODE), "com.samizdat.node");
         assert_eq!(launchd_label(&HUB), "com.samizdat.hub");
         assert_eq!(launchd_label(&PROXY), "com.samizdat.proxy");
+        assert_eq!(launchd_label(&PINNER), "com.samizdat.pinner");
     }
 }

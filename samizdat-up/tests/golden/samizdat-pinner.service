@@ -1,0 +1,15 @@
+[Unit]
+Description=Samizdat Pinner
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+Environment=RUST_BACKTRACE=1
+ExecStart=/usr/local/bin/samizdat-pinner --config /etc/samizdat/pinner.toml
+
+[Install]
+WantedBy=multi-user.target

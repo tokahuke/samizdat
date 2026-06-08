@@ -1,0 +1,14 @@
+# Default samizdat-pinner config written by samizdat-up.
+# Edits to this file survive reinstalls (samizdat-up only writes the
+# default when the file does not already exist).
+
+data = "/var/lib/samizdat/pinner"
+node = "http://localhost:4510"
+port = 4512
+expiry_tick_seconds = 60
+
+# Shared API key required on `X-Api-Key` for every `/pin*` request.
+# Generate a long random string and distribute to customers out of band.
+# Leaving this commented makes every pin attempt return 401, which is
+# the right default for an unconfigured pinner.
+# api_key = "REPLACE_ME"

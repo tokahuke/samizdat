@@ -15,13 +15,14 @@ pub struct Cli {
 /// install as system services by default. `cli` is the user-facing
 /// `samizdat` command-line tool and is also pulled in implicitly when
 /// any daemon is installed (the daemon needs it for administration).
-/// `all` is shorthand for `node`, `hub`, and `proxy` (cli rides
-/// along).
+/// `all` is shorthand for every daemon (`node`, `hub`, `proxy`,
+/// `pinner`); cli rides along.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Component {
     Node,
     Hub,
     Proxy,
+    Pinner,
     Cli,
     All,
 }
@@ -33,8 +34,9 @@ impl Component {
             Component::Node => vec!["node"],
             Component::Hub => vec!["hub"],
             Component::Proxy => vec!["proxy"],
+            Component::Pinner => vec!["pinner"],
             Component::Cli => vec![],
-            Component::All => vec!["node", "hub", "proxy"],
+            Component::All => vec!["node", "hub", "proxy", "pinner"],
         }
     }
 }
