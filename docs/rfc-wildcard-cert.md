@@ -1,248 +1,177 @@
-# RFC: wildcard cert for the public proxy
+# RFC: wildcard TLS for the public proxy
 
 ## Status
 
-Draft. Author: leave the byline empty. Targeted release: post-0.3.x; this
-unlocks the proxy-side per-series-origin isolation that closes T1/T9/T10/T15
-reopens at `proxy.hubfederation.com` and folds T16 (shared proxy
-`localStorage` key).
+Draft. Author: leave the byline empty. Targeted release: post-0.3.x.
 
 ## Motivation
 
 `docs/proxy-app-divergence.md` catalogues four threats that reopen at the
 proxy origin because every series is served under one host
 (`proxy.hubfederation.com`). The structural fix is to serve each series under
-`<base32-key>.proxy.<domain>` and each identity under
-`<handle>.proxy.<domain>`, mirroring what `node/src/http/host_scope.rs`
-already does on the local node. That requires a wildcard TLS cert for
-`*.proxy.<domain>` plus a wildcard DNS record pointing at the proxy host.
+its own subdomain (`<base32-key>.proxy.<domain>` and
+`<identity>.proxy.<domain>`), mirroring what `node/src/http/host_scope.rs`
+already does on the local node. That requires TLS certs valid for those
+subdomains plus DNS that resolves them.
 
-ACME wildcard certs require the DNS-01 challenge (HTTP-01 cannot prove
-control of a wildcard). DNS-01 requires writing a `TXT` record at
-`_acme-challenge.proxy.<domain>` whenever Let's Encrypt asks for renewal.
-Writing that record means talking to the operator's DNS provider, and every
-provider has its own API. Coupling the proxy code to one provider is the
-"too coupled to do" cost.
+Constraint: an operator must be able to roll this out themselves with the
+minimum possible manual configuration. The earlier draft of this RFC
+proposed an ACME wildcard cert via DNS-01 challenge through an acme-dns
+shim. That plan required three operator-side steps (run acme-dns, set a
+CNAME in the real DNS, paste credentials into proxy config), each of which
+is a potential drop-off point. Below is a simpler plan that needs ONE
+operator step.
 
-## The agnostic-DNS-API question
+## Plan: on-demand HTTP-01 per subdomain
 
-The closest vendor-agnostic answer is **acme-dns**: a tiny purpose-built
-authoritative DNS server (open source, BSD, maintained) whose only job is to
-serve `TXT` records for the ACME DNS-01 challenge. The proxy talks to
-acme-dns's stable two-endpoint HTTP API instead of a per-provider SDK; the
-operator's real DNS provider stays out of the picture except for ONE
-permanent CNAME record.
+Use ACME HTTP-01 with on-demand cert provisioning per SNI. This is the
+"automatic HTTPS" pattern that Caddy popularized.
 
-Setup pattern:
+### Operator-facing flow
 
-1. Operator runs an acme-dns instance (or uses a trusted public one).
-2. Operator sets a one-time CNAME in their real DNS:
-   `_acme-challenge.proxy.<domain>` -> `<random>.auth.<acme-dns-host>`.
-3. The proxy stores acme-dns credentials (returned by acme-dns at
-   first-time `/register`) in its config and renews the wildcard cert
-   on schedule by `POST`ing to acme-dns's `/update`.
+1. Operator sets one wildcard DNS record:
+   `*.proxy.<their-domain>` -> proxy host IP (A/AAAA).
+2. Operator starts the proxy. That is the whole setup.
 
-This works regardless of whether the operator's main zone is at Cloudflare,
-Route53, Hetzner DNS, NS1, or a BIND instance in their basement. The only
-constraint is "can set one CNAME in their DNS provider".
+### Runtime flow
 
-Alternatives considered and rejected as the primary path:
+1. A request arrives at the proxy on port 443. The TLS layer reads the SNI
+   (`<base32-key>.proxy.<domain>`).
+2. If a cert for that SNI is in the on-disk cache, serve it.
+3. If not, kick off an ACME HTTP-01 flow against Let's Encrypt for that
+   exact SNI. The challenge URL
+   `http://<base32-key>.proxy.<domain>/.well-known/acme-challenge/...` is
+   reachable because of the wildcard A record from step 1 of the
+   operator-facing flow; the proxy answers on port 80 from the same
+   process. Once the cert is issued (typically one to two seconds), cache
+   it and complete the TLS handshake.
+4. Renewals run on schedule, per cert, in a background task.
 
-- **RFC 2136 + TSIG** is the IETF-standard dynamic update protocol; BIND,
-  PowerDNS, and Knot all support it. Managed DNS providers like Cloudflare
-  and Route53 do not expose it. Only useful if the operator runs their own
-  authoritative nameservers. Worth supporting as a secondary path.
-- **lego / certbot DNS plugins** ship per-provider adapters. The
-  abstraction is at the tool level; the codebase still has to choose
-  providers to support. Pragmatic for end users but not "agnostic at the
-  proxy".
-- **Provider-specific Rust SDKs** is what most projects end up doing.
-  N HTTP clients, N config tables, N test matrices. The cost is exactly the
-  coupling the RFC is trying to avoid.
+The operator's DNS provider is irrelevant beyond setting the one wildcard
+record. There is no CNAME, no acme-dns, no third-party credential, no
+DNS-01 ceremony.
 
-## Goal
+### What this requires of the proxy code
 
-After this RFC ships:
+- A new `proxy/src/sni_acme.rs` (working name) that owns the cert cache
+  and the on-demand ACME state machine. Layers on top of `rustls`'s
+  `ResolvesServerCert` trait so the per-SNI lookup hooks into the TLS
+  handshake.
+- An ACME client capable of HTTP-01. Recommend `instant-acme`
+  (https://crates.io/crates/instant-acme) which exposes a clean async
+  API and lets the caller drive each step (account creation, order,
+  authorize, finalise). The proxy hands `instant-acme` its own HTTP-01
+  responder (just an in-memory map keyed by challenge token).
+- A path on the existing axum router at
+  `/.well-known/acme-challenge/{token}` that serves the responder's map.
+  This already exists for the non-wildcard path; reuse it.
+- The existing `rustls-acme` cert for the bare `proxy.<domain>` is kept
+  by registering that name in the same on-demand flow on first hit; one
+  code path.
 
-- The proxy serves a TLS cert valid for `proxy.<domain>` and
-  `*.proxy.<domain>`.
-- A wildcard DNS A/AAAA record for `*.proxy.<domain>` points at the proxy
-  host (operator does this once in their real DNS).
-- Path-form external URLs (`https://proxy.<domain>/_series/<base64-key>/<path>`
-  and `/~<identity>/<path>`) continue to work but redirect to the host-form
-  (`https://<base32-key>.proxy.<domain>/<path>` and
-  `https://<identity>.proxy.<domain>/<path>`).
-- The proxy is otherwise unchanged in behaviour. The host-form URLs travel
-  the same `translate_to_node_url` path internally that the path-form did
-  (see `proxy/src/http.rs::translate_to_node_url`).
+### Cert cache shape
 
-## Design
+`proxy/<acme-cache>/certs/<sni>/{cert.pem, key.pem, meta.json}` per
+subdomain. `meta.json` records the issue and expiry timestamps so the
+renewal task can prioritise. Atomic write on swap (rename-over) so a
+half-renewed cert never serves.
 
-### Current code
+### Renewal
 
-- `proxy/Cargo.toml:39-43` depends on `rustls-acme = "0.12.1"`.
-- `proxy/src/acme.rs` wires `AcmeConfig` and runs the renewal stream.
-- `proxy/src/http.rs::translate_to_node_url` rewrites incoming path-form
-  URLs to host-form upstream against the local node.
-- TLS-ALPN-01 and HTTP-01 are the only challenges `rustls-acme` 0.12 ships
-  out of the box; DNS-01 is not supported by the crate today.
+A background task wakes every hour, scans the cache for any cert within
+30 days of expiry, renews via the same on-demand flow. Per-cert backoff
+on failure; alarm in `samizdat doctor` (see open question 4 below) if a
+cert is within 7 days of expiry and renewals keep failing.
 
-### Library choice
+## Costs and caveats
 
-Three viable Rust crates support ACME DNS-01:
+- **Cold-start latency.** The first request for a never-before-seen
+  subdomain incurs one to two seconds while ACME negotiates. Subsequent
+  requests reuse the cache. Acceptable for content browsing.
+- **Let's Encrypt rate limit.** Currently 50 certs per registered domain
+  per week (the entire `proxy.<domain>` zone counts as one registered
+  domain for this limit). Documented enough for a personal proxy hosting
+  a single-digit number of series owners. Document the ceiling in
+  `docs/operations.md`. High-volume operators can opt into wildcard
+  DNS-01 via acme-dns as a v2 path; the proxy's plumbing can take either.
+- **Port 80 must be reachable.** HTTP-01 challenges require it. Same
+  requirement as the existing non-wildcard cert; no change.
+- **First request per SNI is sync-ish.** While ACME is in flight, the
+  TLS handshake stalls. Should be safe given the latency budget;
+  document that an operator behind a CDN may need to disable smart
+  caching for `*.proxy.<domain>` requests during cert provisioning.
 
-- **`instant-acme`** (https://crates.io/crates/instant-acme). Async,
-  pluggable challenge solver. Recommended.
-- **`acme-lib`**. Sync; less idiomatic with the rest of the proxy.
-- **Shelling out to `lego` or `certbot`**. Works but introduces a
-  binary dependency on the host.
+## Migration
 
-Recommendation: pull in `instant-acme` for the wildcard path, keep
-`rustls-acme` for the existing non-wildcard cert. Two ACME flows side by
-side is messier than swapping outright, BUT swapping requires re-doing
-the working renewal pipeline; staged migration is safer. See "Open
-questions" below.
+The current proxy uses `rustls-acme` for one fixed domain. Migration:
 
-### Config additions
+1. Add `instant-acme` to `proxy/Cargo.toml`. Keep `rustls-acme` for now;
+   the on-demand layer will subsume it.
+2. Build the `sni_acme` module behind a `[wildcard] enable = true`
+   config flag in `proxy.toml`. Default off; the testbed keeps working
+   on the rustls-acme path until the operator flips the flag.
+3. Once the on-demand path is proven on the testbed, drop the
+   `rustls-acme` dependency and the legacy path. One ACME flow, one
+   library, one config story.
 
-`proxy/src/cli.rs` (and the corresponding TOML) gets a new optional
-section:
+No data migration, no client-visible URL change beyond the eventual 301
+from path-form to host-form (see "URL surface" below).
 
-```toml
-[wildcard]
-acme_dns_url      = "https://auth.example/"
-acme_dns_user     = "<from acme-dns /register>"
-acme_dns_pass     = "<from acme-dns /register>"
-acme_dns_subdomain = "<from acme-dns /register>"
-wildcard_domain   = "proxy.<domain>"
-```
+## URL surface
 
-`wildcard_domain` is the wildcard root; the cert SANs become
-`<wildcard_domain>` and `*.<wildcard_domain>`.
+`translate_to_node_url` in `proxy/src/http.rs` already rewrites the
+external path-form to the upstream host-form against the local node. The
+external surface change once the wildcard cert is in place:
 
-When the `[wildcard]` block is absent, the proxy behaves as today: single
-cert for `proxy.<domain>`. This makes the feature opt-in and keeps the
-testbed running untouched until the operator explicitly turns it on.
-
-### acme-dns client
-
-A new `proxy/src/acme_dns.rs` module exposing the minimum surface:
-
-```rust
-pub struct AcmeDnsClient {
-    base_url: Url,
-    user: String,
-    pass: String,
-    subdomain: String,
-}
-
-impl AcmeDnsClient {
-    pub async fn set_txt(&self, value: &str) -> Result<()>;
-}
-```
-
-That is the entire HTTP API needed for the DNS-01 challenge. One `POST
-{base}/update` with the `X-Api-User` / `X-Api-Key` headers and a JSON body
-containing `{ subdomain, txt }`.
-
-### Wiring into the ACME flow
-
-`instant-acme`'s `Account::order` returns a list of `Authorization`s, each
-with a list of `Challenge`s. The proxy picks the `dns-01` variant, asks
-`AcmeDnsClient::set_txt(&token)`, polls for propagation (acme-dns serves
-it immediately because acme-dns IS the authoritative nameserver for the
-delegated subdomain), then signals Let's Encrypt to validate. Standard
-flow; the only proxy-specific code is the acme-dns call.
-
-### URL rewriting changes
-
-`proxy/src/http.rs::translate_to_node_url` already handles the host-form
-internally for the upstream node call. The external surface change:
-
-- Bare `proxy.<domain>/` keeps the welcome / docs path (no change).
+- `proxy.<domain>/` continues to serve the welcome / docs path.
 - `proxy.<domain>/_series/<base64>/<rest>` -> 301 to
-  `https://<base32>.proxy.<domain>/<rest>` (and serves directly when
-  arrived at the host-form).
+  `https://<base32>.proxy.<domain>/<rest>`.
 - `proxy.<domain>/~<identity>/<rest>` -> 301 to
   `https://<identity>.proxy.<domain>/<rest>`.
-- The 301 redirect ensures old shared links keep working but the user's
-  browser lands on the per-series origin, closing T1/T9/T10/T15 reopens.
+- Host-form requests serve content directly; `translate_to_node_url`
+  becomes a no-op rewrite for them.
 
-`translate_to_node_url` becomes a no-op rewrite for the host-form incoming
-requests: the proxy receives `<base32>.proxy.<domain>/foo`, sets the
-upstream URL `<base32>.localhost:4510/foo` directly.
-
-### Operational rollout
-
-1. Operator stands up an acme-dns instance (own machine or a trusted
-   public one). Costs nothing if self-hosted; a t2.micro is overkill.
-2. Operator sets the `_acme-challenge.proxy.<domain>` CNAME.
-3. Operator sets the `*.proxy.<domain>` wildcard A/AAAA pointing at the
-   proxy host.
-4. Operator drops the `[wildcard]` config block into the proxy's
-   `proxy.toml`.
-5. samizdat-proxy is restarted; instant-acme provisions the wildcard
-   cert; renewal happens on schedule.
-
-No data migration, no client breaking change. External users keep typing
-`https://proxy.hubfederation.com/_series/<key>/...` and get a 301 to the
-new host-form on first hit; the 301 lasts forever, browsers cache it,
-shared links propagate naturally.
-
-## Security considerations
-
-- **acme-dns trust**. If the acme-dns instance is compromised, an
-  attacker can forge ACME challenges for `*.proxy.<domain>` and obtain a
-  fraudulent cert for any series subdomain. The operator should self-host
-  acme-dns where possible; the public free instance is acceptable for
-  personal projects but not for the testbed. Document this.
-- **Wildcard scope**. The wildcard cert covers `<anything>.proxy.<domain>`.
-  An identity-name typo cannot escape that namespace. A wildcard does NOT
-  cover multiple labels (`<a>.<b>.proxy.<domain>` is uncovered) which
-  matches our flat-subdomain expectation.
-- **DNS-01 vs HTTP-01 separation**. Keeping the existing `rustls-acme`
-  HTTP-01 flow for the non-wildcard cert means the proxy needs both port
-  443 (for serving) and port 80 (for HTTP-01) bound. No change from
-  today.
-- **Renewal failure mode**. If acme-dns is unreachable during a renewal
-  attempt, instant-acme retries with backoff. If the cert is within 30
-  days of expiry and renewals keep failing, alarm; do not just serve a
-  stale cert silently. Add a `samizdat doctor` field for "days until
-  proxy cert expiry".
+The 301s ensure pre-existing shared links keep working and the user's
+browser lands on the per-series origin. T1/T9/T10/T15 reopens close
+because each series is its own browser origin on the proxy too.
 
 ## Open questions
 
-1. **Swap rustls-acme out entirely, or stage in instant-acme alongside?**
-   Two ACME flows in one binary is messy; one flow is cleaner but the
-   migration touches the working renewal path. Recommend staged.
-2. **Self-host acme-dns or use the public instance for the testbed?** The
-   testbed is at `proxy.hubfederation.com`; self-hosting acme-dns on
-   that same machine (or a sibling) is cheap and avoids depending on a
-   third-party uptime. Recommend self-host.
-3. **Should the 301 redirect path-form -> host-form be permanent, or
-   serve both shapes indefinitely so links stay simple?** Permanent
-   redirect is the cleaner long-term posture (one canonical form);
-   indefinite dual-serving costs nothing functionally but blurs the URL
-   shape. Decision: permanent 301, keep the path-form parser only to
-   issue the redirect.
-4. **Do we want a fallback to RFC 2136 / TSIG for operators who DO run
-   their own authoritative DNS?** The cost is one more code path. Keep
-   for v2 unless an operator asks.
-5. **Renewal observability.** Where do failed renewals surface?
-   `samizdat doctor` is the natural home but `proxy` is a different
-   daemon than `node`; doctor talks to the node only today. Either teach
-   doctor to query the proxy's local API too, or have the proxy write a
-   status file and have doctor read it. Decide before implementation.
+1. **Drop `rustls-acme` outright after on-demand lands, or keep both?**
+   Recommendation: drop. One library, one flow.
+2. **Do we want a v2 path that uses acme-dns for wildcard DNS-01?** Useful
+   if a high-volume operator hits the per-week cert ceiling. The hook
+   point in the `sni_acme` module is the challenge solver; supporting
+   DNS-01 is a different challenger impl. Defer until someone asks.
+3. **Operator config surface.** Today, `proxy.toml` lists a single
+   domain. With on-demand, the proxy needs to know its zone root
+   (`proxy.<domain>`) to validate incoming SNIs ("is `<x>.proxy.example`
+   a sibling subdomain of mine?"). Add `wildcard_zone =
+   "proxy.<domain>"` and validate inbound SNIs against it; refuse to
+   provision certs for SNIs outside the zone. Prevents the proxy from
+   being weaponised to mint certs for unrelated hosts that happen to
+   resolve to its IP.
+4. **Renewal observability.** Where do failed renewals surface?
+   `samizdat doctor` is the natural home but it talks to the node only
+   today; the proxy is a separate daemon. Either teach doctor to query
+   the proxy's local admin port, or have the proxy write a status file
+   and have doctor read it. Decide before implementation.
+5. **Per-cert revocation.** If an operator wants to forget a series'
+   cert (private key compromised at the series-owner level), an explicit
+   admin route or just deleting the cache file? The latter is simpler
+   and matches "operate by file" elsewhere in samizdat.
 
 ## Alternatives considered
 
-- **Skip wildcard cert; live with the proxy-side single-origin
-  problem.** Status quo. T1/T9/T10/T15 stay reopened at the proxy.
-  T16 (shared `__samizdat_proxy_page_count`) remains. Costs zero,
-  delivers nothing.
-- **Use a per-provider Rust ACME plugin matrix.** Tedious to maintain,
-  couples the codebase to a fixed set of providers, fragile when
-  providers change their APIs.
-- **Front the proxy with a CDN that handles wildcard ACME for you
-  (Cloudflare, Fastly).** Couples deployment to a CDN. Out of scope for
-  a self-hostable project; mention but reject.
+- **acme-dns + DNS-01 wildcard cert.** Earlier draft of this RFC. Three
+  operator-side steps instead of one. Better long-term for very-high-
+  volume operators (no per-cert rate limits) but worse for the dead-simple
+  bar this RFC was rescoped to hit. Kept as the v2 path for when someone
+  needs it.
+- **CDN in front (Cloudflare, Fastly).** Couples deployment to a CDN.
+  Out of scope for a self-hostable project.
+- **One cert with explicit Subject Alternative Names per series.** Cert
+  has to be re-issued every time a series is added; brittle.
+- **Skip the wildcard. Live with the proxy-side single-origin problem.**
+  Status quo. T1/T9/T10/T15 stay reopened at the proxy; T16 remains.
+  Costs zero, delivers nothing.
