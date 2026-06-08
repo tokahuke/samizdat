@@ -110,44 +110,38 @@ controlling their own series.
 (`node/src/http/host_scope.rs` + the host-based content router in
 `node/src/http/mod.rs`); admin endpoints live on a different origin
 (bare loopback) so the worker cannot reach them even with CORS open
-unless an explicit ManageSeries grant exists for that entity.
-**Fix** -- no further action required to close the cross-series leak; the
-remaining same-series MITM is intrinsic to letting authors run JS.
+unless an explicit ManageSeries grant exists for that entity. **NB:
+reopened at the proxy**: `proxy.hubfederation.com` serves every series
+under one origin, so service workers there ARE cross-series. See
+`docs/proxy-app-divergence.md`.
+**Fix** -- no further action required for local browsing; the
+proxy-side reopen needs per-subdomain isolation at the proxy
+(wildcard cert + DNS), tracked in `docs/proxy-app-divergence.md`.
 
 ### T2. Page on samizdat-served origin reads admin/read tokens via fetch
-**Vector** -- A page at `http://127.0.0.1:4510/~attacker/` runs JS that
-calls `fetch('/_register?right=ManageSeries', ...)` or follows the
-`doAuthenticationFlow` popup to acquire `ManageSeries` for itself, then
-calls `/_series-owners` to read every series owner's private key bytes.
-**Current state** -- `node/src/http/auth.rs:622` serves `/_register` for
-any entity that asks; the user has to click through, but
-`docs/threat-model.md` already notes that `ManageSeries` is a flat right:
-once granted to any entity, `js/src/index.ts:230-246` (`getSeriesOwner` /
-`getSeriesOwners`) returns the keypair object including the secret.
-**What an attacker gets** -- Series private keys. Permanent
-impersonation of the series owner on the network: forging editions,
-publishing arbitrary content under the user's identity. The token files
-themselves (`admin-token` mode 0640, `read-token` mode 0644 per
-`node/src/access.rs:99-117`) are NOT readable from the browser, but the
-admin capabilities reachable via entity rights are equivalent for many
-purposes.
-**Severity** -- medium: the page only has the rights of its entity, granted
-via `/_register`, and cannot reach `/_series-owners` unless the user
-explicitly clicked through to grant `ManageSeries`. If the user does grant
-it, the flat-right semantics make the consequence systemic.
-**Mitigation in place** -- the Referer-based trusted-context check
-(`docs/threat-model.md` section "Browser pages served by the node") gates
-this. A page at `/~attacker/` cannot read `/_series-owners` by mere
-navigation; the user must complete a `/_register` flow first. The
-deferred per-entity `ManageSeries` item in `docs/audit-history.md` is what
-would convert this from "exfiltrates ALL series secrets" to "exfiltrates
-only the secrets the user granted access to".
-**Fix** -- Stop returning private key bytes in `/_series-owners`
-responses; require an explicit "reveal secret" route gated on
-`TokenScope::Admin` bearer ONLY (no entity-rights path). Mark
-`ManageSeries` as per-entity rather than flat. The `/_register` template
-should additionally warn the user when the requesting entity is *not* an
-identity the user has otherwise interacted with.
+**Vector** -- A page on a series subdomain calls `fetch('/_register?
+right=ManageSeries', ...)` and, after the user clicks through, reads
+`/_series-owners` to obtain every series owner's private key bytes.
+**Current state** -- This is the OAuth-style scope-and-consent model
+working as designed. `ManageSeries` is a capability scope; granting it
+authorizes the entity to manage all locally-owned series, exactly as the
+consent screen states at `node/templates/register.html:24-26` ("Read your
+locally owned series' private keys (full impersonation on the network)
+and sign new editions on your behalf"). It is not a per-resource ACL;
+the threat is not the scope's shape, but the user granting it to the
+wrong entity via UI deception.
+**What an attacker gets** -- Whatever scope the user clicked Allow on.
+For `ManageSeries`, full impersonation of every locally-owned series.
+**Severity** -- low. The flow REQUIRES the user to navigate through
+`/_register`, read the consent text, wait through the 3-second delay
+gate, and click Allow. The catalogued residual is the consent-UI
+deception path (see T13), not the scope model.
+**Mitigation in place** -- The OAuth-style scope-and-consent flow itself;
+`docs/threat-model.md` "Browser pages served by the node". The consent
+text was sharpened for `ManageSeries`, `ManageIdentities`, and
+`ManageHubs` and a 3-second delay-then-enable gate added to the Allow
+button (`node/templates/register.html`).
+**Fix** -- None. T2 is the intended design. Residual risk lives in T13.
 
 ### T3. Off-origin page CSRFs `/_*` admin endpoints
 **Vector** -- A page on `https://attacker.example` issues `fetch(
@@ -295,7 +289,8 @@ SVG's origin (which is the samizdat origin).
 **Current state** -- No content rewriting. `node/src/http/resolvers.rs`
 streams object bytes as-is.
 **What an attacker gets** -- Script execution under the samizdat
-origin from a "harmless image". Promotes any image hosting into T2/T4.
+origin from a "harmless image". Pivots into T13 (consent-UI deception)
+or T4 (fingerprinting).
 **Severity** -- medium: requires the user to navigate to the SVG URL or
 to a page that embeds it, on a series they have engaged with. The
 escalation paths (T2, T4) are themselves gated by Referer-trusted-context
@@ -331,10 +326,11 @@ isolation landed; the attack is now no different from any cross-origin
 `<script src>` on the open web.
 **Mitigation in place** -- per-series origin isolation
 (`node/src/http/host_scope.rs`). Foreign scripts run opaque; no
-cross-series cookie or storage reach.
-**Fix** -- if the operator wants to fully forbid cross-origin script
-loads, CSP `script-src 'self'` per response would do it. See "Defensive
-primitives to add".
+cross-series cookie or storage reach. **NB: reopened at the proxy**:
+under `proxy.hubfederation.com`, a sibling series' script is same-origin
+and DOES run with full access. See `docs/proxy-app-divergence.md`.
+**Fix** -- local browsing is structurally closed; the proxy-side reopen
+needs per-subdomain isolation at the proxy.
 
 ### T10. Cache and Cache-Storage as persistent fingerprint
 **Vector** -- A page writes an entry to `caches.open('attacker').then(
@@ -350,11 +346,12 @@ cross-series correlation via this surface.
 **Severity** -- low. Reduced from medium once per-series origin
 isolation landed.
 **Mitigation in place** -- per-series origin isolation; cache and
-storage are partitioned per browser-origin.
-**Fix** -- if same-series tracking is itself unacceptable for a given
-hosting profile, send `Clear-Site-Data: "cache", "storage"` on
-unsubscribe from a dedicated admin endpoint, and consider
-`Cache-Control: no-store` on HTML responses.
+storage are partitioned per browser-origin. **NB: reopened at the
+proxy**: under `proxy.hubfederation.com` every series shares one
+Cache Storage and one localStorage, so cross-series correlation is
+trivial there. See `docs/proxy-app-divergence.md`.
+**Fix** -- local browsing is structurally closed; the proxy-side reopen
+needs per-subdomain isolation at the proxy.
 
 ### T11. Persistent supply-chain via external `<script src=https://...>`
 **Vector** -- A subscribed series ships a page with
@@ -362,7 +359,8 @@ unsubscribe from a dedicated admin endpoint, and consider
 time the user visits, the browser fetches from
 `cdn.attacker.example`, leaking the user's IP and a load-pattern that
 identifies which Samizdat content they are reading. The script runs in
-the samizdat origin and can do everything T2 and T4 do.
+the samizdat origin and can pivot into T13 (consent-UI deception) or
+T4 (fingerprinting + phone-home).
 **Current state** -- No content-ingest validation. `node/src/models/`
 accepts arbitrary HTML. The proxy at `proxy/src/http.rs:107-109`
 rewrites HTML through `proxy_page` but the rewrite does not look at
@@ -427,20 +425,23 @@ asserting that the requesting entity should hold the right.
 **What an attacker gets** -- Whatever right the user can be convinced to
 grant. Today, that includes `ManageSeries` (flat across entities; see
 T2), which is the high-impact pivot.
-**Severity** -- low: requires a coordinated UI-deception attack
-culminating in an explicit user click through the `/_register` flow;
-preempted by the existing trusted-context UI in all but corner cases
-where the user misreads the popup.
+**Severity** -- medium. With T2 demoted to "intended design", T13 is the
+load-bearing residual risk for scope grants. Not critical (it requires
+an explicit user click through `/_register`), but the consent screen IS
+the entire defense once an entity has talked the user into the popup.
 **Mitigation in place** -- Referer-based trusted context and CORS
-preflight (see `docs/threat-model.md` section "Browser pages served by
-the node"); plus the `/_register` popup is served by the node and names
-the requesting entity. The residual risk is purely user-comprehension
-under deception.
-**Fix** -- Harden the `/_register` template: name the requesting entity
-prominently, warn when the entity is not one the user has interacted
-with before, and consider a delay-then-confirm pattern for high-impact
-rights. Combined with the deferred per-entity `ManageSeries` change, the
-blast radius of any single misclick shrinks substantially.
+preflight (see `docs/threat-model.md` "Browser pages served by the
+node"); the `/_register` popup is served by the node and names the
+requesting entity. The consent text was sharpened for the three
+high-impact rights (`ManageSeries`, `ManageIdentities`, `ManageHubs`) to
+state the consequence plainly, and a 3-second delay-then-enable gate
+sits on the Allow button so the user cannot muscle-click through
+(`node/templates/register.html`).
+**Fix** -- Further consent-UI hardening: distinguish series-keyed
+entities from identity-keyed entities visually, surface prior-grant
+history (has the user interacted with this entity before), and consider
+typed-confirmation on the three high-impact rights. No scope-model
+change.
 
 ### T14. Proxy origin vs local origin: header asymmetry
 **Vector** -- The same content is served at two origins:
@@ -507,114 +508,113 @@ subdomain, which is what any web author can do on any website.
 **Mitigation in place** -- per-series origin isolation
 (`node/src/http/host_scope.rs`). `pushState` to a different
 `<key>.localhost` or `<identity>.localhost` is a cross-origin operation
-that the browser refuses.
-**Fix** -- no further action required for the cross-entity URL-bar
-deception. Phishing-styled identities (e.g. `bank-secure-login`) are
-discouraged by the contract amendment in
-`blockchain/SamizdatIdentity.sol::_validateIdentity` rejecting
-DNS-unsafe shapes, and refused at runtime by
-`samizdat_common::identity::check_servable_identity` on existing chain
-state; this is a defence-in-depth choice rather than a primary fix.
+that the browser refuses. **NB: reopened at the proxy**: under
+`proxy.hubfederation.com` every series is same-origin, so `pushState`
+across entities works and identity-vs-path confusion returns. See
+`docs/proxy-app-divergence.md`.
+**Fix** -- local browsing is structurally closed; the proxy-side reopen
+needs per-subdomain isolation at the proxy. Phishing-styled identities
+are rejected at registration and at runtime by
+`samizdat_common::identity::check_servable_identity`.
+
+### T16. Proxy template writes a shared cross-series localStorage key
+**Vector** -- `proxy/templates/proxied-page.html.jinja:146-159` writes the
+integer counter `__samizdat_proxy_page_count` into `localStorage`.
+Because every series viewed through `proxy.hubfederation.com` shares one
+browser origin, that key is readable and writable by any series an
+attacker controls.
+**Current state** -- The counter exists to drive a donation modal every
+N page views; it was not intended as a cross-series surface.
+**What an attacker gets** -- A trivial shared identifier readable across
+series viewed via the proxy. A malicious series can overwrite the
+counter, read prior values, or use the key as a side-channel beacon.
+**Severity** -- low. Bounded yield (one integer per browser profile).
+The proxy origin is already known to lump series (T1/T9/T10/T15
+reopens); this is a self-inflicted minor instance of that.
+**Mitigation in place** -- none.
+**Fix** -- Move the counter into a sessionStorage entry namespaced by
+the request's entity, or drop the modal trigger entirely.
+
+### T17. Proxy template leaks viewer IP to Google Fonts on every view
+**Vector** -- The proxy page template at
+`proxy/templates/proxied-page.html.jinja` unconditionally embeds Google
+Fonts via `fonts.googleapis.com` and `fonts.gstatic.com`. Every viewer
+of any proxied page sends one or more requests to Google with the
+viewer's IP and `Referer` shape revealing they are reading samizdat
+content through the public proxy.
+**Current state** -- The references are in the proxy template chain;
+the audit could not exhaustively confirm they are the only third-party
+references. The reader should grep before relying on the absence.
+**What an attacker gets** -- (Passive Google) Per-viewer IP correlation
+tying the viewer to samizdat-via-proxy usage and to specific page views.
+**Severity** -- medium. Affects every proxy viewer, every page view, by
+default. No user action required.
+**Mitigation in place** -- none.
+**Fix** -- Self-host the fonts inside the proxy origin or drop the
+custom font from the template.
 
 ## Defensive primitives to add
 
-A bulleted list of headers and middleware changes that close many of the
-threats above at once. For each: the file to modify, the concrete value, and
-caveats.
+Already shipped (in `node/src/http/mod.rs::api`):
+- `X-Content-Type-Options: nosniff` globally.
+- `X-Frame-Options: DENY` on the admin sub-router.
+- `Referrer-Policy: same-origin` globally (authors override per-document
+  via `<meta name="referrer">` or per-element via `referrerpolicy`).
+- `Permissions-Policy: interest-cohort=()` globally.
+- `Content-Security-Policy: default-src 'none'; script-src 'self'
+  'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self';
+  img-src 'self' data:; form-action 'self'; frame-ancestors 'none';
+  base-uri 'none'` on the admin sub-router only. The content origin
+  carries no platform-imposed CSP; authors who want one ship a
+  `<meta http-equiv="Content-Security-Policy">` in their `<head>`.
+- The four security headers above are now forwarded by
+  `proxy/src/http.rs::PROXY_HEADERS`.
 
-- `Content-Security-Policy: default-src 'self'; script-src 'self';
-  connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';
-  object-src 'none'; base-uri 'none'; frame-ancestors 'none'` -- apply in
-  `node/src/http/resolvers.rs` inside `Resolved::into_response`
-  (`resolvers.rs:26`) so every content response carries it, and in a
-  global middleware added to `node/src/http/mod.rs:228-233` for the API
-  responses. Caveat: `style-src 'unsafe-inline'` is a concession to
-  existing inline styles in published HTML; tightening to `'self'` will
-  break a lot of content. Caveat: `connect-src 'self'` neuters most
-  WebRTC STUN/TURN; verify across Chromium and Firefox. Closes T4, T5,
-  T6, T8, T11.
-
-- `X-Content-Type-Options: nosniff` -- apply in
-  `node/src/http/resolvers.rs:26` (objects) and in a global middleware
-  for API responses. No compatibility caveat. Closes T7.
-
-- `X-Frame-Options: DENY` -- legacy alias for `frame-ancestors 'none'`;
-  apply alongside CSP. Same locations. Closes T6 in legacy browsers.
-
-- `Referrer-Policy: no-referrer` -- apply globally in
-  `node/src/http/mod.rs:228-233`. Caveat: the current auth model
-  *requires* `Referer` for entity-rights extraction
-  (`auth.rs:222-235`). Setting `no-referrer` on responses controls only
-  what THIS origin sends OUT; the requests INTO the node from same-
-  origin pages still carry `Referer`. Verify by reading the spec, not
-  from memory.
-
-- `Cross-Origin-Opener-Policy: same-origin` -- apply globally. Caveat:
-  changes the semantics of the `_register` popup
-  (`js/src/auth.ts:32-65`) which uses `window.open` and waits for an
-  `auth` CustomEvent dispatched from the popup. With COOP `same-origin`
-  the opener-opened pair still works because they share origin, but
-  test thoroughly.
-
-- `Cross-Origin-Embedder-Policy: require-corp` -- apply globally only
-  alongside COOP and CORP. Caveat: requires every embedded resource
-  (images, scripts, stylesheets) to opt in via CORP or CORS; will break
-  any published page that embeds resources without the header. Defer
-  until per-subdomain isolation is in.
-
-- `Cross-Origin-Resource-Policy: same-origin` -- apply on response in
-  `node/src/http/resolvers.rs:26`. Prevents other origins from
-  embedding samizdat-served resources via `<img>`/`<script>`/`<link>`.
-  Caveat: breaks any legitimate external embedding (the proxy itself
-  is the same origin from `proxy.hubfederation.com`, separate from
-  `localhost`; check whether the proxy needs to receive CORS-friendly
-  CORP for its rewrite to work).
-
-- `Permissions-Policy: camera=(), microphone=(), geolocation=(),
-  interest-cohort=(), gyroscope=(), payment=(), usb=(), midi=(),
-  serial=()` -- apply globally. No compatibility caveat for content
-  that doesn't legitimately need these. Closes T5 in part.
-
-- Service-worker scope refusal -- middleware in
-  `node/src/http/mod.rs` that intercepts any response whose path could
-  register a root-scoped worker. Refuse to serve `sw.js`, `/sw.js`,
-  `/service-worker.js`, anything at root path. For scripts under
-  `/_series/<key>/` or `/~<handle>/`, optionally set
-  `Service-Worker-Allowed:` to the entity's prefix so the worker
-  scope cannot escape. Closes T1.
+Still open:
+- `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` -- closing T12. Decision
+  shaped: enabling both opts into `crossOriginIsolated`, which unlocks
+  SharedArrayBuffer and high-precision timers, which in turn admits
+  Spectre-class attacks. Today both are absent and SAB is unavailable.
+  Keep them absent until SAB is needed.
+- `Cross-Origin-Resource-Policy: same-origin` on content responses.
+  Prevents arbitrary origins from embedding samizdat-served resources
+  via `<img>`/`<script>`/`<link>`. Cross-check with whatever the proxy
+  needs to fetch.
+- A content-side CSP IS NOT on this list by deliberate decision:
+  samizdat does not police what authors put on their pages. Authors
+  who want a strict policy on their own series add a `<meta>` tag.
 
 ## Items already covered elsewhere
 
 - The bearer-token / Referer dual auth model is laid out in
   `docs/threat-model.md` under "What is authenticated, and what
   isn't"; not restated here.
+- The OAuth-style scope-and-consent model (rights are scopes granted
+  per-entity via `/_register`, not per-resource ACLs) is described in
+  `docs/threat-model.md` "Browser pages served by the node".
+  Consent-screen hardening is the meaningful follow-up; per-entity
+  scope narrowing is not a fix because it would break legitimate
+  Samizdat admin-tool web apps.
 - The proxy's GET-only / strip-Authorization / strip-Referer behaviour
-  is in `docs/threat-model.md` under "Proxy". This document covers
-  only the *headers in the proxy response back to the browser*, which
-  the threat model doc does not cover.
-- The flat-rights `ManageSeries` issue is on the deferred list (see
-  `docs/threat-model.md` "A malicious local web page in the user's
-  browser" and `docs/audit-history.md`). T2 here makes the
-  browser-layer consequence concrete.
+  is in `docs/threat-model.md` under "Proxy". The proxy-side
+  behavioural divergence from local browsing (T1/T9/T10/T15 reopens,
+  T16 shared key, T17 Google Fonts leak) is catalogued in
+  `docs/proxy-app-divergence.md`.
 - The hub-federation reflection primitive is `threat-model.md`'s "A
   peer node deep in the federation graph"; out of scope here.
 
 ## Open questions for Pedro
 
-- Move to per-series subdomain isolation
-  (`<base64-key>.localhost:4510`) and break the single-origin problem
-  at the root? This is the only structural fix for T1, T9, T10, T15.
-  Costs: relative-link semantics in published content change; CLI URL
-  printing changes; CI fixtures change; proxy must also do subdomain
-  mapping.
-- Disallow `<script src="https://...">` and similar external resource
-  references at content-ingest time, or rely only on CSP at serve
-  time? Ingest-time is offline and cheap; CSP at serve-time is
-  defence in depth. Both is the right answer; question is whether the
-  ingest-time check is a hard block or a warning.
-- Accept that the `~name` URL form (identity, mutable, attacker-
-  controllable handle) is a separate trust domain than
-  `_series/<key>` (immutable public key)? If yes, the per-subdomain
-  scheme should put each `~handle` on its own subdomain too, AND the
-  CSP for `~handle` content can be tighter (no `eval`, no inline) by
-  default since the handle layer is mutable.
+- Wildcard cert at the proxy plus `*.proxy.hubfederation.com` DNS so
+  proxy-fronted pages also get per-series origin isolation. Closes
+  T1/T9/T10/T15 reopens and removes the lumping that drives T16.
+- Should the consent screen distinguish series-keyed entities
+  (`_series/<base64-key>`) from identity-keyed entities
+  (`_identity/~<handle>`) more visibly? Is prior-grant history a useful
+  signal? Is typed-confirmation acceptable on the three high-impact
+  rights even though it slows down legitimate admin-tool installs?
+- Drop the donation modal counter (T16) from the proxy template, or
+  scope it per-entity?
+- Self-host the proxy template's fonts (T17), or accept the
+  third-party leak as the cost of nice typography?
