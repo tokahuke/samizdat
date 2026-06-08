@@ -166,7 +166,7 @@ impl IntoResponse for PageResponse {
 /// - The top-level CORS layer reflects any `Origin` whose host is
 ///   `localhost` or ends in `.localhost`, so the JS SDK can keep talking
 ///   from content subdomains to admin endpoints. Tightening is a followup
-///   (see `docs/javascript-security.md`).
+///   (see `docs/browser-security.md`).
 fn api() -> Router {
     use http::HeaderValue;
     use tower::ServiceBuilder;
@@ -237,7 +237,7 @@ fn api() -> Router {
     // * `cors_layer()` reflects any `Origin` whose host is `localhost` or
     //   `*.localhost`, so the JS SDK can keep talking from content
     //   subdomains to admin endpoints; tightening is a followup (see
-    //   `docs/javascript-security.md`).
+    //   `docs/browser-security.md`).
     let global_layers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             http::header::X_CONTENT_TYPE_OPTIONS,
@@ -261,7 +261,7 @@ fn api() -> Router {
 /// everything else at the browser. Credentials enabled so the SDK can carry
 /// the bearer-cookie path (deferred). Permissive on purpose: per-route
 /// scoping is part of the SDK rework followup tracked in
-/// `docs/javascript-security.md`.
+/// `docs/browser-security.md`.
 fn cors_layer() -> tower_http::cors::CorsLayer {
     use tower_http::cors::{AllowOrigin, CorsLayer};
     CorsLayer::new()

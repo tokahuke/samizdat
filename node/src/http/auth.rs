@@ -209,7 +209,7 @@ fn is_trusted_context(referrer: &Url) -> bool {
 
 /// Derives the [`Entity`] of a request by inspecting the `Referer` header's
 /// HOST. Content lives at `<base32-key>.localhost:<port>` or
-/// `<identity>.localhost:<port>`; cf. `docs/javascript-security.md`.
+/// `<identity>.localhost:<port>`; cf. `docs/browser-security.md`.
 ///
 /// Returns `Err(NotAnEntity)` when the page is on the bare loopback admin
 /// host (no entity to grant), `Err(BadOrigin)` for cross-origin Referers,

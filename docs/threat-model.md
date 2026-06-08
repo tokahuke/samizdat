@@ -140,7 +140,7 @@ The node sets a permissive CORS layer (`tower_http::cors::CorsLayer`)
 that reflects any `Origin` whose host is `localhost` or `*.localhost`.
 This is the structural compromise made for the SDK transition; per-route
 CORS scoping is a deferred followup (see
-`docs/javascript-security.md`). The admin-endpoint defenses still apply
+`docs/browser-security.md`). The admin-endpoint defenses still apply
 inside that CORS umbrella: admin routes require either a bearer token or
 a `Referer`-trusted-context grant whose Entity (now derived from the
 Referer's HOST, not the path) has the necessary AccessRight.

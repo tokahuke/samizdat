@@ -1,5 +1,5 @@
 //! Parses the `Host` header into one of the dispatch scopes the node
-//! recognises. See `docs/upgrade-hazards.md` and `docs/javascript-security.md`
+//! recognises. See `docs/upgrade-hazards.md` and `docs/browser-security.md`
 //! for the motivation: each entity type gets its own browser origin via a
 //! prefix-label subdomain of `localhost`, while all `/_*` admin routes stay
 //! at the bare host.
