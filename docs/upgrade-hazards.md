@@ -129,3 +129,21 @@ source has no effect on a host that has already gone through an
 `install node`; the host keeps whatever hub list it has. New default hubs
 have to either be added with an explicit migration step in `update()`, or
 documented as "operators must run `samizdat hub new ...` manually".
+
+## 8. `/_kvstore/*` is gone
+
+The node-side key-value store and its three routes (`GET`, `PUT`, `DELETE`
+on `/_kvstore/{*tail}` and `DELETE /_kvstore/`) are no longer served. Pages
+that called `sz.kvstore.{get,put,delete,clear}` now hit 404. Per-series
+subdomain isolation makes the browser's own `localStorage`,
+`sessionStorage`, and `IndexedDB` partitioned per origin, so authors get
+the same key-value semantics without a round trip to the node; SamizdatJS
+no longer exposes a `kvstore` property.
+
+The `Table::KVStore` variant was also removed from the
+[`Table`](../node/src/db/mod.rs) enum. LMDB sub-databases are addressed
+by name (`Database::init` opens one handle per `Table::VARIANTS`
+entry), so the on-disk sub-database named `KVStore` is simply no longer
+opened on startup. Its bytes stay in the LMDB file as dead weight until
+the node is wiped; `samizdat vacuum` does not reclaim them. Operators
+upgrading an existing data directory should expect that residual size.

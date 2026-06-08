@@ -50,8 +50,6 @@ pub enum Table {
     RecentNonces,
     /// Access rights granted for each entity to the local Samizdat node.
     AccessRights,
-    /// General key-value store for application (because `LocalStorage` is broken in Samizdat).
-    KVStore,
     /// Specification on which hubs to connect to.
     Hubs,
 }

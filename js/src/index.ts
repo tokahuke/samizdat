@@ -81,12 +81,10 @@ export interface Subscription {
 export class Samizdat {
   accessRights: Array<AccessRight>;
   isAuthenticated: boolean;
-  kvstore: KVStore;
 
   constructor(accessRights?: Array<AccessRight>) {
     this.accessRights = accessRights ?? [];
     this.isAuthenticated = false;
-    this.kvstore = new KVStore();
   }
 
   /**
@@ -305,30 +303,6 @@ export class Samizdat {
   async deleteSubscription(seriesKey: string) {
     await this._ensureRights([AccessRight.ManageSubscriptions]);
     const response = await call("DELETE", `/_subscriptions/${seriesKey}`);
-    return (await response.json())["Ok"] as null;
-  }
-}
-
-export class KVStore {
-  constructor() {}
-
-  async get(key: string) {
-    const response = await call("GET", `/_kvstore/${key}`);
-    return (await response.json())["Ok"] as string | null;
-  }
-
-  async put(key: string, value: string) {
-    const response = await call("PUT", `/_kvstore/${key}`, { value });
-    return (await response.json())["Ok"] as null;
-  }
-
-  async delete(key: string) {
-    const response = await call("DELETE", `/_kvstore/${key}`);
-    return (await response.json())["Ok"] as null;
-  }
-
-  async clear() {
-    const response = await call("DELETE", `/_kvstore`);
     return (await response.json())["Ok"] as null;
   }
 }

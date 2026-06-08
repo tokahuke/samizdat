@@ -27,12 +27,6 @@ fn maybe_redirect_empty(path: &str) -> Option<String> {
 
 /// Does all the redirection dances and shenanigans.
 pub async fn redirect_request(request: Request, next: Next) -> Response {
-    // Exceptions: keys in the kvstore may legitimately contain `//` as part
-    // of an opaque key, so the empty-segment compaction would corrupt them.
-    if request.uri().path().starts_with("/_kvstore/") {
-        return next.run(request).await;
-    }
-
     let mut path = Cow::Borrowed(request.uri().path());
     let mut was_redirected = false;
 

@@ -9,7 +9,6 @@ mod ethereum_provider;
 mod host_scope;
 mod hubs;
 mod identities;
-mod kvstore;
 mod objects;
 mod peers;
 mod redirects;
@@ -207,7 +206,6 @@ fn api() -> Router {
         .layer(axum::middleware::from_fn(require_bare_host));
 
     let admin = Router::new()
-        .nest("/_kvstore", kvstore::api())
         .nest("/_objects", objects::api())
         .nest("/_collections", collections::api())
         .nest("/_series", series::api())
