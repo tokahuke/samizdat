@@ -102,7 +102,7 @@ After a `commit`, the content is reachable locally at the node's per-series
 subdomain:
 
 ```
-http://<base32-of-public-key>.localhost:4510/path/to/stuff
+http://series-<base32-of-public-key>.localhost:4510/path/to/stuff
 ```
 
 Each series lives at its own browser origin, so storage, cookies, and
@@ -113,16 +113,16 @@ output prints the URL for you; `samizdat series ls` also includes a
 To share with friends, give them the public-key form on the public proxy:
 
 ```
-https://proxy.hubfederation.com/_series/<base64-public-key>/path/to/stuff
+https://series-<base32-public-key>.proxy.hubfederation.com/path/to/stuff
 ```
 
-The proxy translates the path-form into the node's host-form upstream, so
-the same content is reachable both ways.
+The proxy uses the same host-form as the node, so the leftmost label maps
+to the same entity on both sides.
 
 Samizdat also supports a friendlier subdomain form using a blockchain
 identity (Polygon, via `samizdat identity create`), reachable at
 `http://<identity>.localhost:4510/` locally and
-`https://proxy.hubfederation.com/~<identity>/` via the proxy. Registering
+`https://<identity>.proxy.hubfederation.com/` via the proxy. Registering
 an identity costs gas and the name has to be a valid DNS label
 (`[a-z0-9-]`, 1-63 chars, no leading or trailing hyphen). Most projects
 skip identities and just share the public-key URL.

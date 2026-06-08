@@ -97,7 +97,7 @@ web platform's contract.
 isolation, the worker registered at origin scope `http://localhost:4510/`
 intercepted every other Samizdat-served path on that origin.
 **Current state** -- Largely resolved. Each series is served at
-`<base32-key>.localhost:<port>` (its own browser origin), so a service
+`series-<base32-key>.localhost:<port>` (its own browser origin), so a service
 worker registered by series A is scoped to series A only and never sees
 fetches for series B. The dispatcher in `node/src/http/host_scope.rs` is
 the structural fix.
@@ -606,8 +606,8 @@ Still open:
 ## Open questions for Pedro
 
 - Should the consent screen distinguish series-keyed entities
-  (`_series/<base64-key>`) from identity-keyed entities
-  (`_identity/~<handle>`) more visibly? Is prior-grant history a useful
+  (`series-<base32-key>.<root>`) from identity-keyed entities
+  (`<handle>.<root>`) more visibly? Is prior-grant history a useful
   signal? Is typed-confirmation acceptable on the three high-impact
   rights even though it slows down legitimate admin-tool installs?
 - Drop the donation modal counter (T16) from the proxy template, or

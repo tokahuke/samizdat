@@ -119,7 +119,7 @@ Most admin routes are unreachable through the proxy by construction.
 Each series and each identity gets its own browser origin via a
 subdomain of `localhost`:
 
-- Series content lives at `http://<base32-key>.localhost:4510/<path>`.
+- Series content lives at `http://series-<base32-key>.localhost:4510/<path>`.
 - Identity content lives at `http://<identity>.localhost:4510/<path>`.
 - All `/_*` admin routes plus the welcome page live at the bare
   `http://localhost:4510/` origin.
