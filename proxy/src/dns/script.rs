@@ -29,14 +29,10 @@ use super::{DnsError, DnsProvider, TxtHandle};
 const STDERR_LIMIT: usize = 512;
 
 /// Internal layout of the script provider. The single-command form
-/// stores the same path in both `set` and `delete` slots and sets
-/// `pass_action` so the `SAMIZDAT_DNS_ACTION` env var is forwarded.
+/// stores the same path in both `set` and `delete` slots.
 pub struct Script {
     set: PathBuf,
     delete: PathBuf,
-    /// True iff the same binary handles both actions; only then do we
-    /// forward `SAMIZDAT_DNS_ACTION` so the script can branch.
-    pass_action: bool,
     timeout: Duration,
 }
 
@@ -48,20 +44,17 @@ impl Script {
         Script {
             set: command.clone(),
             delete: command,
-            pass_action: true,
             timeout,
         }
     }
 
     /// Build a pair-form script provider. The `set` binary runs for
-    /// create, `delete` runs for delete. `SAMIZDAT_DNS_ACTION` is not
-    /// forwarded because the action is already implied by which binary
-    /// the proxy invoked.
+    /// create, `delete` runs for delete. `SAMIZDAT_DNS_ACTION` is set
+    /// either way (pair-form scripts can ignore it).
     pub fn pair(set: PathBuf, delete: PathBuf, timeout: Duration) -> Self {
         Script {
             set,
             delete,
-            pass_action: false,
             timeout,
         }
     }
@@ -81,10 +74,8 @@ impl Script {
         let mut cmd = Command::new(binary);
         cmd.env("SAMIZDAT_DNS_ZONE", zone)
             .env("SAMIZDAT_DNS_NAME", record_name)
-            .env("SAMIZDAT_DNS_VALUE", value);
-        if self.pass_action {
-            cmd.env("SAMIZDAT_DNS_ACTION", action);
-        }
+            .env("SAMIZDAT_DNS_VALUE", value)
+            .env("SAMIZDAT_DNS_ACTION", action);
         // Capture both streams so we can surface stderr on failure
         // without writing the script's chatter to the proxy's own
         // stdout/stderr.

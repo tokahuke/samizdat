@@ -32,11 +32,6 @@ pub struct Cli {
     #[structopt(long)]
     #[serde(default)]
     pub http_port: Option<u16>,
-    /// The name of the domain that this proxy will serve (only applicable if HTTPS is
-    /// set).
-    #[structopt(long)]
-    #[serde(default)]
-    pub domain: Option<String>,
     /// The e-mail of the owner of the domain (only applicable if HTTPS is set).
     #[structopt(long)]
     #[serde(default)]
@@ -73,14 +68,6 @@ impl Cli {
 
         Ok(loaded)
     }
-    pub fn domain(&self) -> Result<&str, anyhow::Error> {
-        let Some(domain) = self.domain.as_ref() else {
-            anyhow::bail!("missing domain parameter")
-        };
-
-        Ok(domain)
-    }
-
     pub fn owner(&self) -> Result<&str, anyhow::Error> {
         let Some(owner) = self.owner.as_ref() else {
             anyhow::bail!("missing owner parameter")

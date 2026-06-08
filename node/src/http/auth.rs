@@ -14,6 +14,9 @@ use serde_derive::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
+use samizdat_common::host_label::{decode_host_label_to_key, is_base32_key_label};
+use samizdat_common::identity::check_servable_identity;
+
 use crate::access::{admin_token, read_token, AccessRight, Entity, TokenScope};
 use crate::db::Table;
 
@@ -213,9 +216,6 @@ fn is_trusted_context(referrer: &Url) -> bool {
 /// and `Err(TrustedContext)` when the page is `/_register` (the dedicated
 /// grant-administration page, gated by a different middleware).
 fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection> {
-    use samizdat_common::host_label::{decode_host_label_to_key, is_base32_key_label};
-    use samizdat_common::identity::check_servable_identity;
-
     check_origin(referrer).map_err(SecurityScopeRejection::BadOrigin)?;
 
     if is_trusted_context(referrer) {

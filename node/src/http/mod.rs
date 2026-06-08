@@ -8,7 +8,6 @@ mod editions;
 mod ethereum_provider;
 mod host_scope;
 mod hubs;
-mod identities;
 mod objects;
 mod peers;
 mod redirects;

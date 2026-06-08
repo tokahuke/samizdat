@@ -7,12 +7,16 @@
 //! The renewal task wakes every 12 hours, checks expiry, and runs a full
 //! issuance if the existing cert is within 30 days of `not_after`.
 
-use std::path::{Path, PathBuf};
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use arc_swap::ArcSwapOption;
+use axum::extract::Path as AxumPath;
+use axum::response::Redirect;
+use axum::routing::any;
 use chrono::{DateTime, Utc};
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, NewAccount, NewOrder, OrderStatus,
@@ -483,7 +487,7 @@ pub async fn serve(
     http_addr.set_port(http_port);
     let http_listener = tokio::net::TcpListener::bind(http_addr).await?;
 
-    let redirector = crate::acme::redirect_to_https_for(&dns.wildcard_root, addr);
+    let redirector = redirect_to_https_for(&dns.wildcard_root, addr);
     let (https_outcome, http_outcome) = tokio::join!(
         axum_server::bind_rustls(addr, rustls_config).serve(app.into_make_service()),
         axum::serve(http_listener, redirector.into_make_service()),
@@ -493,11 +497,29 @@ pub async fn serve(
     Ok(())
 }
 
-/// Helper exposed for the `wildcard.toml` schema (the
-/// `[acme] directory` field would have a default).
-pub fn default_acme_directory() -> String {
-    "https://acme-v02.api.letsencrypt.org/directory".to_owned()
+/// Build a port-80 -> 443 redirector for the wildcard root. Used by
+/// `serve` above to bounce plain HTTP requests onto HTTPS.
+pub fn redirect_to_https_for(domain: &str, addr: SocketAddr) -> axum::Router {
+    let base = if addr.port() == 443 {
+        format!("https://{domain}/")
+    } else {
+        format!("https://{domain}:{}/", addr.port())
+    };
+    let base_for_path = base.clone();
+    let base_for_root = base;
+    axum::Router::new()
+        .route(
+            "/{*path}",
+            any(move |AxumPath(path): AxumPath<String>| {
+                let base = base_for_path.clone();
+                async move { Redirect::permanent(&format!("{base}{path}")) }
+            }),
+        )
+        .route(
+            "/",
+            any(move || {
+                let base = base_for_root.clone();
+                async move { Redirect::permanent(&base) }
+            }),
+        )
 }
-
-#[allow(dead_code)]
-fn _dirty(_p: &Path) {}

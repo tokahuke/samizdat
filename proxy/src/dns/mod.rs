@@ -109,29 +109,6 @@ pub trait ProviderConfig: Send + Sync + std::fmt::Debug {
     fn resolve(&self) -> anyhow::Result<Box<dyn DnsProvider>>;
 }
 
-/// Read a credential from the environment, optionally under an
-/// operator-supplied env-var name. Used by every HTTP provider's
-/// `Topology::resolve` to turn `Option<token_env_override>` into the
-/// actual secret value.
-pub(crate) fn resolve_env(
-    override_name: Option<&str>,
-    default_name: &str,
-) -> anyhow::Result<String> {
-    let var = override_name.unwrap_or(default_name);
-    std::env::var(var)
-        .map_err(|_| anyhow::anyhow!("env var {var} is not set; cannot construct provider"))
-}
-
-/// Optional sibling: returns None if the var is absent. Used for
-/// Route53's session token (only present under STS).
-pub(crate) fn resolve_env_optional(
-    override_name: Option<&str>,
-    default_name: &str,
-) -> Option<String> {
-    let var = override_name.unwrap_or(default_name);
-    std::env::var(var).ok()
-}
-
 /// Shared reqwest client builder for the HTTP providers (DO,
 /// Cloudflare, Route53). The same client gets reused across calls so
 /// connections are kept warm across renewals.

@@ -1,4 +1,4 @@
-//! Helpers shared by the HTTP-based providers (DigitalOcean,
+//! Helpers shared by the HTTP-based providers (e.g. DigitalOcean,
 //! Cloudflare, Route53). The script provider does not need these.
 
 /// Cap used when an HTTP provider folds the server's response body into

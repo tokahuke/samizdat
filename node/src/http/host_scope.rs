@@ -110,9 +110,10 @@ impl<S: Send + Sync> FromRequestParts<S> for HostScope {
 /// Parse + classify a raw `Host` header value (`host[:port]`, possibly with
 /// IPv6 brackets). Exposed for unit tests; the extractor delegates here.
 pub fn classify(raw: &str) -> Result<HostScope, HostScopeRejection> {
-    let host = strip_port(raw)
-        .ok_or_else(|| HostScopeRejection::Malformed(raw.to_owned()))?
-        .to_ascii_lowercase();
+    let authority = http::uri::Authority::try_from(raw.trim())
+        .map_err(|_| HostScopeRejection::Malformed(raw.to_owned()))?;
+    // Authority::host() strips port for us and unwraps IPv6 brackets.
+    let host = authority.host().to_ascii_lowercase();
 
     // Bare loopback.
     if host == "localhost" || host == "127.0.0.1" || host == "::1" {
@@ -137,37 +138,6 @@ pub fn classify(raw: &str) -> Result<HostScope, HostScopeRejection> {
     }
 
     Err(HostScopeRejection::UntrustedHost(host))
-}
-
-/// Strips the port suffix from a Host header value, handling IPv6 brackets.
-/// Returns `None` if the value is structurally malformed (mismatched
-/// brackets, multiple colons outside brackets).
-fn strip_port(raw: &str) -> Option<&str> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-
-    if let Some(rest) = raw.strip_prefix('[') {
-        // IPv6 literal: [addr] or [addr]:port. Find the closing bracket.
-        let close = rest.find(']')?;
-        let addr = &rest[..close];
-        let after = &rest[close + 1..];
-        if after.is_empty() || after.starts_with(':') {
-            return Some(addr);
-        }
-        return None;
-    }
-
-    // Hostname or IPv4. Only one ':' is allowed (separating the port).
-    let mut parts = raw.splitn(2, ':');
-    let host = parts.next()?;
-    if let Some(port) = parts.next() {
-        if port.contains(':') {
-            return None;
-        }
-    }
-    Some(host)
 }
 
 #[cfg(test)]
@@ -218,19 +188,6 @@ mod tests {
             matches!(err, HostScopeRejection::UnservableIdentity(_)),
             "expected UnservableIdentity, got {err:?}"
         );
-    }
-
-    #[test]
-    fn strip_port_handles_ipv6() {
-        assert_eq!(strip_port("[::1]:4510"), Some("::1"));
-        assert_eq!(strip_port("[::1]"), Some("::1"));
-        assert_eq!(strip_port("[::1]:"), Some("::1"));
-        assert_eq!(strip_port("localhost:4510"), Some("localhost"));
-        assert_eq!(strip_port("localhost"), Some("localhost"));
-        assert_eq!(strip_port("127.0.0.1"), Some("127.0.0.1"));
-        // Malformed: bare colon, multi-colon non-bracketed.
-        assert_eq!(strip_port("a:b:c"), None);
-        assert_eq!(strip_port(""), None);
     }
 
     #[test]

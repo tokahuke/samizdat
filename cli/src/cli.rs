@@ -1,25 +1,17 @@
-//! Command-line interface module for the Samizdat application.
-//!
-//! This module provides the command-line argument parsing and execution logic for all
-//! Samizdat commands.
-
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use structopt::StructOpt;
 
 use crate::{api::EditionKind, commands};
 
-/// Global CLI instance for the application
 static CLI: OnceLock<Cli> = OnceLock::new();
 
-/// Initializes the CLI by parsing command line arguments
 pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
     tracing::debug!("Arguments from command line: {:#?}", cli);
     cli
 }
 
-/// Returns a reference to the global CLI instance
 pub fn cli<'a>() -> &'a Cli {
     CLI.get_or_init(init_cli)
 }
@@ -513,11 +505,6 @@ pub enum IdentityCommand {
         /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
-        /// Bypass the DNS-safety check on `identity`. Use only for on-chain
-        /// reservations of names that no samizdat node will serve at the
-        /// `<identity>.localhost` subdomain.
-        #[structopt(long)]
-        force: bool,
     },
     /// Updates an existing blockchain identity association
     Update {
@@ -531,10 +518,6 @@ pub enum IdentityCommand {
         /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
-        /// Bypass the DNS-safety check on `identity`. Use only for
-        /// reservations of names that no samizdat node will serve.
-        #[structopt(long)]
-        force: bool,
     },
     /// Gets the current key for an identity
     Get {
@@ -558,15 +541,13 @@ impl IdentityCommand {
                 entity,
                 ttl,
                 endpoint,
-                force,
-            } => commands::identity::create(identity, entity, ttl, endpoint, force).await,
+            } => commands::identity::create(identity, entity, ttl, endpoint).await,
             IdentityCommand::Update {
                 identity,
                 entity,
                 ttl,
                 endpoint,
-                force,
-            } => commands::identity::update(identity, entity, ttl, endpoint, force).await,
+            } => commands::identity::update(identity, entity, ttl, endpoint).await,
             IdentityCommand::Get { identity, endpoint } => {
                 commands::identity::get(identity, endpoint).await
             }

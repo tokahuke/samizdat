@@ -42,11 +42,6 @@ toml = "0.8.19"
 serde_derive = "1.0.228"
 serde = "1.0.228"
 serde_json = "1.0.149"
-rustls-acme = { version = "0.12.1", default-features = false, features = [
-    "ring",
-    "tokio",
-    "axum",
-] }
 instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls", "ring"] }
 arc-swap = "1.7"
 rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }

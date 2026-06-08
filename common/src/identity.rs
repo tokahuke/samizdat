@@ -16,79 +16,47 @@
 //! registrations, and it remains the only defense against pre-redeploy
 //! garbage forever.
 
-use std::fmt::{self, Display};
-
 use crate::host_label::KEY_HOST_LABEL_LEN;
 
 /// Why a candidate identity handle is unservable as a subdomain.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Reason {
-    /// The empty string.
+    #[error("identity is empty")]
     Empty,
-    /// Too long for a DNS label (RFC 1035: 63 bytes max).
+    #[error("identity is {0} bytes; DNS labels are limited to 63 bytes")]
     TooLong(usize),
-    /// Contains a byte outside `[a-z0-9-]`. Carries the offending byte so the
-    /// user knows what to remove.
+    /// Carries the offending byte so the user knows what to remove.
+    #[error("{}", bad_byte_message(*.0))]
     BadByte(u8),
-    /// First byte is `-`.
+    #[error("identity starts with '-'")]
     LeadingHyphen,
-    /// Last byte is `-`.
+    #[error("identity ends with '-'")]
     TrailingHyphen,
-    /// Reserved DNS label, would shadow infrastructure names.
+    #[error("identity is a reserved DNS label")]
     Reserved,
-    /// Looks like an IPv4 octet sequence; ambiguous against future numeric
-    /// host conventions.
+    #[error("identity is all digits; reserved against numeric host ambiguity")]
     AllNumeric,
-    /// Starts with `xn--` (IDN punycode prefix). IDN handling is not
-    /// supported; reject for now.
-    PunycodePrefix,
     /// Length and alphabet exactly match a 52-char base32 series-key label;
-    /// would collide with the key-vs-identity dispatch in
+    /// would collide with key-vs-identity dispatch in
     /// `node/src/http/host_scope.rs`.
+    #[error(
+        "identity matches the 52-character base32 series-key shape and would \
+         collide with key-based subdomain dispatch"
+    )]
     KeyShape,
 }
 
-impl Display for Reason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Reason::Empty => write!(f, "identity is empty"),
-            Reason::TooLong(n) => write!(
-                f,
-                "identity is {n} bytes; DNS labels are limited to 63 bytes"
-            ),
-            Reason::BadByte(b) => {
-                if b.is_ascii_graphic() {
-                    write!(
-                        f,
-                        "identity contains '{}' (0x{:02x}); only a-z, 0-9 and '-' are allowed",
-                        *b as char, b
-                    )
-                } else {
-                    write!(
-                        f,
-                        "identity contains a non-printable byte 0x{:02x}; only a-z, 0-9 and \
-                         '-' are allowed",
-                        b
-                    )
-                }
-            }
-            Reason::LeadingHyphen => write!(f, "identity starts with '-'"),
-            Reason::TrailingHyphen => write!(f, "identity ends with '-'"),
-            Reason::Reserved => write!(f, "identity is a reserved DNS label"),
-            Reason::AllNumeric => write!(
-                f,
-                "identity is all digits; reserved against numeric host ambiguity"
-            ),
-            Reason::PunycodePrefix => write!(
-                f,
-                "identity starts with 'xn--' (IDN punycode); not supported"
-            ),
-            Reason::KeyShape => write!(
-                f,
-                "identity matches the 52-character base32 series-key shape and would \
-                 collide with key-based subdomain dispatch"
-            ),
-        }
+fn bad_byte_message(b: u8) -> String {
+    if b.is_ascii_graphic() {
+        format!(
+            "identity contains '{}' (0x{:02x}); only a-z, 0-9 and '-' are allowed",
+            b as char, b
+        )
+    } else {
+        format!(
+            "identity contains a non-printable byte 0x{:02x}; only a-z, 0-9 and '-' are allowed",
+            b
+        )
     }
 }
 
@@ -136,10 +104,6 @@ pub fn check_servable_identity(s: &str) -> Result<(), Reason> {
 
     if RESERVED_LABELS.iter().any(|r| *r == s) {
         return Err(Reason::Reserved);
-    }
-
-    if s.starts_with("xn--") {
-        return Err(Reason::PunycodePrefix);
     }
 
     if bytes.iter().all(|b| b.is_ascii_digit()) {
@@ -226,11 +190,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_xn_prefix() {
-        assert_eq!(
-            check_servable_identity("xn--caf-dma"),
-            Err(Reason::PunycodePrefix)
-        );
+    fn accepts_punycode_prefix() {
+        assert!(check_servable_identity("xn--caf-dma").is_ok());
     }
 
     #[test]
