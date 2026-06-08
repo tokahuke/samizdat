@@ -151,8 +151,12 @@ jobs:
           ssh root@${{ secrets.TESTBED_HOST }} 'chmod 640 /etc/samizdat/proxy.env && chgrp samizdat /etc/samizdat/proxy.env'
           rm -f /tmp/proxy.env
 
-      - name: Restart samizdat-proxy
-        run: ssh root@${{ secrets.TESTBED_HOST }} systemctl restart samizdat-proxy
+      - name: Restart all samizdat daemons
+        # `samizdat-up install` is idempotent and registers the unit
+        # files; on a re-run against a populated droplet it does NOT
+        # restart already-running daemons, so the new binary on disk
+        # would keep the old process alive. Restart explicitly.
+        run: ssh root@${{ secrets.TESTBED_HOST }} systemctl restart samizdat-node samizdat-hub samizdat-proxy
 
       - name: Subscribe to seed collections
         # Idempotent: the CLI errors loudly on duplicate entries with

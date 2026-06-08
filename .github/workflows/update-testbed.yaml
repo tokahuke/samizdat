@@ -63,3 +63,9 @@ jobs:
 
       - name: samizdat-up update
         run: ssh root@${{ secrets.TESTBED_HOST }} samizdat-up update
+
+      - name: Restart all samizdat daemons
+        # `samizdat-up update` swaps the on-disk binary but does not
+        # restart already-running services; restart so the new code
+        # actually runs.
+        run: ssh root@${{ secrets.TESTBED_HOST }} systemctl restart samizdat-node samizdat-hub samizdat-proxy
