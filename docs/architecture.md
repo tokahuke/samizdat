@@ -324,11 +324,31 @@ key works fine as an identifier on its own.
    opaque-encrypted) to every connected node whose subscription riddle
    matches the series public key.
 
+### URL forms
+
+Content is served at per-series subdomains so each series gets its own
+browser origin. Three shapes:
+
+- `http://<base32-key>.localhost:<port>/<path>` -- local, series-keyed.
+  The label is RFC 4648 base32 lowercase no-padding of the 32-byte
+  Ed25519 public key (52 chars).
+- `http://<identity>.localhost:<port>/<path>` -- local, identity-keyed
+  (DNS-safe identity registered on-chain).
+- `https://proxy.hubfederation.com/_series/<base64-key>/<path>` and
+  `/~<identity>/<path>` -- the public proxy. The path-form is the
+  external surface; the proxy rewrites into the node's host-form
+  upstream.
+
+All `/_*` admin routes plus the welcome page live at the bare
+`http://localhost:<port>/` origin, which is a different origin from any
+series subdomain.
+
 ### Resolving
 
-1. Browser requests `http://localhost:<port>/<series-name>/<path>`.
-2. Node resolves `<series-name>` (either a raw pubkey or an identity-dapp
-   lookup), looks up the latest edition, finds the locator hash for `<path>`.
+1. Browser requests `http://<base32-key>.localhost:<port>/<path>`.
+2. Node decodes `<base32-key>` into the series public key (or resolves an
+   identity handle via the identity-dapp lookup), looks up the latest
+   edition, finds the locator hash for `<path>`.
 3. If the object is locally cached, served directly. Otherwise:
 4. Node creates a `Query` with `content_riddles` derived from the locator,
    sends it to every connected hub.

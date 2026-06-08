@@ -98,7 +98,29 @@ clear error. New keys that lack `serde(default)` and that the daemon
 unconditionally reads will crash old installs on first restart after the
 upgrade.
 
-## 6. Default-hub seeding is one-shot per install
+## 6. Node URL shape changed to per-series subdomains
+
+The node serves content at `http://<base32-key>.localhost:<port>/<path>`
+and `http://<identity>.localhost:<port>/<path>`. The path-based content
+routes `/_series/<key>/<path>` and `/~<identity>/<path>` on the node are
+GONE; any bookmark, hardcoded link, or curl pinned to the path-form
+against `localhost:<port>` returns 404. The public proxy still accepts
+those external URLs (`https://proxy.hubfederation.com/_series/...` and
+`/~<handle>/...`) and translates them to host-form upstream, so
+proxy-fronted links survive.
+
+The dispatcher lives in [`node/src/http/host_scope.rs`](../node/src/http/host_scope.rs)
+and the content handlers in [`node/src/http/content.rs`](../node/src/http/content.rs).
+The proxy rewrite lives in [`proxy/src/http.rs::translate_to_node_url`](../proxy/src/http.rs).
+
+The smart contract was tightened to refuse DNS-unsafe identity names but
+the on-chain bytecode is unchanged; the runtime
+[`samizdat_common::identity::check_servable_identity`](../common/src/identity.rs)
+is the only filter against new garbage until the deployment is rotated.
+See [`blockchain/REDEPLOY.md`](../blockchain/REDEPLOY.md) for the
+redeploy procedure.
+
+## 7. Default-hub seeding is one-shot per install
 
 [`samizdat-up/src/install/mod.rs::seed_default_hubs_best_effort`](../samizdat-up/src/install/mod.rs)
 runs only during `samizdat-up install node`, not during `samizdat-up

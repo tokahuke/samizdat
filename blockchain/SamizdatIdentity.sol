@@ -152,7 +152,7 @@ contract SamizdatIdentityV1 {
 
     // Register an association (or update an existing one).
     function registerWithTtl(
-        string calldata identity, 
+        string calldata identity,
         string calldata entity,
         uint64 ttl
     ) payable public notDeprecated {
@@ -168,10 +168,15 @@ contract SamizdatIdentityV1 {
             entry.owner == address(0) || entry.owner == msg.sender,
             "Must be owner of the identity to control it"
         );
-        require(bytes(identity).length != 0, "Identity cannot be empty");
-        require(bytes(identity)[0] != "_", "Identity canot start with `_`");
         require(bytes(entity).length != 0, "Entity cannot be empty");
         require(ttl > 15 * 60, "TTL must be greater than 15 minutes");
+
+        // DNS-safety check on the identity. Mirrors
+        // `samizdat_common::identity::check_servable_identity` (see
+        // common/src/identity.rs). Any identity that fails here cannot be
+        // hosted at `<identity>.localhost:<port>` and would be a
+        // shadow/phishing-shaped subdomain.
+        _validateIdentity(identity);
 
         // Do update:
         entry.entity = entity;
@@ -180,6 +185,80 @@ contract SamizdatIdentityV1 {
 
         // Insert:
         SamizdatIdentityStorage(identityStorage).setIdentity(identity, entry);
+    }
+
+    // Reserved labels rejected as identities. Match the list in
+    // `common/src/identity.rs`. Stored as keccak256 digests so the lookup
+    // is one hash per candidate rather than a string compare loop.
+    function _isReservedLabel(bytes32 h) private pure returns (bool) {
+        return
+            h == keccak256("localhost") ||
+            h == keccak256("local") ||
+            h == keccak256("arpa") ||
+            h == keccak256("test") ||
+            h == keccak256("example") ||
+            h == keccak256("invalid") ||
+            h == keccak256("localhost4") ||
+            h == keccak256("localhost6") ||
+            h == keccak256("samizdat");
+    }
+
+    // Refuses identities the node cannot serve at a `<identity>.localhost`
+    // subdomain. Rules mirror `check_servable_identity` in
+    // `common/src/identity.rs`:
+    //   - 1..=63 ASCII bytes.
+    //   - Alphabet [a-z0-9-].
+    //   - No leading or trailing '-'.
+    //   - Not in the reserved label set.
+    //   - Not the `xn--` punycode prefix.
+    //   - Not all digits (numeric host ambiguity).
+    //   - Not a 52-char base32 key shape (a-z, 2-7 only); would shadow
+    //     a series-key subdomain.
+    function _validateIdentity(string calldata identity) private pure {
+        bytes memory b = bytes(identity);
+        uint256 n = b.length;
+        require(n >= 1, "Identity cannot be empty");
+        require(n <= 63, "Identity is too long (max 63 bytes)");
+
+        bool allDigits = true;
+        bool keyShape = (n == 52);
+        for (uint256 i = 0; i < n; i++) {
+            bytes1 c = b[i];
+            bool isDigit = c >= 0x30 && c <= 0x39;
+            bool isLower = c >= 0x61 && c <= 0x7A;
+            bool isHyphen = c == 0x2D;
+            require(
+                isDigit || isLower || isHyphen,
+                "Identity must use only a-z, 0-9 and '-'"
+            );
+            if (!isDigit) {
+                allDigits = false;
+            }
+            // base32 lowercase alphabet is [a-z2-7]: digits 0, 1, 8, 9 and
+            // hyphen break the key-shape match.
+            if (keyShape) {
+                bool inBase32 =
+                    (c >= 0x61 && c <= 0x7A) || (c >= 0x32 && c <= 0x37);
+                if (!inBase32) {
+                    keyShape = false;
+                }
+            }
+        }
+
+        require(b[0] != 0x2D, "Identity cannot start with '-'");
+        require(b[n - 1] != 0x2D, "Identity cannot end with '-'");
+        require(!allDigits, "Identity cannot be all digits");
+        require(!keyShape, "Identity must not match the 52-char base32 key shape");
+
+        // Reject `xn--` punycode prefix.
+        if (n >= 4) {
+            require(
+                !(b[0] == 0x78 && b[1] == 0x6E && b[2] == 0x2D && b[3] == 0x2D),
+                "Identity must not start with 'xn--'"
+            );
+        }
+
+        require(!_isReservedLabel(keccak256(b)), "Identity is a reserved label");
     }
 
     // Register an association (or update an existing one) with a TTL of 1 hour.

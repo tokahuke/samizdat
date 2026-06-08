@@ -92,38 +92,27 @@ Samizdat already has in mind.
 
 ### T1. Service worker survives series uninstall and intercepts other series
 **Vector** -- Malicious series content registers a service worker via
-`navigator.serviceWorker.register('/sw.js')`. The worker is registered at
-origin scope `http://127.0.0.1:4510/`. It survives the user navigating
-away, survives the series being unsubscribed/removed from the node, and
-intercepts `fetch` for every other Samizdat-served path on the same origin.
-**Current state** -- No service-worker scoping at the HTTP layer.
-`node/src/http/mod.rs:152` assembles routes; none add
-`Service-Worker-Allowed` headers or refuse to serve scripts under a path
-that would let the browser register them at the root scope. I could not
-locate any service-worker-related code.
-**What an attacker gets** -- Persistent man-in-the-middle on every
-samizdat-served page until the user manually unregisters the worker from
-browser devtools. The worker can rewrite responses for `/~bank/`,
-exfiltrate request bodies, mint fake `Authorization` failures.
-**Severity** -- high: requires the user to have first navigated to (or
-subscribed to) the malicious series; not a passive-visit-no-precondition
-attack. The damage once triggered is persistent and cross-entity.
-**Mitigation in place** -- partial; the structural cause is the shared
-single origin (see `docs/threat-model.md` "Browser pages served by the
-node") and there is no service-worker-scope HTTP middleware today. The
-existing same-origin contract is what makes the worker cross-entity once
-registered; the Referer-based trusted-context check still prevents the
-worker from invoking admin endpoints unless the entity was granted the
-matching right.
-**Fix** -- In `node/src/http/mod.rs`, add a middleware that refuses to
-serve any response with `Service-Worker-Allowed` outside `/_series/<key>/`
-or `/~<handle>/` subtrees, and that always emits
-`Service-Worker-Allowed: /_series/<key>/` (or the entity scope) for
-scripts inside those subtrees. Better still, refuse to serve scripts at
-all paths shallow enough to register a root-scoped worker: any `.js`
-served at `/sw.js`, `/`, or `/index.js` should be answered with an empty
-header or `Service-Worker-Allowed: /none/`. Per-subdomain origins (see
-single-origin problem) makes this go away.
+`navigator.serviceWorker.register('/sw.js')`. Before per-series subdomain
+isolation, the worker registered at origin scope `http://localhost:4510/`
+intercepted every other Samizdat-served path on that origin.
+**Current state** -- Largely resolved. Each series is served at
+`<base32-key>.localhost:<port>` (its own browser origin), so a service
+worker registered by series A is scoped to series A only and never sees
+fetches for series B. The dispatcher in `node/src/http/host_scope.rs` is
+the structural fix.
+**What an attacker gets** -- Persistent man-in-the-middle for THAT
+series' own pages, until the user unregisters the worker. No cross-series
+reach.
+**Severity** -- low. Reduced from high once the per-series origin
+boundary landed; only same-series MITM remains, and that is the operator
+controlling their own series.
+**Mitigation in place** -- per-series origin isolation
+(`node/src/http/host_scope.rs` + the host-based content router in
+`node/src/http/mod.rs`); admin endpoints live on a different origin
+(bare loopback) so the worker cannot reach them even with CORS open
+unless an explicit ManageSeries grant exists for that entity.
+**Fix** -- no further action required to close the cross-series leak; the
+remaining same-series MITM is intrinsic to letting authors run JS.
 
 ### T2. Page on samizdat-served origin reads admin/read tokens via fetch
 **Vector** -- A page at `http://127.0.0.1:4510/~attacker/` runs JS that
@@ -323,53 +312,49 @@ SVG inline; serve as `application/octet-stream` for objects without an
 allowlisted MIME.
 
 ### T9. Cross-series JS pull
-**Vector** -- A page at `/~attacker/` includes
-`<script src="/_series/<other-key>/sensitive.js">`. The browser fetches
-it from the same origin; the script executes in `~attacker`'s context.
-This is correct per the web platform: same origin, same script tag.
-**Current state** -- Direct consequence of the single-origin model.
-`node/src/http/series.rs:34-67` happily serves the content; there is no
-origin-comparison defence.
-**What an attacker gets** -- Reads of script-shaped resources from
-sibling entities, executed in the attacker entity's context. The
-`Referer` the node sees is `~attacker`'s page, so any later admin call
-the attacker makes via JS does NOT pick up the victim entity's rights.
-The damage is read-only-of-the-script-body, but the script body can
-itself contain secrets (config, baked-in tokens).
-**Severity** -- medium today (depends on what scripts contain),
-structurally high (any future per-entity browser session model breaks).
-**Mitigation in place** -- the Referer-the-node-sees is still
-`~attacker`'s page, so the attacker's later admin calls do NOT pick up the
-victim entity's rights (see `docs/threat-model.md` "Browser pages served
-by the node"). What leaks is the script body content only.
-**Fix** -- Per-series subdomain isolation. No header fix closes this.
+**Vector** -- A page on series A includes
+`<script src="http://<base32-other-key>.localhost:4510/sensitive.js">`.
+The script is on a different origin; the browser fetches it as a normal
+cross-origin script and executes in series A's context (script tags are
+opaque cross-origin reads by design of the web platform).
+**Current state** -- Structurally bounded: the fetch crosses origins now
+that each series has its own subdomain, so the browser can no longer
+pretend the source was "same-site". A page that loads a sibling series'
+script gets opaque execution; no DOM access, no body read via JS, no
+cookies sent.
+**What an attacker gets** -- Execution of the foreign script body in the
+attacker entity's context. The script body itself is not readable from JS
+unless the foreign series cooperates with CORS (which it does not by
+default). What leaks: the side effects of executing the script, if any.
+**Severity** -- low. Reduced from medium once per-series subdomain
+isolation landed; the attack is now no different from any cross-origin
+`<script src>` on the open web.
+**Mitigation in place** -- per-series origin isolation
+(`node/src/http/host_scope.rs`). Foreign scripts run opaque; no
+cross-series cookie or storage reach.
+**Fix** -- if the operator wants to fully forbid cross-origin script
+loads, CSP `script-src 'self'` per response would do it. See "Defensive
+primitives to add".
 
 ### T10. Cache and Cache-Storage as persistent fingerprint
 **Vector** -- A page writes an entry to `caches.open('attacker').then(
 c => c.put('/marker', new Response('uuid')))`. Next session, the same
-page reads the marker. Identifier survives across page loads, across
-restarts of the browser, across switching networks, until the user
-manually clears site data for `127.0.0.1`. The HTTP cache supports the
-same idea via cache-keying tricks on intermediate ETags.
-**Current state** -- No `Clear-Site-Data` header anywhere. No
-`Cache-Control: no-store` default. The Samizdat node sets `ETag` per
-content hash (`node/src/http/resolvers.rs:73,102`) which is content-
-addressed and stable; that is appropriate for content delivery but means
-a page can fingerprint *the user's catalogue of seen content* via
-selective revalidation.
-**What an attacker gets** -- Long-lived per-browser identifier, plus an
-oracle for "has this user ever fetched this object hash before".
-**Severity** -- medium: a privacy/fingerprinting attack with bounded
-yield (one stable identifier per browser profile, plus a content-cache
-oracle); requires the user to revisit attacker-controlled content.
-**Mitigation in place** -- none; no `Clear-Site-Data` plumbing on
-unsubscribe, no per-entity storage partitioning today.
-**Fix** -- Send `Clear-Site-Data: "cache", "storage"` when the user
-"forgets" an entity (a new admin route invoked by the CLI / UI on
-unsubscribe). Per-subdomain isolation again helps: clearing storage for
-one subdomain does not affect others. Consider `Cache-Control:
-no-store` for HTML responses (not for content objects, which are
-content-addressed and benefit from caching).
+page reads the marker.
+**Current state** -- Per-series subdomain isolation scopes Cache Storage
+and the HTTP cache to one series. Cross-series tracking via this oracle
+is closed. WITHIN a series, the operator still has a long-lived
+identifier; that is intrinsic to letting authors run JS on their own
+content.
+**What an attacker gets** -- A per-series-per-browser identifier. No
+cross-series correlation via this surface.
+**Severity** -- low. Reduced from medium once per-series origin
+isolation landed.
+**Mitigation in place** -- per-series origin isolation; cache and
+storage are partitioned per browser-origin.
+**Fix** -- if same-series tracking is itself unacceptable for a given
+hosting profile, send `Clear-Site-Data: "cache", "storage"` on
+unsubscribe from a dedicated admin endpoint, and consider
+`Cache-Control: no-store` on HTML responses.
 
 ### T11. Persistent supply-chain via external `<script src=https://...>`
 **Vector** -- A subscribed series ships a page with
@@ -514,19 +499,22 @@ the *origin* is still `127.0.0.1:4510`.
 `http://127.0.0.1:4510/~bank.example/login` while the page itself was
 loaded from `/~attacker/`. Combined with T9 (cross-series JS pull), the
 attacker can render a convincing forgery.
-**Severity** -- medium: phishing requires the user to navigate to (or
-have subscribed to) the malicious entity first, and the deception is
-limited to URL-bar manipulation within the single origin.
-**Mitigation in place** -- partial; the same-origin policy still prevents
-`pushState` to a different ORIGIN, so the address bar always shows
-`127.0.0.1:4510`. The Referer-trusted-context check ensures admin
-operations the deceptive page initiates run with the attacker entity's
-rights, not the impersonated entity's. The residual gap is purely visual
-deception of the user.
-**Fix** -- Per-series subdomain isolation. Once each identity is on
-its own subdomain, `pushState` to another identity's path becomes a
-cross-origin operation and is blocked by the browser. No middleware
-fix on the current single-origin layout closes this.
+**Severity** -- low. Per-series subdomain isolation closes
+`pushState`-across-entities (the address bar shows the actual subdomain
+host, and `pushState` to a different origin is blocked). Residual
+deception is the operator's own URL-bar manipulation within their own
+subdomain, which is what any web author can do on any website.
+**Mitigation in place** -- per-series origin isolation
+(`node/src/http/host_scope.rs`). `pushState` to a different
+`<key>.localhost` or `<identity>.localhost` is a cross-origin operation
+that the browser refuses.
+**Fix** -- no further action required for the cross-entity URL-bar
+deception. Phishing-styled identities (e.g. `bank-secure-login`) are
+discouraged by the contract amendment in
+`blockchain/SamizdatIdentity.sol::_validateIdentity` rejecting
+DNS-unsafe shapes, and refused at runtime by
+`samizdat_common::identity::check_servable_identity` on existing chain
+state; this is a defence-in-depth choice rather than a primary fix.
 
 ## Defensive primitives to add
 

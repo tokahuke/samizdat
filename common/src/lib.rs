@@ -8,6 +8,8 @@ pub mod blockchain;
 pub mod cipher;
 pub mod db;
 pub mod heap_entry;
+pub mod host_label;
+pub mod identity;
 pub mod keyed_channel;
 pub mod logger;
 pub mod quic;

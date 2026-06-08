@@ -513,6 +513,11 @@ pub enum IdentityCommand {
         /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
+        /// Bypass the DNS-safety check on `identity`. Use only for on-chain
+        /// reservations of names that no samizdat node will serve at the
+        /// `<identity>.localhost` subdomain.
+        #[structopt(long)]
+        force: bool,
     },
     /// Updates an existing blockchain identity association
     Update {
@@ -526,6 +531,10 @@ pub enum IdentityCommand {
         /// Optional custom blockchain endpoint
         #[structopt(long)]
         endpoint: Option<String>,
+        /// Bypass the DNS-safety check on `identity`. Use only for
+        /// reservations of names that no samizdat node will serve.
+        #[structopt(long)]
+        force: bool,
     },
     /// Gets the current key for an identity
     Get {
@@ -549,13 +558,15 @@ impl IdentityCommand {
                 entity,
                 ttl,
                 endpoint,
-            } => commands::identity::create(identity, entity, ttl, endpoint).await,
+                force,
+            } => commands::identity::create(identity, entity, ttl, endpoint, force).await,
             IdentityCommand::Update {
                 identity,
                 entity,
                 ttl,
                 endpoint,
-            } => commands::identity::update(identity, entity, ttl, endpoint).await,
+                force,
+            } => commands::identity::update(identity, entity, ttl, endpoint, force).await,
             IdentityCommand::Get { identity, endpoint } => {
                 commands::identity::get(identity, endpoint).await
             }

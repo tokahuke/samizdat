@@ -6,6 +6,9 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use mime::Mime;
+use samizdat_common::host_label::encode_key_to_host_label;
+use samizdat_common::identity::check_servable_identity;
+use samizdat_common::Key;
 
 use crate::cli::cli;
 use crate::html::proxy_page;
@@ -67,8 +70,27 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
         (Some(identity), _) => ("_identity", identity),
     };
 
-    // Query node for the web page:
-    let translated = format!("{}{}", cli().node, path);
+    // The node serves content at `<base32-key>.localhost:<port>/<rest>`
+    // and `<identity>.localhost:<port>/<rest>`. The proxy keeps the
+    // path-form on its external surface and rewrites here into the
+    // host-form upstream.
+    let translated = match translate_to_node_url(path, &cli().node) {
+        Ok(url) => url,
+        Err(BadIdentity { handle, reason }) => {
+            tracing::info!("Rejecting identity '{handle}' at proxy: {reason}");
+            return Ok(axum::response::Response::builder()
+                .status(400)
+                .header("Content-Type", "text/plain")
+                .body(
+                    format!(
+                        "identity '{handle}' is not servable as a subdomain: {reason}. \
+                         Use the public-key form `_series/<base64-key>/` if you know it."
+                    )
+                    .into(),
+                )
+                .expect("can build 400 response"));
+        }
+    };
     let response = CLIENT.get(translated).send().await?;
 
     let response = match response.status().as_u16() {
@@ -114,6 +136,71 @@ pub async fn do_proxy(OriginalUri(uri): OriginalUri) -> Result<Response<Body>, a
     };
 
     Ok(response)
+}
+
+/// Reason a `/~<identity>/...` request cannot be forwarded to the node.
+struct BadIdentity {
+    handle: String,
+    reason: samizdat_common::identity::Reason,
+}
+
+/// Rewrites an incoming proxy path into the upstream node URL. Three cases:
+///
+/// - `/_series/<base64-key>/<rest>` -> `<scheme>://<base32-key>.<node-host>:<node-port>/<rest>`.
+///   The key is decoded as URL-safe base64 (matching `samizdat_common::Key::FromStr`)
+///   and re-encoded as lowercase base32 for the subdomain label. Bad keys
+///   are passed through verbatim (the node will 400 or 404, with detail),
+///   so this function never fails on key parse alone.
+/// - `/~<identity>/<rest>` -> `<scheme>://<identity>.<node-host>:<node-port>/<rest>`.
+///   The identity is validated with `check_servable_identity` first; failures
+///   return Err so the caller can produce a clean 400 to the external user.
+/// - Anything else (root, ACME paths) -> forwarded verbatim.
+fn translate_to_node_url(path: &str, node_base: &str) -> Result<String, BadIdentity> {
+    // Parse the node base URL once so we can substitute the host portion.
+    // If the operator passed an invalid `--node` value, fall back to the
+    // verbatim concatenation; we cannot do anything better here and the
+    // request will surface a connect error downstream.
+    let Ok(base_url) = url::Url::parse(node_base) else {
+        return Ok(format!("{node_base}{path}"));
+    };
+    let scheme = base_url.scheme();
+    let host = match base_url.host_str() {
+        Some(h) => h,
+        None => return Ok(format!("{node_base}{path}")),
+    };
+    let port_part = match base_url.port() {
+        Some(p) => format!(":{p}"),
+        None => String::new(),
+    };
+
+    // `/_series/<key>/<rest>`
+    if let Some(after) = path.strip_prefix("/_series/") {
+        let mut split = after.splitn(2, '/');
+        let key_str = split.next().unwrap_or("");
+        let rest = split.next().unwrap_or("");
+        if let Ok(key) = key_str.parse::<Key>() {
+            let label = encode_key_to_host_label(&key);
+            return Ok(format!("{scheme}://{label}.{host}{port_part}/{rest}"));
+        }
+        // Bad key: fall through to verbatim forward so the node can answer.
+    }
+
+    // `/~<identity>/<rest>` or `/~<identity>`
+    if let Some(after) = path.strip_prefix("/~") {
+        let mut split = after.splitn(2, '/');
+        let handle = split.next().unwrap_or("").to_ascii_lowercase();
+        let rest = split.next().unwrap_or("");
+        if handle.is_empty() {
+            return Ok(format!("{node_base}{path}"));
+        }
+        if let Err(reason) = check_servable_identity(&handle) {
+            return Err(BadIdentity { handle, reason });
+        }
+        return Ok(format!("{scheme}://{handle}.{host}{port_part}/{rest}"));
+    }
+
+    // Root / ACME / anything else: verbatim.
+    Ok(format!("{node_base}{path}"))
 }
 
 /// Tests if the node is live at the URL supplied to the CLI.

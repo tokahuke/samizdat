@@ -3,8 +3,10 @@
 mod auth;
 mod collections;
 mod connections;
+mod content;
 mod editions;
 mod ethereum_provider;
+mod host_scope;
 mod hubs;
 mod identities;
 mod kvstore;
@@ -26,7 +28,7 @@ use std::{
 use axum::{
     extract::{ConnectInfo, FromRequestParts, Request},
     middleware::Next,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -149,9 +151,26 @@ impl IntoResponse for PageResponse {
 }
 
 /// The entrypoint of the Samizdat node public HTTP API.
+///
+/// Split into two sub-routers and a top-level CORS layer:
+///
+/// - The **admin sub-router** holds every `/_*` nest. Its requests must arrive
+///   on the bare loopback host (`localhost`, `127.0.0.1`, `[::1]`); the
+///   `require_bare_host` layer returns 404 for admin requests on any
+///   `*.localhost` subdomain. Admin auth (bearer token or `/_register`
+///   trusted-context grant via the Referer) still applies on individual
+///   routes; this layer is only the host-level guard.
+/// - The **content sub-router** holds the two content handlers (`GET /` and
+///   `GET /{*name}`). Both use the `HostScope` extractor to dispatch: bare
+///   host serves the welcome HTML at `/`, subdomain hosts resolve series /
+///   identity content. The content router never sees an admin path because
+///   the admin nest above is checked first by `Router::merge` order.
+/// - The top-level CORS layer reflects any `Origin` whose host is
+///   `localhost` or ends in `.localhost`, so the JS SDK can keep talking
+///   from content subdomains to admin endpoints. Tightening is a followup
+///   (see `docs/javascript-security.md`).
 fn api() -> Router {
-    Router::new()
-        .merge(identities::api())
+    let admin = Router::new()
         .nest("/_kvstore", kvstore::api())
         .nest("/_objects", objects::api())
         .nest("/_collections", collections::api())
@@ -165,6 +184,70 @@ fn api() -> Router {
         .nest("/_connections", connections::api())
         .nest("/_peers", peers::api())
         .nest("/_vacuum", vacuum())
+        .layer(axum::middleware::from_fn(require_bare_host));
+
+    let content = Router::new()
+        .route("/", get(content::content_root))
+        .route("/{*name}", get(content::content_path));
+
+    admin.merge(content).layer(cors_layer())
+}
+
+/// Builds the CORS layer applied at the top of the node API. Reflects any
+/// `Origin` whose host is `localhost` or a `*.localhost` subdomain; rejects
+/// everything else at the browser. Credentials enabled so the SDK can carry
+/// the bearer-cookie path (deferred). Permissive on purpose: per-route
+/// scoping is part of the SDK rework followup tracked in
+/// `docs/javascript-security.md`.
+fn cors_layer() -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin, _parts| {
+            let Ok(s) = origin.to_str() else {
+                return false;
+            };
+            let Ok(url) = url::Url::parse(s) else {
+                return false;
+            };
+            match url.host() {
+                Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(url::Host::Ipv6(ip)) => ip.to_canonical().is_loopback(),
+                None => false,
+            }
+        }))
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
+}
+
+/// Layer applied to the admin sub-router that returns 404 for any request
+/// arriving on a `*.localhost` subdomain. Admin endpoints exist only on the
+/// bare loopback host; a subdomain request that happens to hit an admin
+/// path should not be served, otherwise it would defeat the per-series
+/// origin isolation (a content page could call admin endpoints from its own
+/// origin via a same-origin fetch).
+async fn require_bare_host(request: Request, next: Next) -> Response {
+    use crate::http::host_scope::{classify, HostScope};
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|h| std::str::from_utf8(h.as_bytes()).ok());
+    let on_bare = match host {
+        Some(raw) => matches!(classify(raw), Ok(HostScope::BareLoopback)),
+        None => false,
+    };
+    if on_bare {
+        next.run(request).await
+    } else {
+        Response::builder()
+            .status(http::StatusCode::NOT_FOUND)
+            .body(
+                "admin endpoints are only available on the bare loopback host \
+                 (`localhost`, `127.0.0.1`, `[::1]`)"
+                    .into(),
+            )
+            .expect("can build require_bare_host response")
+    }
 }
 
 /// Creates a router for vacuum-related endpoints.
@@ -222,15 +305,12 @@ async fn deny_outside_requests(
 
 /// Runs the HTTP API server.
 pub async fn serve() -> Result<(), crate::Error> {
-    let server = Router::new()
-        .route("/", get(|| async { Html(include_str!("../index.html")) }))
-        .merge(api())
-        .layer(
-            tower::ServiceBuilder::new()
-                .layer(axum::middleware::from_fn(deny_outside_requests))
-                .layer(axum::middleware::from_fn(redirect_request))
-                .layer(tower_http::trace::TraceLayer::new_for_http()),
-        );
+    let server = api().layer(
+        tower::ServiceBuilder::new()
+            .layer(axum::middleware::from_fn(deny_outside_requests))
+            .layer(axum::middleware::from_fn(redirect_request))
+            .layer(tower_http::trace::TraceLayer::new_for_http()),
+    );
 
     axum::serve(
         tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, cli().port)).await?,

@@ -309,9 +309,19 @@ pub async fn commit(
     )
     .await?;
 
+    let owner = api::get_series_owner(&nickname).await?;
+    let public_key: samizdat_common::Key = owner.keypair.verifying_key().into();
+    let host_label = samizdat_common::host_label::encode_key_to_host_label(&public_key);
+    let port = std::env::var("SAMIZDAT_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(4510);
+    let url = format!("http://{host_label}.localhost:{port}/");
+
     #[derive(Tabled)]
     struct Row {
         nickname: String,
+        url: String,
         collection: Hash,
         timestamp: chrono::DateTime<chrono::Utc>,
         ttl: String,
@@ -319,6 +329,7 @@ pub async fn commit(
 
     show_table([Row {
         nickname: nickname.to_owned(),
+        url,
         collection: edition.signed.collection.hash,
         timestamp: edition.signed.timestamp,
         ttl: format!("{:?}", edition.signed.ttl),

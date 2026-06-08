@@ -191,8 +191,23 @@ impl Display for Entity {
 }
 
 impl Entity {
-    /// Creates an Entity from a URL path string.
-    /// Returns None if the path cannot be parsed into a valid entity.
+    /// Constructs an entity from a type tag and identifier string. Callers
+    /// in `entity_from_referrer` derive these from the Referer's HOST.
+    ///
+    /// Conventional values:
+    /// - `r#type = "_series"`, `identifier = "<base64-key>"`
+    /// - `r#type = "_identity"`, `identifier = "~<handle>"`
+    pub fn new(r#type: impl Into<String>, identifier: impl Into<String>) -> Entity {
+        Entity {
+            r#type: r#type.into(),
+            identifier: identifier.into(),
+        }
+    }
+
+    /// Parses an Entity from a path string used by the `/_auth/<tail>`
+    /// admin routes. Admin scripts identify an entity by writing its
+    /// path-form (e.g. `_series/<key>` or `~handle`). Returns None if the
+    /// tail does not have at least one non-empty segment.
     pub fn from_path(path: &str) -> Option<Entity> {
         let mut split = path.split('/');
         let mut r#type = split.next()?;
@@ -202,9 +217,7 @@ impl Entity {
         }
 
         if r#type.starts_with('_') {
-            // Non-identity based access.
             let identifier = split.next()?;
-
             Some(Entity {
                 r#type: r#type.to_owned(),
                 identifier: identifier.to_owned(),

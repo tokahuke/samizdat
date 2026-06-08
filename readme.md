@@ -1,7 +1,7 @@
 # Samizdat: your content, available.
 
 [![Continuous Integration](https://github.com/tokahuke/samizdat/actions/workflows/test-samizdat-up.yaml/badge.svg?branch=main)](https://github.com/tokahuke/samizdat/actions/workflows/test-samizdat-up.yaml)
-![Version 0.3.2](https://img.shields.io/badge/version-0.3.2-informational)
+![Version 0.3.3](https://img.shields.io/badge/version-0.3.3-informational)
 
 ## Website
 
@@ -81,7 +81,7 @@ On Windows, download `samizdat-up.exe` from the same location and run
 
 In the installation, the `samizdat` cli tool is included. Run `samizdat init`
 in an empty project directory and it will create a manifest (`Samizdat.toml`)
-and a private manifest (`.Samizdat.priv`, secrets only — add to `.gitignore`).
+and a private manifest (`.Samizdat.priv`, secrets only -- add to `.gitignore`).
 You will be shown the private key once on stdout; back it up.
 
 `samizdat init` also registers a new _series_ with your node. A series has a
@@ -98,21 +98,34 @@ declared in `Samizdat.toml` and publishes the result.
 public one.** This is on purpose: the public series is a sign-once-and-it's-
 out-there operation. To push to the public series, pass `--release`.
 
-After a `commit`, the content is reachable at:
+After a `commit`, the content is reachable locally at the node's per-series
+subdomain:
 
 ```
-http://localhost:4510/_series/<base64-public-key>/path/to/stuff
+http://<base32-of-public-key>.localhost:4510/path/to/stuff
 ```
 
-The public key is what you copy out of `Samizdat.toml` (or `samizdat series ls`)
-and share with friends. Despite the `localhost`, the URL is fetchable from
-any node connected to the same hub federation.
+Each series lives at its own browser origin, so storage, cookies, and
+service workers are isolated from every other series. The `samizdat commit`
+output prints the URL for you; `samizdat series ls` also includes a
+`host_label` column with the same string.
 
-Samizdat also supports a friendlier URL form, `http://localhost:4510/~<identity>/`,
-but **identities are a separate concept** from series nicknames: an identity
-is a blockchain-registered name (Polygon, via `samizdat identity create`) that
-resolves to a public key. It costs gas to register, and it is global. Most
-projects skip it and just share the `_series/<key>/` URL.
+To share with friends, give them the public-key form on the public proxy:
+
+```
+https://proxy.hubfederation.com/_series/<base64-public-key>/path/to/stuff
+```
+
+The proxy translates the path-form into the node's host-form upstream, so
+the same content is reachable both ways.
+
+Samizdat also supports a friendlier subdomain form using a blockchain
+identity (Polygon, via `samizdat identity create`), reachable at
+`http://<identity>.localhost:4510/` locally and
+`https://proxy.hubfederation.com/~<identity>/` via the proxy. Registering
+an identity costs gas and the name has to be a valid DNS label
+(`[a-z0-9-]`, 1-63 chars, no leading or trailing hyphen). Most projects
+skip identities and just share the public-key URL.
 
 This is just the tip of the iceberg, however! Check out more under
 [docs/](docs/) in this repository.

@@ -27,6 +27,7 @@ hyper = "1.9"
 mime = "0.3.17"
 scraper = "0.22.0"
 rand = "0.8.5"
+url = "2.5.4"
 axum = { version = "0.8.9", features = ["macros", "original-uri"] }
 axum-server = { version = "0.7.3", default-features = false, features = [
     "tls-rustls-no-provider",
