@@ -27,6 +27,24 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS", long, default_value = "2048")]
     #[serde_inline_default(2048)]
     pub max_connections: usize,
+    /// Maximum number of simultaneous connections accepted from a single
+    /// source IPv4 address. Tighter than the v6 cap because a v4
+    /// address typically maps to one host or one NAT pool. Raise if
+    /// you see legitimate clients behind CGNAT or corporate egress
+    /// getting "per-ip cap reached" warnings.
+    #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS_PER_IPV4", long, default_value = "16")]
+    #[serde_inline_default(16)]
+    pub max_connections_per_ipv4: usize,
+    /// Maximum number of simultaneous connections accepted from a single
+    /// source IPv6 address. Looser than the v4 cap because a single
+    /// user's `/64` prefix lets them rotate through many distinct
+    /// source addresses (SLAAC privacy extensions, manual rotation),
+    /// so a per-address cap on v6 is mostly cosmetic. Principled fix
+    /// is per-`/64` accounting; deferred until the v6 federation is
+    /// large enough to care.
+    #[structopt(env = "SAMIZDAT_MAX_CONNECTIONS_PER_IPV6", long, default_value = "64")]
+    #[serde_inline_default(64)]
+    pub max_connections_per_ipv6: usize,
     /// Maximum number of _simultaneous_ resolutions per query.
     #[structopt(env = "SAMIZDAT_MAX_RESOLUTIONS_PER_QUERY", long, default_value = "12")]
     #[serde_inline_default(12)]

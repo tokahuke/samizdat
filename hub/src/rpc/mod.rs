@@ -10,11 +10,13 @@ use futures::prelude::*;
 use node_sampler::StatisticsType;
 use samizdat_common::db::readonly_tx;
 use samizdat_common::keyed_channel::KeyedChannel;
+use std::collections::HashMap;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tarpc::context;
 use tarpc::server::{self, Channel};
@@ -318,6 +320,72 @@ async fn announce_edition(
     .await;
 }
 
+/// Per-source-IP simultaneous-connection counter. A single misbehaving
+/// host opening many source ports otherwise eats the global
+/// `max_connections` pool unbounded. The cap is asymmetric between v4
+/// and v6 (`cli().max_connections_per_ipv4` vs `..._per_ipv6`): a
+/// single v4 address typically maps to one host or NAT pool, while a
+/// v6 user with a `/64` can trivially rotate source addresses, so a
+/// per-v6-address cap can be looser without losing real protection.
+/// Each accepted connection holds a `PerIpPermit` whose Drop
+/// decrements the shared count, removing the map entry when it hits
+/// zero so the table does not grow with one-shot connections.
+struct PerIpCap {
+    counts: StdMutex<HashMap<IpAddr, usize>>,
+    cap_v4: usize,
+    cap_v6: usize,
+}
+
+impl PerIpCap {
+    fn new(cap_v4: usize, cap_v6: usize) -> Self {
+        Self {
+            counts: StdMutex::new(HashMap::new()),
+            cap_v4,
+            cap_v6,
+        }
+    }
+
+    fn cap_for(&self, ip: IpAddr) -> usize {
+        match ip {
+            IpAddr::V4(_) => self.cap_v4,
+            IpAddr::V6(_) => self.cap_v6,
+        }
+    }
+
+    fn try_acquire(self: &Arc<Self>, ip: IpAddr) -> Option<PerIpPermit> {
+        let cap = self.cap_for(ip);
+        let mut guard = self.counts.lock().expect("per-ip cap mutex not poisoned");
+        let count = guard.entry(ip).or_insert(0);
+        if *count >= cap {
+            return None;
+        }
+        *count += 1;
+        Some(PerIpPermit {
+            cap: self.clone(),
+            ip,
+        })
+    }
+}
+
+struct PerIpPermit {
+    cap: Arc<PerIpCap>,
+    ip: IpAddr,
+}
+
+impl Drop for PerIpPermit {
+    fn drop(&mut self) {
+        let Ok(mut guard) = self.cap.counts.lock() else {
+            return;
+        };
+        if let Some(c) = guard.get_mut(&self.ip) {
+            *c = c.saturating_sub(1);
+            if *c == 0 {
+                guard.remove(&self.ip);
+            }
+        }
+    }
+}
+
 /// Runs the "direct" server. This is the system where the Hub acts as a server and the
 /// Node acts as a client. This is used for, e.g., the nodes to ask the server the
 /// resolution to a given query.
@@ -327,6 +395,10 @@ pub async fn run(
 ) -> Result<(), io::Error> {
     let client_semaphore = Arc::new(Semaphore::new(cli().max_connections));
     let server_semaphore = Arc::new(Semaphore::new(cli().max_connections));
+    let per_ip_cap = Arc::new(PerIpCap::new(
+        cli().max_connections_per_ipv4,
+        cli().max_connections_per_ipv6,
+    ));
 
     let all_endpoints = addrs
         .into_iter()
@@ -380,10 +452,12 @@ pub async fn run(
             tokio::spawn({
                 let client_semaphore = client_semaphore.clone();
                 let server_semaphore = server_semaphore.clone();
+                let per_ip_cap = per_ip_cap.clone();
                 async move {
                     if let Err(err) = setup_connection(
                         client_semaphore,
                         server_semaphore,
+                        per_ip_cap,
                         connection,
                         client_addr,
                         candidate_channels,
@@ -405,24 +479,33 @@ pub async fn run(
 async fn setup_connection(
     client_semaphore: Arc<Semaphore>,
     server_semaphore: Arc<Semaphore>,
+    per_ip_cap: Arc<PerIpCap>,
     connection: quinn::Connection,
     client_addr: SocketAddr,
     candidate_channels: KeyedChannel<Candidate>,
 ) -> Result<(), crate::Error> {
-    // Acquire BOTH permits up front, before we negotiate transports or spawn
-    // anything. Two reasons:
-    // - Atomicity: if one semaphore is exhausted, we must NOT bring up only
-    //   the other half. The previous design acquired permits in separate
+    // Acquire all three permits up front, before we negotiate transports or
+    // spawn anything. Two reasons:
+    // - Atomicity: if any cap is exhausted, we must NOT bring up only some
+    //   of the others. The previous design acquired permits in separate
     //   spawned tasks, so a flood would leave many half-open connections
     //   where the node sees the QUIC handshake succeed but every `do_query`
     //   returns `NoReverseConnection` (or vice versa).
     // - Resource cap: `accept_bincode_transports` allocates two transports
     //   per inbound connection. Acquiring the permits first makes
-    //   `max_connections` an actual cap on resource allocation rather than a
-    //   reject-after-allocation half-measure.
-    //
-    // Per-IP cap is still a TODO; one misbehaving host can still occupy every
-    // slot via many source ports.
+    //   `max_connections` and `max_connections_per_ip` actual caps on
+    //   resource allocation rather than reject-after-allocation half-measures.
+    let ip_permit = match per_ip_cap.try_acquire(client_addr.ip()) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "per-IP connection cap reached for {}; dropping connection from {client_addr}",
+                client_addr.ip()
+            );
+            connection.close(0u32.into(), b"per-ip cap reached");
+            return Ok(());
+        }
+    };
     let server_permit = match server_semaphore.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => {
@@ -450,6 +533,12 @@ async fn setup_connection(
     // Serrver setup:
     tokio::spawn(async move {
         let _permit = server_permit;
+        // Hold the per-IP permit on the server task so it lives as long as
+        // the connection's server-direction half. The client task only sees
+        // `client_permit`; whichever task terminates last releases its own
+        // semaphore permit, and the per-IP slot is freed when the server
+        // task ends.
+        let _ip_permit = ip_permit;
 
         // Set up server:
         let server = HubServer::new(client_addr, candidate_channels);
