@@ -1,8 +1,10 @@
-//! HTML content processing and transformation for serving pages in development mode.
+//! HTML content processing for `samizdat commit` and `samizdat watch`.
 //!
-//! This module handles HTML file modifications for the CLI, including path proxying and
-//! automatic page refresh functionality. It processes HTML files to adjust internal links
-//! and inject refresh-triggering JavaScript when needed.
+//! Each series and identity has its own browser origin via subdomain
+//! (`series-<key>.<root>` / `<identity>.<root>`). Absolute paths
+//! resolve against the entity's own root, so commit-time path
+//! rewriting is no longer needed; this module only injects the
+//! page-refresh snippet that `samizdat watch` uses in dev mode.
 
 use regex::Regex;
 use std::borrow::Cow;
@@ -15,48 +17,30 @@ use std::sync::LazyLock;
 static MATCH_HTML: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\.html?$"#).expect("valid regex"));
 
-/// Regular expression to match href attributes that are relative paths.
-static FIND_HREF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"href\s*=\s*('|")/"#).expect("valid regex"));
-
 /// Regular expression to match the closing body tag.
 static FIND_FOOT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"</body>"#).expect("valid regex"));
 
-/// Processes an HTML page, adjusting paths and optionally adding refresh functionality.
-///
-/// # Arguments
-/// * `path` - The file path to process
-/// * `raw` - The raw content of the file
-/// * `refresh_server_addr` - Optional WebSocket server address for refresh functionality
-///
-/// # Returns
-/// The processed content, either modified or unchanged if not an HTML file
+/// Processes an HTML page, optionally adding refresh functionality.
 pub fn proxy_page(
     path: impl AsRef<Path>,
     raw: &'_ [u8],
     refresh_server_addr: Option<SocketAddr>,
 ) -> Cow<'_, [u8]> {
     if MATCH_HTML.is_match(&path.as_ref().to_string_lossy()) {
-        // Only support utf-8 HTML by now...
+        let Some(addr) = refresh_server_addr else {
+            return Cow::Borrowed(raw);
+        };
         let raw = String::from_utf8_lossy(raw);
-
-        // Proxy paths in HTML
-        let proxied = FIND_HREF.replace_all(raw.as_ref(), "href=$1~/");
-
-        // Add the page refresh snippet to the end of the body of the HTML.
-        if let Some(addr) = refresh_server_addr {
-            FIND_FOOT.replace_all(
-                proxied.as_ref(),
+        FIND_FOOT
+            .replace_all(
+                raw.as_ref(),
                 concat!(include_str!("trigger_refresh_snippet.html"), "</body>")
                     .replace("$$address", &addr.to_string()),
             )
-        } else {
-            proxied
-        }
-        .into_owned()
-        .into_bytes()
-        .into()
+            .into_owned()
+            .into_bytes()
+            .into()
     } else {
         // Not HTML: make no changes.
         Cow::Borrowed(raw)
