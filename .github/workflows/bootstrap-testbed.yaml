@@ -126,18 +126,33 @@ jobs:
           REMOTE_EOF
 
       - name: Render + apply testbed proxy.toml
-        # samizdat-up's default proxy.toml has https=false / example.org.
-        # The testbed needs the real domain so Let's Encrypt works.
-        # Overlay the templated config and restart the proxy.
+        # samizdat-up's default proxy.toml has the example values. The
+        # testbed needs the real domain and the [dns] block so the
+        # proxy can drive ACME DNS-01 for the wildcard cert.
         env:
           DOMAIN: ${{ secrets.PROXY_DOMAIN }}
+          WILDCARD_ROOT: ${{ secrets.PROXY_DOMAIN }}
+          ZONE: hubfederation.com
           PROXY_OWNER_EMAIL: ${{ secrets.PROXY_OWNER_EMAIL }}
         run: |
           set -e
           envsubst < install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template \
             > /tmp/proxy.toml
           scp /tmp/proxy.toml root@${{ secrets.TESTBED_HOST }}:/etc/samizdat/proxy.toml
-          ssh root@${{ secrets.TESTBED_HOST }} systemctl restart samizdat-proxy
+
+      - name: Write /etc/samizdat/proxy.env
+        # Holds the DigitalOcean PAT the proxy uses to drive ACME
+        # DNS-01 against the hubfederation.com zone.
+        run: |
+          set -e
+          umask 077
+          printf 'DIGITALOCEAN_TOKEN=%s\n' '${{ secrets.TESTBED_PROXY_DO_TOKEN }}' > /tmp/proxy.env
+          scp /tmp/proxy.env root@${{ secrets.TESTBED_HOST }}:/etc/samizdat/proxy.env
+          ssh root@${{ secrets.TESTBED_HOST }} 'chmod 640 /etc/samizdat/proxy.env && chgrp samizdat /etc/samizdat/proxy.env'
+          rm -f /tmp/proxy.env
+
+      - name: Restart samizdat-proxy
+        run: ssh root@${{ secrets.TESTBED_HOST }} systemctl restart samizdat-proxy
 
       - name: Subscribe to seed collections
         # Idempotent: the CLI errors loudly on duplicate entries with

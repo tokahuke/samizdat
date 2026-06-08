@@ -2,7 +2,8 @@ name: Update testbed
 
 # Recurring update for the testbed droplet. The droplet pulls its new
 # binaries from the samizdat network it already participates in, so
-# this workflow just ssh's in and runs `samizdat-up update`.
+# this workflow ssh's in, syncs the proxy config from the in-repo
+# template + secrets, then runs `samizdat-up update`.
 #
 # Run after a successful `publish-get-samizdat.yaml`. The publish
 # workflow itself waits for the testbed to mirror the new edition
@@ -18,6 +19,11 @@ jobs:
     name: Update
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
         with:
@@ -27,6 +33,33 @@ jobs:
 
       - name: Scan host key
         run: ssh-keyscan -H "${{ secrets.TESTBED_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Render + apply testbed proxy.toml
+        # The proxy daemon refuses to boot without a [dns] block; render
+        # the template fresh on every update so changes there roll out
+        # without a re-bootstrap.
+        env:
+          DOMAIN: ${{ secrets.PROXY_DOMAIN }}
+          WILDCARD_ROOT: ${{ secrets.PROXY_DOMAIN }}
+          ZONE: hubfederation.com
+          PROXY_OWNER_EMAIL: ${{ secrets.PROXY_OWNER_EMAIL }}
+        run: |
+          set -e
+          envsubst < install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template \
+            > /tmp/proxy.toml
+          scp /tmp/proxy.toml root@${{ secrets.TESTBED_HOST }}:/etc/samizdat/proxy.toml
+
+      - name: Write /etc/samizdat/proxy.env
+        # Holds the DigitalOcean PAT the proxy uses to drive ACME DNS-01
+        # against the hubfederation.com zone. systemd's
+        # EnvironmentFile=- picks it up at samizdat-proxy start.
+        run: |
+          set -e
+          umask 077
+          printf 'DIGITALOCEAN_TOKEN=%s\n' '${{ secrets.TESTBED_PROXY_DO_TOKEN }}' > /tmp/proxy.env
+          scp /tmp/proxy.env root@${{ secrets.TESTBED_HOST }}:/etc/samizdat/proxy.env
+          ssh root@${{ secrets.TESTBED_HOST }} 'chmod 640 /etc/samizdat/proxy.env && chgrp samizdat /etc/samizdat/proxy.env'
+          rm -f /tmp/proxy.env
 
       - name: samizdat-up update
         run: ssh root@${{ secrets.TESTBED_HOST }} samizdat-up update

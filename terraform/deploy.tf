@@ -50,6 +50,18 @@ resource "github_actions_secret" "proxy_owner_email" {
   value = var.proxy_owner_email
 }
 
+# DigitalOcean PAT exposed to the testbed proxy so it can drive ACME
+# DNS-01 against the hubfederation.com zone (writes/deletes
+# _acme-challenge TXT records during renewal). Same account-wide token
+# terraform already uses; recommendation is to swap for a scoped PAT
+# limited to domain:* on the relevant zone before going beyond one
+# operator. See docs/operations.md.
+resource "github_actions_secret" "testbed_proxy_do_token" {
+  repository  = var.github_repo
+  secret_name = "TESTBED_PROXY_DO_TOKEN"
+  value       = var.do_token
+}
+
 ###
 #
 # Deploy key for the `get-samizdat` release-collection repo. The
