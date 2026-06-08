@@ -24,10 +24,9 @@ prevents new garbage from being added on-chain.
 1. Compile `SamizdatIdentity.sol` and deploy a fresh `SamizdatIdentityV1`
    against the EXISTING `SamizdatIdentityStorage` address. The storage
    contract is shared; we are only swapping the operator.
-2. From the previously-deployed (loose) V1, as `isOwner`, call
-   `deprecate(<new-V1-address>)`. The existing `deprecate` flow
-   (`SamizdatIdentity.sol::deprecate`) rotates the storage's operator to
-   the new V1 via `SamizdatIdentityStorage::setOperator`.
+2. From the live V1, as `isOwner`, call `deprecate(<new-V1-address>)`.
+   The `deprecate` flow in `SamizdatIdentity.sol` rotates the storage's
+   operator to the new V1 via `SamizdatIdentityStorage::setOperator`.
 3. Update the contract address constant the node reads. Check
    `common/src/blockchain.rs` for the address constant and the ABI loader;
    the ABI in `blockchain/SamizdatIdentityV1.json` is functionally

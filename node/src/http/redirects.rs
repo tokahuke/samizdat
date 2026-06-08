@@ -1,6 +1,4 @@
-//! Path-level redirects. Currently only the double-slash compaction; the
-//! path no longer carries entity information, so the tilde-style "home"
-//! redirects this module used to do are gone.
+//! Path-level redirects. Currently only the double-slash compaction.
 
 use std::borrow::Cow;
 

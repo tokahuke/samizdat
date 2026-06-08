@@ -5,11 +5,6 @@
 //!   returns the welcome HTML; series and identity subdomains resolve the
 //!   "root" of the corresponding collection.
 //! - `GET /{*name}` -- same dispatch with a content path.
-//!
-//! The bare-loopback case for `/` is what previously lived in
-//! `node/src/http/mod.rs::serve`'s root route (the `index.html` welcome
-//! page). Folding it in here is what avoids having to write a separate
-//! routing dispatcher; both routes share the same `HostScope` extractor.
 
 use axum::extract::Path;
 use axum::http::StatusCode;
@@ -21,8 +16,7 @@ use crate::http::resolvers::{resolve_identity, resolve_series};
 use crate::http::{PageResponse, SamizdatTimeout};
 use crate::models::SeriesRef;
 
-/// Welcome HTML served at `GET /` on the bare-loopback admin host. Same
-/// content as previously served from `serve()` directly.
+/// Welcome HTML served at `GET /` on the bare-loopback admin host.
 const WELCOME_HTML: &str = include_str!("../index.html");
 
 /// Handles `GET /`.
