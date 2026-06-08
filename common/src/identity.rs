@@ -73,7 +73,6 @@ const RESERVED_LABELS: &[&str] = &[
     "invalid",
     "localhost4",
     "localhost6",
-    "samizdat",
     "object",
     "series",
     "collection",

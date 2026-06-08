@@ -16,35 +16,43 @@ resource "digitalocean_record" "tesbed_ipv6" {
   value  = digitalocean_droplet.samizdat_testbed.ipv6_address
 }
 
-resource "digitalocean_record" "proxy_ipv4" {
+# Apex (`hubfederation.com`) and one-label-deep wildcard
+# (`*.hubfederation.com`) both point at the testbed droplet. The proxy
+# holds the apex + wildcard SANs on one Let's Encrypt cert via ACME
+# DNS-01 (see `proxy/src/wildcard.rs`). Per-series / per-identity
+# subdomains all resolve here:
+# - `series-<base32-key>.hubfederation.com` -> series content
+# - `object-<hash>.hubfederation.com` -> raw object bytes
+# - `collection-<hash>.hubfederation.com` -> snapshot item lookup
+# - `edition-<id>.hubfederation.com` -> signed-edition item lookup
+# - `<identity>.hubfederation.com` -> identity content
+# - `hubfederation.com` -> proxy welcome
+# The `testbed.hubfederation.com` record above is more-specific than
+# the wildcard, so it stays the SSH-target name without colliding.
+resource "digitalocean_record" "apex_ipv4" {
   domain = digitalocean_domain.hubfederation.id
   type   = "A"
-  name   = "proxy"
+  name   = "@"
   value  = digitalocean_droplet.samizdat_testbed.ipv4_address
 }
 
-resource "digitalocean_record" "proxy_ipv6" {
+resource "digitalocean_record" "apex_ipv6" {
   domain = digitalocean_domain.hubfederation.id
   type   = "AAAA"
-  name   = "proxy"
+  name   = "@"
   value  = digitalocean_droplet.samizdat_testbed.ipv6_address
 }
 
-# Per-series subdomain isolation at the proxy. Each series is served at
-# `<base32-key>.proxy.hubfederation.com` and each identity at
-# `<handle>.proxy.hubfederation.com`. The wildcard A/AAAA points every
-# such name at the same droplet; the proxy obtains TLS certs on demand
-# per SNI via ACME HTTP-01.
-resource "digitalocean_record" "proxy_wildcard_ipv4" {
+resource "digitalocean_record" "wildcard_ipv4" {
   domain = digitalocean_domain.hubfederation.id
   type   = "A"
-  name   = "*.proxy"
+  name   = "*"
   value  = digitalocean_droplet.samizdat_testbed.ipv4_address
 }
 
-resource "digitalocean_record" "proxy_wildcard_ipv6" {
+resource "digitalocean_record" "wildcard_ipv6" {
   domain = digitalocean_domain.hubfederation.id
   type   = "AAAA"
-  name   = "*.proxy"
+  name   = "*"
   value  = digitalocean_droplet.samizdat_testbed.ipv6_address
 }

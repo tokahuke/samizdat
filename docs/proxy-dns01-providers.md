@@ -28,7 +28,7 @@ The method set:
 
 * `async fn set_txt(&self, zone: &str, record_name: &str, value: &str)
   -> Result<TxtHandle, DnsError>`. The `zone` is the apex of the zone
-  the operator configured (for example `proxy.hubfederation.com` or
+  the operator configured (for example `hubfederation.com` or
   just `hubfederation.com`, whichever the operator's DNS provider
   treats as a hosted zone). The `record_name` is the fully qualified
   name to create, typically `_acme-challenge.proxy.<domain>`. The
@@ -117,7 +117,7 @@ Zone discovery: DigitalOcean addresses zones by their apex name
 directly in the URL path, so there is no lookup step. The
 `zone` config key is the apex (`hubfederation.com`). The challenge
 record name passed to `set_txt` is the fully qualified
-`_acme-challenge.proxy.hubfederation.com`, and the implementation
+`_acme-challenge.hubfederation.com`, and the implementation
 strips the trailing `.<zone>` before posting, since the DO API expects
 the relative name in the `name` JSON field.
 
@@ -246,8 +246,8 @@ live at the `[dns]` level:
 * `zone` is the apex of the hosted zone the credentials can write
   inside (`hubfederation.com`).
 * `wildcard_root` is the name the wildcard cert covers
-  (`proxy.hubfederation.com`); the cert SANs are
-  `proxy.hubfederation.com` and `*.proxy.hubfederation.com`. Defaults
+  (`hubfederation.com`); the cert SANs are
+  `hubfederation.com` and `*.hubfederation.com`. Defaults
   to the existing `domain` value if omitted.
 
 **Credentials live in env vars, not in `proxy.toml`.** TOML files get
@@ -277,7 +277,7 @@ restart samizdat-proxy`".
 ```toml
 [dns]
 zone = "hubfederation.com"
-wildcard_root = "proxy.hubfederation.com"
+wildcard_root = "hubfederation.com"
 
 [dns.digitalocean]
 # token_env = "MY_OTHER_NAME"   # optional override; defaults to DIGITALOCEAN_TOKEN
@@ -294,7 +294,7 @@ DIGITALOCEAN_TOKEN=dop_v1_...
 ```toml
 [dns]
 zone = "hubfederation.com"
-wildcard_root = "proxy.hubfederation.com"
+wildcard_root = "hubfederation.com"
 
 [dns.cloudflare]
 # token_env = "MY_OTHER_NAME"   # optional override; defaults to CLOUDFLARE_API_TOKEN
@@ -311,7 +311,7 @@ CLOUDFLARE_API_TOKEN=<scoped API token>
 ```toml
 [dns]
 zone = "hubfederation.com"
-wildcard_root = "proxy.hubfederation.com"
+wildcard_root = "hubfederation.com"
 
 [dns.route53]
 region = "us-east-1"

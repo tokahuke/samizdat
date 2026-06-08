@@ -8,7 +8,7 @@ surface (`object-<hash>.<root>`, `series-<key>.<root>`,
 Each entity owns a browser origin on both surfaces, so storage
 partitioning, service-worker scope, same-origin reach, and relative-URL
 resolution behave the same whether a viewer used `localhost:<port>` or
-`proxy.hubfederation.com`. This file catalogues what still differs.
+`hubfederation.com`. This file catalogues what still differs.
 
 ## A. Closed by the typed-subdomain refactor
 

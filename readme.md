@@ -6,7 +6,7 @@
 ## Website
 
 Samizdat is pulling itself by its bootstraps!
-https://proxy.hubfederation.com/~samizdat
+https://samizdat.hubfederation.com
 
 ## Donate
 
@@ -69,7 +69,7 @@ latest release from the network itself and then installs the node, hub or proxy 
 a system service. On Linux and macOS:
 
 ```
-curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/install.sh | sudo bash
+curl -fsSL https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com/latest/install.sh | sudo bash
 sudo samizdat-up install node
 ```
 
@@ -113,7 +113,7 @@ output prints the URL for you; `samizdat series ls` also includes a
 To share with friends, give them the public-key form on the public proxy:
 
 ```
-https://series-<base32-public-key>.proxy.hubfederation.com/path/to/stuff
+https://series-<base32-public-key>.hubfederation.com/path/to/stuff
 ```
 
 The proxy uses the same host-form as the node, so the leftmost label maps
@@ -122,7 +122,7 @@ to the same entity on both sides.
 Samizdat also supports a friendlier subdomain form using a blockchain
 identity (Polygon, via `samizdat identity create`), reachable at
 `http://<identity>.localhost:4510/` locally and
-`https://<identity>.proxy.hubfederation.com/` via the proxy. Registering
+`https://<identity>.hubfederation.com/` via the proxy. Registering
 an identity costs gas and the name has to be a valid DNS label
 (`[a-z0-9-]`, 1-63 chars, no leading or trailing hyphen). Most projects
 skip identities and just share the public-key URL.
@@ -137,7 +137,7 @@ This is just the tip of the iceberg, however! Check out more under
 * `hub`: the Samizdat Hub crate.
 * `node`: the Samizdat Node crate.
 * `cli`: the Samizdat CLI crate.
-* `proxy`: a proxy to bridge a Samizdat Node to the open Web, used in [https://proxy.hubfederation.com](https://proxy.hubfederation.com).
+* `proxy`: a proxy to bridge a Samizdat Node to the open Web, used in [https://hubfederation.com](https://hubfederation.com).
 * `samizdat-up`: cross-platform installer / service manager (systemd, launchd, Windows SCM).
 * `js`: the SamizdatJS library, which enables Web applications to interface with the local Samizdat node.
 * `install`: installation artifacts for end users on different platforms.

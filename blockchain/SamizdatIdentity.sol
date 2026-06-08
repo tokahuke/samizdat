@@ -204,7 +204,6 @@ contract SamizdatIdentityV1 {
             h == keccak256("invalid") ||
             h == keccak256("localhost4") ||
             h == keccak256("localhost6") ||
-            h == keccak256("samizdat") ||
             h == keccak256("object") ||
             h == keccak256("series") ||
             h == keccak256("collection") ||

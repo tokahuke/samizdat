@@ -1,7 +1,7 @@
 # Operating the testbed
 
 A runbook for the things you actually have to do to keep the public
-testbed (`testbed.hubfederation.com` / `proxy.hubfederation.com`)
+testbed (`testbed.hubfederation.com` / `hubfederation.com`)
 alive, not a description of what the code is. For the latter, see
 [`extras.md`](extras.md).
 
@@ -17,7 +17,7 @@ two roles at once:
 2. **The release-distribution origin.** The testbed's node holds the
    `get-samizdat` collection (series key
    `r0Km0HptEt6Fhosmy7qxaKxyDtwHkzi0-eYbt1WatdM`). The proxy at
-   `proxy.hubfederation.com` exposes that collection over HTTPS,
+   `hubfederation.com` exposes that collection over HTTPS,
    which is where `samizdat-up` fetches binaries from.
 
 Releases and updates are dogfooded: after first bootstrap, the testbed
@@ -107,8 +107,8 @@ purpose), here is the full ceremony:
    the runner). Subsequent runs from the same lockfile reuse the
    shared cargo cache.
 6. Probe:
-   - `curl -fsSI https://proxy.hubfederation.com/` should return a
-     valid cert (issued for `proxy.hubfederation.com`) and a 4xx/5xx
+   - `curl -fsSI https://hubfederation.com/` should return a
+     valid cert (issued for `hubfederation.com`) and a 4xx/5xx
      status until you publish content.
    - `nc -uz testbed.hubfederation.com 4511` (UDP) should succeed.
    - `ssh root@testbed.hubfederation.com 'systemctl is-active samizdat-hub samizdat-node samizdat-proxy'`
@@ -118,7 +118,7 @@ purpose), here is the full ceremony:
    This cross-compiles all targets, signs an edition with the
    `GET_SAMIZDAT_PRIV` secret, announces over the federation, and
    polls until the testbed serves the new content. After this, the
-   public URLs at `proxy.hubfederation.com/~get-samizdat/...` serve
+   public URLs at `get-samizdat.hubfederation.com/...` serve
    real binaries.
 8. To upgrade the testbed itself to the binaries it now serves
    (instead of the local-build copies from bootstrap):
@@ -164,32 +164,32 @@ gotchas in the next section.
   (`ssh host bash -s <<'EOF' ... EOF`), and single-command
   invocations work fine because fish just exec's the binary.
 - **`PROXY_DOMAIN` is not the same as `TESTBED_HOST`.** Both DNS
-  labels (`testbed.hubfederation.com`, `proxy.hubfederation.com`)
+  labels (`testbed.hubfederation.com`, `hubfederation.com`)
   resolve to the same droplet. The proxy's Let's Encrypt cert is
   issued for `PROXY_DOMAIN` because that's where install scripts
   point; SSH targets `TESTBED_HOST`. Easy to conflate; the workflow
   uses both deliberately.
-- **Per-series subdomain TLS is HTTP-01 on demand.** The proxy
-  obtains a Let's Encrypt cert per `<x>.proxy.hubfederation.com` the
-  first time a request for that SNI arrives, via standard HTTP-01.
-  The only operator-facing requirement is a wildcard DNS record
-  (`*.proxy.<domain>` -> proxy host IP), which `terraform/domain.tf`
-  provisions for the testbed. No DNS-API access is required at
-  runtime; the proxy holds no DigitalOcean credentials. Operators
-  hosting their own samizdat-proxy do the same: set one wildcard
-  A/AAAA record and start the proxy. Let's Encrypt rate-limits to 50
-  certs per registered domain per week; a personal proxy is
-  comfortably under that.
+- **Wildcard TLS via ACME DNS-01.** The proxy holds one wildcard
+  cert covering `<wildcard_root>` and `*.<wildcard_root>`, renewed in
+  a background task driven by `instant-acme`. The challenge runs
+  against the configured DNS provider (DigitalOcean, Cloudflare,
+  Route53, or a script escape hatch); see `docs/proxy-dns01-providers.md`
+  for the trait and `proxy/src/wildcard.rs` for the renewal loop.
+  Operator-facing setup: one wildcard A/AAAA record
+  (`*.proxy.<domain>` -> proxy host IP; `terraform/domain.tf`
+  provisions this for the testbed), a `[dns]` block in `proxy.toml`
+  selecting the provider, and the provider's credentials in
+  `/etc/samizdat/proxy.env` (the systemd unit's `EnvironmentFile`).
 - **DigitalOcean token scope.** The `do_token` Terraform variable is
   the account-wide PAT that provisions the droplet, DNS records, SSH
-  keys, etc. The proxy itself does not need it; only Terraform does.
-  If a future feature ever requires the proxy to write DNS records
-  (e.g. DNS-01 wildcard cert path for high-volume operators), create
-  a separate DigitalOcean PAT with custom scope `domain:create,
-  domain:update, domain:delete` restricted to `hubfederation.com`
-  (the equivalent of an AWS IAM role narrowed to one resource), and
-  pass it through as a distinct Terraform variable. Do NOT reuse
-  the account-wide token on the droplet.
+  keys, etc. The proxy ALSO needs DigitalOcean API access at runtime
+  to drive ACME DNS-01; the `testbed_proxy_do_token` GitHub Actions
+  secret (managed by `terraform/deploy.tf`) currently re-exposes the
+  same account-wide PAT to the proxy daemon. Recommendation for
+  production: mint a separate DigitalOcean PAT with custom scope
+  `domain:create, domain:update, domain:delete` restricted to
+  `hubfederation.com` (the equivalent of an AWS IAM role narrowed to
+  one resource), and swap it in via the same Terraform variable.
 - **The `get-samizdat` submodule clone needs the deploy key.**
   Workflows that recursively check out submodules will 404 unless
   the `GET_SAMIZDAT_DEPLOY_KEY` secret is installed into the SSH
@@ -223,7 +223,7 @@ If you need it, tunnel via SSH:
   Encrypt errors. Rate limits and ACME state live under
   `/var/lib/samizdat/proxy/acme/`.
 - **`samizdat-up install` fails on a user's machine**: confirm
-  `curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up | wc -c`
+  `curl -fsSL https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up | wc -c`
   returns a binary-sized number. If 0/HTML/404, the testbed's node
   doesn't have the current edition. Run `samizdat-up update` from the
   publishing machine or check the publish workflow.

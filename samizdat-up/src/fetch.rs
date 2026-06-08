@@ -3,7 +3,7 @@
 //!
 //! The proxy serves the collection at:
 //!
-//!     https://proxy.hubfederation.com/~get-samizdat/<version>/<target-triple>/<component>/<file>
+//!     https://series-<get-samizdat-base32-key>.hubfederation.com/<version>/<target-triple>/<component>/<file>
 //!
 //! `latest/` works as the version label and points at the most recent
 //! signed edition.
@@ -18,7 +18,8 @@ use std::time::Duration;
 /// Default origin for the published get-samizdat collection. Override
 /// at install-time with `--from <URL>` (used by the integration test
 /// workflow with a `file://` path pointing at locally-built artifacts).
-pub const DEFAULT_ORIGIN: &str = "https://proxy.hubfederation.com/~get-samizdat";
+pub const DEFAULT_ORIGIN: &str =
+    "https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com";
 
 /// What triple to fetch for. Defaults to whatever the running
 /// samizdat-up was compiled for; the result is stable across the

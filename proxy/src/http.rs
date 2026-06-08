@@ -39,15 +39,16 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 /// Build the host-form router. Dispatches purely on the `Host` header
 /// and forwards the request path verbatim.
 ///
-/// Three classes of host are accepted:
+/// Six classes of host are accepted (all forwarded verbatim to the
+/// node, which re-parses the type prefix in `host_scope::classify`):
 ///
-/// - bare `<wildcard_root>`: forwards path verbatim to the node root.
-///   This serves the proxy's landing / welcome surface.
-/// - `<base32-key>.<wildcard_root>`: upstream is
-///   `<scheme>://<base32-key>.<node-host>:<node-port>/<path>`.
+/// - bare `<wildcard_root>`: serves the proxy welcome / node admin.
+/// - `series-<key>.<wildcard_root>`: series content.
+/// - `object-<hash>.<wildcard_root>`: raw object bytes.
+/// - `collection-<hash>.<wildcard_root>`: item lookup in the snapshot.
+/// - `edition-<id>.<wildcard_root>`: item lookup in the edition.
 /// - `<identity>.<wildcard_root>` where `<identity>` passes
-///   `check_servable_identity`: upstream is
-///   `<scheme>://<identity>.<node-host>:<node-port>/<path>`.
+///   `check_servable_identity`: identity content.
 ///
 /// Anything else gets a 400.
 pub fn wildcard_api(wildcard_root: String) -> axum::Router {

@@ -358,7 +358,7 @@ jobs:
       #     whole point of staying online a bit longer.
       - name: Wait for testbed to mirror
         run: |
-          BASE="https://proxy.hubfederation.com/~get-samizdat/latest"
+          BASE="https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com/latest"
 
           # Phase 1: sha-match on linux samizdat-up.
           LOCAL_PATH="install/get-samizdat/dist/latest/x86_64-unknown-linux-gnu/samizdat-up/samizdat-up"

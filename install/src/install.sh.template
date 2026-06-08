@@ -16,7 +16,7 @@
 
 set -eu
 
-PROXY="https://proxy.hubfederation.com/~get-samizdat"
+PROXY="https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com"
 
 # --- Detect target triple --------------------------------------------------
 

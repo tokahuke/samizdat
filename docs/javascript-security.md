@@ -54,7 +54,7 @@ the structural single-origin lumping that web platform contracts care about.
 
 The historical shape: every series, every identity, every page served by
 the node lived at one origin (`http://127.0.0.1:4510`), with the proxy
-mirroring the lumping under `https://proxy.hubfederation.com/...`.
+mirroring the lumping under `https://hubfederation.com/...`.
 Inside one origin, web platform contracts treat the contents as one
 application. The typed-subdomain dispatcher closes this on both
 surfaces: each entity gets its own subdomain origin, and the storage,
@@ -443,7 +443,7 @@ change.
 ### T14. Proxy origin vs local origin: header asymmetry
 **Vector** -- The same content is served at two origins:
 `http://127.0.0.1:4510` (local) and
-`https://proxy.hubfederation.com` (via `proxy/src/http.rs`). Security
+`https://hubfederation.com` (via `proxy/src/http.rs`). Security
 headers added on the node path are not necessarily forwarded by the
 proxy, and vice versa.
 **Current state** -- `proxy/src/http.rs:13-22` lists `PROXY_HEADERS`
@@ -517,7 +517,7 @@ rejected at registration and at runtime by
 ### T16. Proxy template writes a shared cross-series localStorage key
 **Vector** -- `proxy/templates/proxied-page.html.jinja:146-159` writes the
 integer counter `__samizdat_proxy_page_count` into `localStorage`.
-Because every series viewed through `proxy.hubfederation.com` shares one
+Because every series viewed through `hubfederation.com` shares one
 browser origin, that key is readable and writable by any series an
 attacker controls.
 **Current state** -- The counter exists to drive a donation modal every

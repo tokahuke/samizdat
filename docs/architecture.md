@@ -39,7 +39,7 @@ browser, distinguished by a prefix label in the leftmost DNS component:
 - `edition-<id>.<root>` -- a specific edition by signed-pointer id.
 - `<identity>.<root>` -- an on-chain identity handle (no prefix).
 
-`<root>` is `localhost:<port>` for the node and `proxy.hubfederation.com`
+`<root>` is `localhost:<port>` for the node and `hubfederation.com`
 for the public proxy. Each class gets its own browser origin, so storage,
 service workers, and same-origin reach are partitioned per entity. One
 wildcard cert (`*.<root>`) and one wildcard DNS A record cover the whole
@@ -365,7 +365,7 @@ record:
 
 `<hash>` is the canonical base32 form of a `Hash` (RFC 4648 lowercase,
 no padding). `<root>` is `localhost:<port>` for the node or
-`proxy.hubfederation.com` for the public proxy; the proxy and node speak
+`hubfederation.com` for the public proxy; the proxy and node speak
 the same prefix-label dispatch, so a URL works on either origin with
 only the root swapped.
 

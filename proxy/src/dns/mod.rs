@@ -80,14 +80,14 @@ pub trait DnsProvider: Send + Sync {
 /// ```toml
 /// [dns]
 /// zone = "hubfederation.com"
-/// wildcard_root = "proxy.hubfederation.com"
+/// wildcard_root = "hubfederation.com"
 /// provider = "digitalocean"
 /// token_env = "DIGITALOCEAN_TOKEN"
 /// ```
 #[derive(Debug, Deserialize)]
 pub struct DnsTopology {
     /// Apex of the DNS zone the credentials can write inside (for
-    /// `proxy.hubfederation.com`, this is typically `hubfederation.com`).
+    /// `hubfederation.com`, this is typically also `hubfederation.com`).
     pub zone: String,
     /// The name the wildcard cert covers. Cert SANs are
     /// `<wildcard_root>` and `*.<wildcard_root>`.

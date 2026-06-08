@@ -64,8 +64,9 @@ that crate:
   `.Samizdat.priv` (the publishing series private key, gitignored)
   and `dist/` (the artifact tree the proxy serves).
 - `install/src/install.sh.template` -- the bootstrap shim served at
-  `~get-samizdat/<version>/install.sh`. Detects OS+arch, downloads
-  the right `samizdat-up` binary, places it in `/usr/local/bin/`.
+  `series-<get-samizdat-key>.hubfederation.com/<version>/install.sh`.
+  Detects OS+arch, downloads the right `samizdat-up` binary, places
+  it in `/usr/local/bin/`.
 - `install/src/x86_64-unknown-linux-gnu/testbed/proxy.toml.template`
   -- the testbed's `proxy.toml` with `${DOMAIN}` and
   `${PROXY_OWNER_EMAIL}` placeholders, applied by
@@ -145,7 +146,7 @@ for state.
 Resources:
 
 - One `digitalocean_droplet` running Ubuntu 22.04 (`s-1vcpu-1gb`, nyc3).
-- DNS A/AAAA for `testbed.hubfederation.com` + `proxy.hubfederation.com`
+- DNS A/AAAA for `testbed.hubfederation.com` + `hubfederation.com`
   pointing at it.
 - An ED25519 keypair (`tls_private_key`) whose public half is uploaded
   to DO as the droplet's SSH key and whose private half is pushed to
@@ -206,7 +207,7 @@ End users on Linux/macOS get the new version next time they run:
 
 or, for a fresh install:
 
-    curl -fsSL https://proxy.hubfederation.com/~get-samizdat/latest/install.sh | sudo bash
+    curl -fsSL https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com/latest/install.sh | sudo bash
     sudo samizdat-up install node
 
 ## Findings landed against the extras
