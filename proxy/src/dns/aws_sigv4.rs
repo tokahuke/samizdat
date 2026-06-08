@@ -16,6 +16,7 @@
 use chrono::{DateTime, Utc};
 use ring::digest::{digest, SHA256};
 use ring::hmac;
+use std::fmt::Write;
 
 /// Inputs to a single SigV4 signing operation. All slices are borrowed;
 /// the signer produces owned `String`s in `SignedHeaders`. `query` is
@@ -174,7 +175,7 @@ fn encode_path(path: &str) -> String {
         if unreserved {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{:02X}", b));
+            let _ = write!(out, "%{:02X}", b);
         }
     }
     out

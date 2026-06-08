@@ -41,3 +41,6 @@ serde_with = "3.20.0"
 [dev-dependencies]
 samizdat-common = { path = "../common", features = ["test-helpers"] }
 tempfile = "3.12"
+
+[lints]
+workspace = true

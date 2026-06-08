@@ -19,6 +19,7 @@
 //! issuance if validation actually fails.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -413,7 +414,7 @@ fn encode_query_value(value: &str) -> String {
         if unreserved {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{:02X}", b));
+            let _ = write!(out, "%{:02X}", b);
         }
     }
     out

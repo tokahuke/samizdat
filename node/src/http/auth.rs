@@ -650,7 +650,7 @@ fn do_authenticate_trusted_context(request: &Request) -> Result<(), SecurityScop
         check_origin(&referer).map_err(SecurityScopeRejection::BadOrigin)
     } else {
         Err(SecurityScopeRejection::NotTrustedContext(
-            referer.to_owned(),
+            referer.clone(),
         ))
     }
 }

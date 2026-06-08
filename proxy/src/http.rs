@@ -85,9 +85,8 @@ async fn do_wildcard_dispatch(
     headers: &HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Result<Response<Body>, anyhow::Error> {
-    let raw_host = match headers.get("host").and_then(|h| h.to_str().ok()) {
-        Some(h) => h,
-        None => return Ok(bad_request("missing or malformed Host header")),
+    let Some(raw_host) = headers.get("host").and_then(|h| h.to_str().ok()) else {
+        return Ok(bad_request("missing or malformed Host header"));
     };
     let host = match axum::http::uri::Authority::try_from(raw_host.trim()) {
         Ok(authority) => authority.host().to_ascii_lowercase(),

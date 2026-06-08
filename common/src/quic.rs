@@ -96,7 +96,7 @@ fn transport_config(keep_alive: bool) -> TransportConfig {
     transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));
 
     if keep_alive {
-        transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 4)));
+        transport.keep_alive_interval(Some(Duration::from_millis(u64::from(IDLE_TIMEOUT_MS) / 4)));
     } else {
         transport.keep_alive_interval(None);
     }

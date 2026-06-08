@@ -191,7 +191,7 @@ mod tests {
 
         // Ascending: lexicographic order matches integer order.
         let mut asc: Vec<[u8; 8]> = ids.iter().map(|i| i.to_bytes(false)).collect();
-        asc.sort();
+        asc.sort_unstable();
         let asc_ids: Vec<Id> = asc
             .iter()
             .map(|b| Id(u64::from_be_bytes(*b)))
@@ -202,7 +202,7 @@ mod tests {
 
         // Descending: lexicographic order is reverse of integer order.
         let mut desc: Vec<[u8; 8]> = ids.iter().map(|i| i.to_bytes(true)).collect();
-        desc.sort();
+        desc.sort_unstable();
         let desc_ids: Vec<Id> = desc
             .iter()
             .map(|b| Id(u64::from_be_bytes(*b) ^ u64::MAX))

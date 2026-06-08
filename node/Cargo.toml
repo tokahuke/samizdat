@@ -56,3 +56,6 @@ subtle = "2.6.1"
 [dev-dependencies]
 samizdat-common = { path = "../common", features = ["test-helpers"] }
 tempfile = "3.12"
+
+[lints]
+workspace = true

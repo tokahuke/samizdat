@@ -327,7 +327,7 @@ pub async fn commit(
     }
 
     show_table([Row {
-        nickname: nickname.to_owned(),
+        nickname: nickname.clone(),
         url,
         collection: edition.signed.collection.hash,
         timestamp: edition.signed.timestamp,

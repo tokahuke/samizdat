@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
+use std::fmt::Write;
 
 use super::{http_client, DnsError, DnsProvider, TxtHandle};
 
@@ -196,7 +197,7 @@ fn json_string(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                let _ = write!(out, "\\u{:04x}", c as u32);
             }
             c => out.push(c),
         }
@@ -251,7 +252,7 @@ mod tests {
             }
         }"#;
         let id = extract_record_id(body).unwrap();
-        assert_eq!(id, 1234567);
+        assert_eq!(id, 1_234_567);
     }
 
     #[test]

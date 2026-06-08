@@ -722,7 +722,7 @@ mod test {
         from_map.sort();
         dbg!(&from_map);
 
-        let mut from_vec = some_hashes.iter().cloned().collect::<Vec<_>>();
+        let mut from_vec = some_hashes.iter().copied().collect::<Vec<_>>();
         from_vec.sort();
         dbg!(&from_vec);
 

@@ -5,10 +5,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use futures::FutureExt;
 use serde_derive::Deserialize;
-use serde_with::serde_as;
-use serde_with::DisplayFromStr;
-
-use samizdat_common::Hash;
 
 use crate::access::AccessRight;
 use crate::http::ApiResponse;
@@ -26,22 +22,6 @@ fn collection() -> Router {
         #[serde(default)]
         is_draft: bool,
         hashes: Vec<(String, String)>,
-    }
-
-    #[serde_as]
-    #[derive(Deserialize)]
-    struct ItemPath {
-        #[serde_as(as = "DisplayFromStr")]
-        hash: Hash,
-        #[serde(default)]
-        name: String,
-    }
-
-    #[serde_as]
-    #[derive(Deserialize)]
-    struct CollectionPath {
-        #[serde_as(as = "DisplayFromStr")]
-        hash: Hash,
     }
 
     Router::new()

@@ -62,9 +62,7 @@ impl NodeServer {
     async fn resolve_object(self, resolution: Arc<Resolution>) -> ResolutionResponse {
         tracing::info!("got object {resolution:?}");
 
-        let content_riddle = if let Some(content_riddle) = resolution.content_riddles.first() {
-            content_riddle
-        } else {
+        let Some(content_riddle) = resolution.content_riddles.first() else {
             return ResolutionResponse::EmptyResolution;
         };
 

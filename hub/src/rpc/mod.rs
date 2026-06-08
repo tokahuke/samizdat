@@ -495,36 +495,23 @@ async fn setup_connection(
     //   per inbound connection. Acquiring the permits first makes
     //   `max_connections` and `max_connections_per_ip` actual caps on
     //   resource allocation rather than reject-after-allocation half-measures.
-    let ip_permit = match per_ip_cap.try_acquire(client_addr.ip()) {
-        Some(p) => p,
-        None => {
-            tracing::warn!(
-                "per-IP connection cap reached for {}; dropping connection from {client_addr}",
-                client_addr.ip()
-            );
-            connection.close(0u32.into(), b"per-ip cap reached");
-            return Ok(());
-        }
+    let Some(ip_permit) = per_ip_cap.try_acquire(client_addr.ip()) else {
+        tracing::warn!(
+            "per-IP connection cap reached for {}; dropping connection from {client_addr}",
+            client_addr.ip()
+        );
+        connection.close(0u32.into(), b"per-ip cap reached");
+        return Ok(());
     };
-    let server_permit = match server_semaphore.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::warn!(
-                "server connection cap reached; dropping connection from {client_addr}"
-            );
-            connection.close(0u32.into(), b"server cap reached");
-            return Ok(());
-        }
+    let Ok(server_permit) = server_semaphore.clone().try_acquire_owned() else {
+        tracing::warn!("server connection cap reached; dropping connection from {client_addr}");
+        connection.close(0u32.into(), b"server cap reached");
+        return Ok(());
     };
-    let client_permit = match client_semaphore.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::warn!(
-                "client connection cap reached; dropping connection from {client_addr}"
-            );
-            connection.close(0u32.into(), b"client cap reached");
-            return Ok(());
-        }
+    let Ok(client_permit) = client_semaphore.clone().try_acquire_owned() else {
+        tracing::warn!("client connection cap reached; dropping connection from {client_addr}");
+        connection.close(0u32.into(), b"client cap reached");
+        return Ok(());
     };
 
     let (direct_transport, reverse_transport) =

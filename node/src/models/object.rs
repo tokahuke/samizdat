@@ -891,9 +891,8 @@ impl ObjectRef {
     /// either the content or the hash of this object.
     pub fn self_seal(&self) -> Result<ObjectRef, crate::Error> {
         // Get the content bytes
-        let content = match self.content()? {
-            Some(bytes) => bytes,
-            None => return Err(crate::Error::ObjectNotFound),
+        let Some(content) = self.content()? else {
+            return Err(crate::Error::ObjectNotFound);
         };
 
         // Create a new object header

@@ -111,7 +111,7 @@ pub fn check_servable_identity(s: &str) -> Result<(), Reason> {
         return Err(Reason::TrailingHyphen);
     }
 
-    if RESERVED_LABELS.iter().any(|r| *r == s) {
+    if RESERVED_LABELS.contains(&s) {
         return Err(Reason::Reserved);
     }
 

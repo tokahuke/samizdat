@@ -116,7 +116,7 @@ impl WildcardCertManager {
     pub async fn prime(&self) -> anyhow::Result<()> {
         fs::create_dir_all(&self.cert_dir)
             .await
-            .with_context(|| format!("creating cert dir {:?}", self.cert_dir))?;
+            .with_context(|| format!("creating cert dir {}", self.cert_dir.display()))?;
 
         if self.try_load_disk_cert().await? {
             info!("loaded wildcard cert from disk");
@@ -435,10 +435,10 @@ async fn atomic_write(path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
     ));
     fs::write(&tmp, bytes)
         .await
-        .with_context(|| format!("writing temp file {:?}", tmp))?;
+        .with_context(|| format!("writing temp file {}", tmp.display()))?;
     fs::rename(&tmp, &path)
         .await
-        .with_context(|| format!("renaming temp into {:?}", path))?;
+        .with_context(|| format!("renaming temp into {}", path.display()))?;
     Ok(())
 }
 

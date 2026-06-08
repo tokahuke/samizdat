@@ -159,13 +159,10 @@ impl DnsProvider for Script {
 
     async fn remove_txt(&self, zone: &str, handle: TxtHandle) -> Result<(), DnsError> {
         let raw = handle.0;
-        let (record_name, value) = match raw.split_once('\x00') {
-            Some(parts) => parts,
-            None => {
-                return Err(DnsError::Provider(
-                    "malformed handle: expected <name>\\0<value>".to_owned(),
-                ));
-            }
+        let Some((record_name, value)) = raw.split_once('\x00') else {
+            return Err(DnsError::Provider(
+                "malformed handle: expected <name>\\0<value>".to_owned(),
+            ));
         };
         let delete_path = self.delete.clone();
         self.run(&delete_path, "delete", zone, record_name, value)

@@ -15,7 +15,7 @@ pub struct Hub {
 
 impl Droppable for Hub {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
-        let address = self.address.to_string();
+        let address = self.address.clone();
         Table::Hubs.delete(tx, &address)?;
         tokio::spawn(async move { crate::hubs().remove(&address).await });
         Ok(())
