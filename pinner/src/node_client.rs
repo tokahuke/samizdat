@@ -11,6 +11,8 @@ use serde_derive::Serialize;
 
 static CLIENT: OnceLock<NodeClient> = OnceLock::new();
 
+/// Build the process-wide `NodeClient` against `node_base` (the local
+/// node's HTTP root) and stash it in [`CLIENT`]. Call once at startup.
 pub fn init(node_base: &str) -> Result<(), anyhow::Error> {
     let token = read_admin_token().context("reading ~/.samizdat/access-token")?;
     let http = reqwest::Client::builder()
@@ -26,13 +28,18 @@ pub fn init(node_base: &str) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Borrow the process-wide `NodeClient`. Panics if `init` has not run.
 pub fn get() -> &'static NodeClient {
     CLIENT.get().expect("node_client not initialized")
 }
 
+/// Authenticated HTTP handle on the local node's admin API.
 pub struct NodeClient {
+    /// Base URL of the node (no trailing `/`).
     base: String,
+    /// Bearer token read from `~/.samizdat/access-token`.
     token: String,
+    /// Reused reqwest client; carries the 30s timeout.
     http: reqwest::Client,
 }
 

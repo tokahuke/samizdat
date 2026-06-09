@@ -134,7 +134,9 @@ fn connected_ips() -> Router {
             async move {
                 let ips = ROOM
                     .raw_participants()
-                    .await.keys().copied()
+                    .await
+                    .keys()
+                    .copied()
                     .collect::<Vec<_>>();
                 Ok(ips)
             }
@@ -349,9 +351,10 @@ fn statistics_logs() -> Router {
                             let log: StatisticsLog = bincode::deserialize(serialized)?;
 
                             if let Some(statistics_type) = statistics_type
-                                && statistics_type != log.statistics().statistics_type {
-                                    return Ok(None);
-                                }
+                                && statistics_type != log.statistics().statistics_type
+                            {
+                                return Ok(None);
+                            }
 
                             if !peers.is_empty() && !peers.contains(&log.statistics().peer_ip) {
                                 return Ok(None);

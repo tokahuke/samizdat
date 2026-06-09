@@ -7,6 +7,7 @@ use crate::{
     Hash, MessageRiddle, Riddle, address::ChannelId, cipher::OpaqueEncrypted, riddles::Hint,
 };
 
+/// Outcome of a `set_property` RPC call from a node to a hub.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SetPropertyResponse {
     /// The new value is now in place.
@@ -166,9 +167,14 @@ pub struct Candidate {
 /// The response of a node to a hub on the resolution status of a query.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ResolutionResponse {
+    /// The node holds the content; the validation riddles prove it.
     Found(Vec<Riddle>),
+    /// The node accepts the redirect; further transfer continues on
+    /// the given channel.
     Redirect(ChannelId),
+    /// The resolution was structurally empty (no riddles supplied).
     EmptyResolution,
+    /// The node does not hold the content and cannot help.
     NotFound,
 }
 

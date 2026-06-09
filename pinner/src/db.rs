@@ -13,6 +13,9 @@ use samizdat_common::{
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::{IntoStaticStr, VariantArray};
 
+/// Pinner sub-databases. Variant order is part of the on-disk schema:
+/// `samizdat_common::db::Table::discriminant` derives the LMDB table
+/// id from it, so do not reorder or remove variants.
 #[derive(Debug, Clone, Copy, IntoStaticStr, VariantArray)]
 #[non_exhaustive]
 pub enum Table {
@@ -51,11 +54,18 @@ impl Migration<Table> for BaseMigration {
 /// What the pinner records for each subscription it is managing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinnedRow {
+    /// When the pin lapses; the expiry loop sweeps anything past this.
     pub expires_at: DateTime<Utc>,
+    /// Opaque customer identifier, optional, set at first pin and kept
+    /// through renewals.
     pub customer: Option<String>,
+    /// When the row was first written; preserved across renewals.
     pub created_at: DateTime<Utc>,
 }
 
+/// Open the pinner's LMDB environment at `data_dir`. Call once at
+/// process startup before any of the `upsert`/`get`/`list` helpers
+/// below.
 pub fn init(data_dir: &str) -> Result<(), anyhow::Error> {
     init_db::<Table>(data_dir).map_err(|e| anyhow::anyhow!("db init: {e}"))?;
     Ok(())
@@ -94,6 +104,8 @@ pub fn upsert(
     .map_err(|e| anyhow::anyhow!("db upsert: {e}"))
 }
 
+/// Read the `PinnedRow` for `key`. `Ok(None)` means the pinner is not
+/// holding that series.
 pub fn get(key: &Key) -> Result<Option<PinnedRow>, anyhow::Error> {
     readonly_tx(|tx| {
         Table::PinnedSeries
@@ -102,6 +114,8 @@ pub fn get(key: &Key) -> Result<Option<PinnedRow>, anyhow::Error> {
     })
 }
 
+/// Every pinned series and its row. Used by the expiry loop and by
+/// the admin API.
 pub fn list() -> Result<Vec<(Key, PinnedRow)>, anyhow::Error> {
     // Inner result short-circuits on the first per-row failure, outer
     // result reports a transaction-level failure. Two `?`s unwrap both.
@@ -122,6 +136,8 @@ pub fn list() -> Result<Vec<(Key, PinnedRow)>, anyhow::Error> {
     collected.map_err(|e| anyhow::anyhow!("db list: {e}"))
 }
 
+/// Drop the pinner's interest in `key`. The on-node subscription is
+/// separate; call the node's DELETE route too.
 pub fn delete(key: &Key) -> Result<(), anyhow::Error> {
     writable_tx(|tx| {
         Table::PinnedSeries.delete(tx, key.as_bytes())?;

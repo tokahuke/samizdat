@@ -322,7 +322,7 @@ fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScop
     entity_from_referrer(&referer).map(Some)
 }
 
-/// Represents the security scope of a request, containing the associated entity.
+/// The entity a request is scoped to, derived from its Referer.
 pub struct SecurityScope(pub Entity);
 
 impl<S: Send + Sync> FromRequestParts<S> for SecurityScope {

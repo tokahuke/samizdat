@@ -1,3 +1,7 @@
+//! Samizdat proxy: TLS-terminating reverse proxy that bridges the
+//! public web to a local samizdat node, plus the wildcard-certificate
+//! and DNS-challenge plumbing.
+
 mod cli;
 mod dns;
 mod http;

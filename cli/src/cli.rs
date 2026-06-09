@@ -1,3 +1,5 @@
+//! `samizdat` CLI argument parsing and top-level command dispatch.
+
 use std::{path::PathBuf, sync::OnceLock};
 use structopt::StructOpt;
 
@@ -5,12 +7,15 @@ use crate::{api::EditionKind, commands};
 
 static CLI: OnceLock<Cli> = OnceLock::new();
 
+/// Parse argv into a [`Cli`]. Called lazily by [`cli`]; explicit
+/// invocation is rarely needed.
 pub fn init_cli() -> Cli {
     let cli = Cli::from_args();
     tracing::debug!("Arguments from command line: {:#?}", cli);
     cli
 }
 
+/// Borrow the parsed CLI, initialising it from argv on first call.
 pub fn cli<'a>() -> &'a Cli {
     CLI.get_or_init(init_cli)
 }
@@ -25,10 +30,10 @@ pub fn server() -> Result<String, anyhow::Error> {
     Ok(format!("http://127.0.0.1:{}", crate::access_token::port()?))
 }
 
-/// Main CLI configuration structure containing global options and subcommands
+/// Top-level CLI: global options plus the subcommand to run.
 #[derive(Clone, Debug, StructOpt)]
 pub struct Cli {
-    /// Path to the Samizdat data directory
+    /// Path to the Samizdat data directory.
     #[structopt(
         long,
         short,
@@ -37,16 +42,16 @@ pub struct Cli {
     )]
     pub data: PathBuf,
 
-    /// Enable verbose logging
+    /// Verbose logging.
     #[structopt(long, short = "v", env = "SAMIZDAT_VERBOSE")]
     pub verbose: bool,
 
-    /// The command to execute
+    /// Subcommand to run.
     #[structopt(subcommand)]
     pub command: Command,
 }
 
-/// Available CLI commands for Samizdat
+/// Top-level CLI subcommands.
 #[derive(Clone, Debug, StructOpt)]
 pub enum Command {
     /// Tests if the server is up
@@ -253,10 +258,8 @@ impl Command {
     }
 }
 
-/// Hub management commands for controlling hub connections.
-///
-/// These commands allow creating, listing, and removing hub connections that
-/// the node uses to communicate with the Samizdat network.
+/// Hub management: create, list, and remove hub connections used by the
+/// node to talk to the Samizdat network.
 #[derive(Clone, Debug, StructOpt)]
 pub enum HubCommand {
     /// Creates a new hub connection
@@ -288,10 +291,7 @@ impl HubCommand {
     }
 }
 
-/// Connection management commands for monitoring active hub connections.
-///
-/// These commands provide visibility into the current hub connections
-/// maintained by the node.
+/// Visibility into the node's current hub connections.
 #[derive(Clone, Debug, StructOpt)]
 pub enum ConnectionCommand {
     /// Lists all active connections
@@ -306,7 +306,7 @@ impl ConnectionCommand {
     }
 }
 
-/// Peer management commands for interacting with network peers.
+/// Network-peer management.
 #[derive(Clone, Debug, StructOpt)]
 pub enum PeerCommand {
     /// Lists all known peers
@@ -321,10 +321,7 @@ impl PeerCommand {
     }
 }
 
-/// Collection management commands for handling content collections.
-///
-/// These commands provide functionality to view and manage collections of
-/// content within the Samizdat system.
+/// Inspect content collections held by the node.
 #[derive(Clone, Debug, StructOpt)]
 pub enum CollectionCommand {
     /// Shows details on a particular collection
@@ -342,10 +339,8 @@ impl CollectionCommand {
     }
 }
 
-/// Series management commands for handling content series.
-///
-/// These commands provide functionality to create, remove, and manage series,
-/// which are sequences of related content editions in Samizdat.
+/// Series management: create, remove, list, and inspect series. A series
+/// is a sequence of related content editions.
 #[derive(Clone, Debug, StructOpt)]
 pub enum SeriesCommand {
     /// Creates a new locally owned series
@@ -406,10 +401,8 @@ impl SeriesCommand {
     }
 }
 
-/// Edition management commands for handling content editions.
-///
-/// These commands allow viewing and managing editions, which are specific
-/// versions of content within a series.
+/// Inspect editions. An edition is a specific version of a series's
+/// content.
 #[derive(Clone, Debug, StructOpt)]
 pub enum EditionCommand {
     /// Lists all known editions or all known editions for a given series public key, if
@@ -425,10 +418,7 @@ impl EditionCommand {
     }
 }
 
-/// Subscription management commands for handling content subscriptions.
-///
-/// These commands enable users to subscribe to series, manage their subscriptions,
-/// and control content synchronization from the network.
+/// Subscription management: subscribe to series, refresh, remove, list.
 #[derive(Clone, Debug, StructOpt)]
 pub enum SubscriptionCommand {
     /// Subscribe to a series
@@ -481,11 +471,9 @@ impl SubscriptionCommand {
     }
 }
 
-/// Identity management commands for blockchain-based identity operations.
-///
-/// These commands provide functionality to manage identities on the blockchain,
-/// including creating and updating identity associations and managing blockchain
-/// endpoints.
+/// Identity management on the Polygon blockchain. Set the provider
+/// endpoint, create or update an identity-to-entity mapping, look up an
+/// identity.
 #[derive(Clone, Debug, StructOpt)]
 pub enum IdentityCommand {
     /// Sets the Polygon blockchain provider endpoint
@@ -557,10 +545,8 @@ impl IdentityCommand {
     }
 }
 
-/// Authentication management commands for controlling access rights.
-///
-/// These commands allow managing access control through granting and revoking
-/// rights to different Web application scopes.
+/// Access-control commands: grant, revoke, and list rights for Web
+/// application scopes.
 #[derive(Clone, Debug, StructOpt)]
 pub enum AuthCommand {
     /// Grants access rights to a scope

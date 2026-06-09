@@ -1,7 +1,5 @@
-//! Models for storing and managing data in the hub.
-//!
-//! This module contains the data structures and traits used to represent and manipulate
-//! various types of information tracked by the hub.
+//! Models for the entities the hub tracks: per-IP blacklist, connection log,
+//! query log, candidate log, statistics log.
 
 mod blacklisted_ip;
 mod candidate_log;

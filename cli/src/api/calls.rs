@@ -1,8 +1,5 @@
-//! API call implementations for interacting with the Samizdat node.
-//!
-//! This module provides strongly-typed wrappers around HTTP endpoints exposed by the
-//! node,
-//! organized into logical groups.
+//! Strongly-typed wrappers around the Samizdat node's HTTP endpoints,
+//! grouped by topic.
 
 use anyhow::Context;
 use futures::StreamExt;
@@ -231,25 +228,38 @@ pub async fn get_all_series_owners() -> Result<Vec<GetSeriesOwnerResponse>, anyh
 
 // Series:
 
+/// Response shape for `GET /_series`: one entry per series the node
+/// knows about, keyed by public key.
 #[derive(Deserialize)]
 pub struct GetSeriesResponse {
+    /// The series public key (Ed25519).
     pub public_key: Key,
 }
 
+/// `GET /_series` -- list every series the node has heard about.
 pub async fn get_all_series() -> Result<Vec<GetSeriesResponse>, anyhow::Error> {
     get("/_series").await
 }
 
 // Editions:
 
+/// Response shape for `GET /_editions`: a signed edition record plus
+/// the public key of the series it advances.
 #[derive(Deserialize)]
 pub struct GetEditionResponse {
+    /// The signed edition content. Verify against `public_key` before
+    /// trusting any field.
     pub signed: Signed<EditionContent>,
+    /// Public key of the series this edition belongs to.
     pub public_key: Key,
+    /// Whether the edition is a draft (publisher-local, not for
+    /// federation).
     #[serde(default)]
     pub is_draft: bool,
 }
 
+/// `GET /_editions` -- every edition the node has either signed or
+/// learned about.
 pub async fn get_all_editions() -> Result<Vec<GetEditionResponse>, anyhow::Error> {
     get("/_editions").await
 }

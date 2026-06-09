@@ -1,6 +1,5 @@
-//! Tools for replay attacks resistance. This avoids both malicious attacks and
-//! unfortunate accidents and is also useful to avoid message amplification attacks
-//! to the network.
+//! Replay-attack resistance. Catches both deliberate replays and accidental
+//! retransmits, and blunts message-amplification attacks against the network.
 //!
 //! # Threat model and limits
 //!

@@ -1,6 +1,5 @@
-//! A sampling scheme based on the idea of Thompson Sampling to make the hub capable of
-//! discerning the best node in the network. This is a very simple implementation and can
-//! be vastly improved upon in the future.
+//! Thompson-sampling-inspired scheme the hub uses to pick which node to ask next.
+//! Bare-bones today; plenty of room to refine.
 
 use rand::distributions::Distribution;
 use serde_derive::{Deserialize, Serialize};

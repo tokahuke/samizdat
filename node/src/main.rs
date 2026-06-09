@@ -1,3 +1,6 @@
+//! Samizdat node: the peer process that publishes, serves and replicates
+//! content over the federation.
+
 #![feature(try_blocks)]
 
 mod access;

@@ -52,7 +52,8 @@ pub static ROOM: LazyLock<Room> = LazyLock::new(Room::new);
 /// and made every replay check the global hub bottleneck.
 pub static REPLAY_RESISTANCE: LazyLock<ReplayResistance> = LazyLock::new(ReplayResistance::new);
 
-/// Represents a connection to a Samizdat node.
+/// A node connected to this hub: the RPC client, the address, per-node
+/// throttle and semaphore, and the running statistics used by the sampler.
 #[derive(Debug)]
 pub struct Node {
     /// Gathers statics on the ability of this node to answer queries.

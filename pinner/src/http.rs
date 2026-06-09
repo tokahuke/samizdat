@@ -20,6 +20,8 @@ use std::num::NonZeroU32;
 
 use crate::{cli::cli, db, node_client};
 
+/// Build the pinner's axum `Router`: all routes are gated behind the
+/// `X-Api-Key` check and wrapped in HTTP tracing.
 pub fn router() -> Router {
     let auth = middleware::from_fn(require_api_key);
 

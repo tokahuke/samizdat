@@ -4,9 +4,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::install;
 
+/// Top-level samizdat-up CLI: just the subcommand to run.
 #[derive(Parser, Debug)]
 #[command(name = "samizdat-up", version, about, long_about = None)]
 pub struct Cli {
+    /// The subcommand selected on the command line.
     #[command(subcommand)]
     pub command: Command,
 }
@@ -41,6 +43,7 @@ impl Component {
     }
 }
 
+/// Top-level samizdat-up subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Install a component + its CLI, register it as a system service,
@@ -139,6 +142,7 @@ pub enum Command {
     },
 }
 
+/// Subcommands of `samizdat-up admin`.
 #[derive(Subcommand, Debug)]
 pub enum AdminAction {
     /// Add `<user>` to the `samizdat` group. The user must log out
@@ -152,6 +156,7 @@ pub enum AdminAction {
 }
 
 impl Cli {
+    /// Dispatch the parsed subcommand to the appropriate handler.
     pub fn run(self) -> Result<(), anyhow::Error> {
         match self.command {
             Command::Install {

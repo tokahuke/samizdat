@@ -167,10 +167,9 @@ impl WildcardCertManager {
                 }
             };
 
-            if needs_renewal
-                && let Err(err) = self.run_issuance().await {
-                    error!("wildcard cert renewal failed: {err}; will retry next tick");
-                }
+            if needs_renewal && let Err(err) = self.run_issuance().await {
+                error!("wildcard cert renewal failed: {err}; will retry next tick");
+            }
 
             // Jitter the wait so a fleet of proxies booted together
             // does not stampede the ACME directory at the same wall-

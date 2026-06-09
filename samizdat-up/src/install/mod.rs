@@ -115,10 +115,20 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// Options for a single install run. Parsed from the CLI by
+/// `cli.rs::Command::Install`.
 pub struct InstallOpts {
+    /// Which daemon (node, hub, proxy, pinner) to install. `All`
+    /// installs the standard node bundle.
     pub component: Component,
+    /// Optional version pin; defaults to `latest` from the upstream
+    /// release feed.
     pub version: Option<String>,
+    /// Skip enabling the system service after install. Useful when
+    /// hand-running the binary for debugging.
     pub no_service: bool,
+    /// Optional local path to install from (a pre-downloaded archive
+    /// or a developer build), bypassing the network fetch.
     pub from: Option<String>,
     /// Unix user to run the daemons as. `None` keeps the
     /// service-manager default (root on Linux + macOS). The user
@@ -127,11 +137,18 @@ pub struct InstallOpts {
     pub as_user: Option<String>,
 }
 
+/// Options for a single uninstall run.
 pub struct UninstallOpts {
+    /// Which daemon (or `All`) to remove.
     pub component: Component,
+    /// If true, also drop the on-disk data directory; if false, leave
+    /// data behind so a future install can pick it up.
     pub purge: bool,
 }
 
+/// Install the requested component on the host. Dispatches to the
+/// platform module and, on a successful node install, seeds the
+/// default hub list best-effort.
 pub fn install(opts: InstallOpts) -> Result<()> {
     // Capture before move; seeding only matters when the node daemon
     // was just enabled.
@@ -159,6 +176,8 @@ pub fn install(opts: InstallOpts) -> Result<()> {
     Ok(())
 }
 
+/// Remove the requested component from the host. Dispatches to the
+/// platform module; respects `opts.purge`.
 pub fn uninstall(opts: UninstallOpts) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -179,6 +198,10 @@ pub fn uninstall(opts: UninstallOpts) -> Result<()> {
     }
 }
 
+/// Update an installed component to a new version: replace the
+/// binary in place, then restart its service. `component=None`
+/// updates every component currently installed; `to=None` resolves
+/// to `latest` from the upstream release feed.
 pub fn update(component: Option<Component>, to: Option<String>) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -199,6 +222,8 @@ pub fn update(component: Option<Component>, to: Option<String>) -> Result<()> {
     }
 }
 
+/// Print the components installed on this host and their installed
+/// versions. Backs the `samizdat-up list` subcommand.
 pub fn list() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -218,11 +243,15 @@ pub fn list() -> Result<()> {
     }
 }
 
+/// Windows-only entry point invoked by the Service Control Manager
+/// to run a Samizdat daemon under SCM supervision.
 #[cfg(target_os = "windows")]
 pub fn run_as_service(component: Component) -> Result<()> {
     windows::run_as_service(component)
 }
 
+/// One-off admin operation on the local install (add the current user
+/// to the samizdat group, rotate tokens, etc). Linux and macOS only.
 pub fn admin(action: AdminAction) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -262,6 +291,8 @@ pub fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
     }
 }
 
+/// Replace the `samizdat-up` binary itself with a fresh download
+/// from the upstream feed.
 pub fn self_update() -> Result<()> {
     #[cfg(target_os = "linux")]
     {

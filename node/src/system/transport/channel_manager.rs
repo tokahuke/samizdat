@@ -1,3 +1,7 @@
+//! Per-channel send/recv halves layered on top of a QUIC connection,
+//! plus the keyed registry that lets a peer demultiplex incoming
+//! streams back to the right local channel.
+
 use futures::prelude::*;
 use samizdat_common::address::{ChannelAddr, ChannelId};
 use std::{
@@ -16,8 +20,13 @@ use super::{
     multiplexed::Multiplexed,
 };
 
+/// Slot for one peer's optional live `Multiplexed` connection. The
+/// outer `Mutex` serialises connect attempts; the `Option` is `None`
+/// while no connection is established.
 pub type PeerEntry = Arc<Mutex<Option<Arc<Multiplexed>>>>;
 
+/// Process-wide map from peer socket address to its connection slot.
+/// Walked periodically to evict closed connections.
 pub static PEER_CONNECTIONS: LazyLock<Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>>> =
     LazyLock::new(|| {
         let peers: Arc<RwLock<BTreeMap<SocketAddr, PeerEntry>>> = Arc::default();
@@ -157,9 +166,14 @@ pub async fn initiate(
     ))
 }
 
+/// Cloneable handle for sending payloads down one logical channel on
+/// a shared QUIC connection.
 #[derive(Clone)]
 pub struct ChannelSender {
+    /// Identifies this channel among the others sharing the underlying
+    /// QUIC connection.
     channel_id: ChannelId,
+    /// The shared multiplexed connection this channel rides on.
     multiplexed: Arc<Multiplexed>,
 }
 
@@ -173,7 +187,11 @@ impl ChannelSender {
     }
 }
 
+/// Receive half of a logical channel: a stream of incoming QUIC
+/// streams demultiplexed for this channel id.
 pub struct ChannelReceiver {
+    /// Stream of inbound QUIC unidirectional streams tagged with this
+    /// channel's id by the demultiplexer.
     receiver: mpsc::UnboundedReceiver<RecvStream>,
 }
 

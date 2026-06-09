@@ -1,3 +1,6 @@
+//! Process-wide QUIC endpoint plus the accept/dial paths the rest of
+//! the transport layer goes through to reach peers.
+
 use futures::future::join;
 use samizdat_common::quic;
 use std::{net::SocketAddr, sync::OnceLock};
@@ -10,6 +13,8 @@ use super::matcher::Matcher;
 
 static CONNECTION_MANAGER: OnceLock<ConnectionManager> = OnceLock::new();
 
+/// Borrow the process-wide `ConnectionManager`, lazily creating it on
+/// first call (binds a QUIC endpoint to `[::]:0`).
 pub fn connection_manager<'a>() -> &'a ConnectionManager {
     CONNECTION_MANAGER.get_or_init(|| {
         let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
@@ -22,14 +27,23 @@ pub fn connection_manager<'a>() -> &'a ConnectionManager {
     })
 }
 
+/// Which side of a duplicate connection to drop when both peers
+/// happened to dial each other simultaneously.
 #[derive(Debug, Clone, Copy)]
 pub enum DropMode {
+    /// Keep the outgoing connection; drop the incoming one.
     DropIncoming,
+    /// Keep the incoming connection; drop the outgoing one.
     DropOutgoing,
 }
 
+/// Owns the QUIC endpoint and the pending-incoming matcher used to
+/// pair outbound dials with the same peer's inbound attempts.
 pub struct ConnectionManager {
+    /// The shared QUIC endpoint used for both sides of the conversation.
     endpoint: Endpoint,
+    /// Pending-incoming rendezvous: an outbound dial registers here so
+    /// the inbound stream from the same peer can be handed back.
     matcher: Matcher<SocketAddr, Incoming>,
 }
 

@@ -1,14 +1,12 @@
-//! A helper `struct` to be used in conjunction with [`BinaryHeap`] in
-//! order to make it behave like a map.
+//! Priority-plus-payload pair that lets [`BinaryHeap`] behave like a map: the heap
+//! orders by `P` while carrying a `T` along for the ride.
 
 use std::cmp;
 #[cfg(doc)]
 use std::collections::BinaryHeap;
 
-/// A helper `struct` to be used in conjunction with [`BinaryHeap`] in
-/// order to make it behave like a map.
-///
-/// The ordering of the [`HeapEntry`] is the same as the ordering of `P`.
+/// Priority-plus-payload pair for use with [`BinaryHeap`]. Ordered by `P`; `T` rides
+/// along.
 #[derive(Debug)]
 pub struct HeapEntry<P, T> {
     /// The ordered key used by the binary heap.
@@ -18,8 +16,7 @@ pub struct HeapEntry<P, T> {
 }
 
 impl<P: Ord, T> HeapEntry<P, T> {
-    /// Compares two heap entries based on their priorities.
-    /// Used internally for implementing ordering traits.
+    /// Compares two entries by priority. Backs the `Ord` / `PartialOrd` impls.
     fn ord(&self, other: &Self) -> cmp::Ordering {
         self.priority.cmp(&other.priority)
     }

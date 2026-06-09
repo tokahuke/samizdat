@@ -330,10 +330,9 @@ pub async fn commit(
     Ok(())
 }
 
-/// Watches the project directory for changes and automatically commits new editions.
-///
-/// Provides live reload functionality through a WebSocket connection when changes are
-/// detected.
+/// Watches the project directory and commits a new edition on every
+/// change. Pushes a `refresh` message over WebSocket so an open browser
+/// preview reloads itself.
 pub async fn watch(
     ttl: &Option<String>,
     no_browser: bool,
@@ -391,9 +390,10 @@ pub async fn watch(
             "http://localhost:{}/_series/{}",
             crate::access_token::port()?,
             private_manifest.public_key_debug
-        )) {
-            println!("WARNING: could not open browser: {err}")
-        }
+        ))
+    {
+        println!("WARNING: could not open browser: {err}")
+    }
 
     // Print watch banner:
     println!();

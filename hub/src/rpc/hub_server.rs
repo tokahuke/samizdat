@@ -1,4 +1,4 @@
-//! Implements the RPC server part of the Hub API.
+//! Server side of the Hub RPC API.
 
 use futures::prelude::*;
 use std::{net::SocketAddr, pin::pin, sync::Arc, time::Instant};

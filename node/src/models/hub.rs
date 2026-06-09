@@ -1,3 +1,7 @@
+//! Hub records: the addresses a node should connect to as RPC clients
+//! to participate in the federation, plus how the address is to be
+//! resolved.
+
 use serde_derive::{Deserialize, Serialize};
 
 use samizdat_common::{
@@ -7,9 +11,13 @@ use samizdat_common::{
 
 use crate::db::Table;
 
+/// One hub the node should connect to: the addressable string and the
+/// resolution mode (DNS, raw socket, etc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hub {
+    /// Address the node will dial. Format depends on `resolution_mode`.
     pub address: String,
+    /// How `address` is to be turned into an IP/port pair.
     pub resolution_mode: AddrResolutionMode,
 }
 

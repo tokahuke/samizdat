@@ -156,10 +156,11 @@ fn extract_record_id(body: &str) -> Result<i64, DnsError> {
     }
     let mut digits = String::new();
     if let Some(&c) = chars.peek()
-        && c == '-' {
-            digits.push(c);
-            chars.next();
-        }
+        && c == '-'
+    {
+        digits.push(c);
+        chars.next();
+    }
     while let Some(&c) = chars.peek() {
         if c.is_ascii_digit() {
             digits.push(c);

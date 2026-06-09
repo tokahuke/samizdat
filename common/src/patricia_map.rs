@@ -38,7 +38,7 @@ impl Side {
     }
 }
 
-/// Represents the status when following a path in the Patricia tree
+/// Outcome of walking one hash through the Patricia tree.
 enum FollowStatus {
     /// Split occurred at the given side and position
     Split(Side, u8),

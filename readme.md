@@ -21,33 +21,33 @@ If you support this work, consider donating using crypto
 
 ## Introduction
 
-In these troubling times, some people might find it hard to publish content to the web. Samizdat is a P2P network for sharing and publishing content without the need of a server, most of which are run by _them_. Self-publish your content today with Samizdat!
+Samizdat is a peer-to-peer network for publishing content without a server. Most servers are run by _them_; this one isn't run by anyone.
 
 ### Warning
 
-This is still a proof of concept implementation. So three caveats are in place:
+Still a proof of concept. Three caveats:
 
-1. Don't rely on the availability of the network or of your content; have alternatives in place.
-2. Expect frequent breaking changes.
-3. Expect vulnerabilities. Do not use the network for sensitive content yet.
+1. Don't rely on the network or your content staying up; keep backups.
+2. Expect breaking changes.
+3. Expect vulnerabilities. Don't put anything sensitive on it yet.
 
-> How to make this warning disappear? Contribute! I am but one humble human being.
+> How to make this warning go away? Contribute. I'm one person.
 
 ## Project goals
 
-Samizdat (from a Russian term meaning "self-publishing") aims to provide a decentralized internet application that enables one to do the following:
+Samizdat (Russian for "self-publishing") wants to be a decentralized application that can:
 
-1. Be able to allow one to serve a public, static site without the need for a hosting service. The content is to be hosted in the person's own device or in caches from people who visit the site. (READY)
+1. Serve a public static site with no hosting service. Content lives on the publisher's device and in the caches of people who visited the site. (READY)
 
-2. Provide a human-friendly identifier for resources contained in this network, i.e., a URL scheme. This URL is to be content-addressed, not location-addressed. (IN CONSTRUCTION)
+2. Give resources a human-friendly, content-addressed URL. (IN CONSTRUCTION)
 
-3. Oblivious hosting: only the device serving the content and the device asking for the content can extract any information about the content or its metadata. (BY DESIGN)
+3. Hide who is asking for what: only the device serving and the device asking learn anything about the content or its metadata. (BY DESIGN)
 
-4. Do all this _easily_ and _conveniently_. Graphical interfaces, mobile apps and amenities are welcome. (IN CONSTRUCTION)
+4. Do all of the above easily. GUIs, mobile apps, conveniences welcome. (IN CONSTRUCTION)
 
-We are not quite there yet...
+Not there yet.
 
-## 📢 Help wanted! 🗯
+## Help wanted
 
 These are important issues where help is most appreciated:
 
@@ -58,15 +58,15 @@ These are important issues where help is most appreciated:
 
 ## Architecture
 
-The project uses a hybrid peer-to-peer network, where nodes connect to hubs. The nodes are the consumers and producers of content; all content transmission is handled by the nodes. The hubs are used for routing, discovery and NAT traversal. One node can connect to many hubs simultaneously so that content can diffuse through different tribes with time.
+Hybrid peer-to-peer: nodes connect to hubs. Nodes produce, consume and transfer content. Hubs handle routing, discovery and NAT traversal. A node can connect to many hubs at once, so content drifts across tribes over time.
 
-For a deeper tour of the crates and concepts, see [docs/architecture.md](docs/architecture.md).
+For the crate-by-crate tour, see [docs/architecture.md](docs/architecture.md).
 
 ## Installation
 
-The recommended path is the `samizdat-up` bootstrap installer, which downloads the
-latest release from the network itself and then installs the node, hub or proxy as
-a system service. On Linux and macOS:
+The recommended path is `samizdat-up`, which downloads the latest release from the
+network itself and installs the node, hub or proxy as a system service. On Linux
+and macOS:
 
 ```
 curl -fsSL https://series-v5bknud2nujn5bmgrmtmxovrncwhedw4a6jtrnhz4yn3ovm2wxjq.hubfederation.com/latest/install.sh | sudo bash
@@ -79,20 +79,20 @@ On Windows, download `samizdat-up.exe` from the same location and run
 
 ## Quick start
 
-In the installation, the `samizdat` cli tool is included. Run `samizdat init`
-in an empty project directory and it will create a manifest (`Samizdat.toml`)
-and a private manifest (`.Samizdat.priv`, secrets only -- add to `.gitignore`).
-You will be shown the private key once on stdout; back it up.
+The installation ships the `samizdat` CLI. Run `samizdat init` in an empty
+project directory: it creates a manifest (`Samizdat.toml`) and a private
+manifest (`.Samizdat.priv`, secrets only -- add to `.gitignore`). The
+private key is printed once on stdout; back it up.
 
-`samizdat init` also registers a new _series_ with your node. A series has a
-public key (which is what the network sees) and a node-local **nickname**
-(taken from the project directory name by default, overridable with
-`--nickname <x>`). The nickname is a label your own node uses to find the
-series; it carries no meaning to anyone else.
+`samizdat init` also registers a new _series_ with your node. A series has
+a public key (what the network sees) and a node-local **nickname** (the
+project directory name by default, overridable with `--nickname <x>`).
+The nickname is a label your own node uses to find the series; nobody
+else sees it.
 
-To refresh the contents of your series, run `samizdat commit` (or
-`samizdat watch` for continuous refresh-on-save). It runs the build script
-declared in `Samizdat.toml` and publishes the result.
+To refresh the series, run `samizdat commit` (or `samizdat watch` for
+refresh-on-save). It runs the build script in `Samizdat.toml` and
+publishes the result.
 
 **`samizdat commit` always publishes under your `[debug]` series, not your
 public one.** This is on purpose: the public series is a sign-once-and-it's-
@@ -105,10 +105,10 @@ subdomain:
 http://series-<base32-of-public-key>.localhost:4510/path/to/stuff
 ```
 
-Each series lives at its own browser origin, so storage, cookies, and
-service workers are isolated from every other series. The `samizdat commit`
-output prints the URL for you; `samizdat series ls` also includes a
-`host_label` column with the same string.
+Each series gets its own browser origin, so storage, cookies and service
+workers are isolated from every other series. `samizdat commit` prints
+the URL; `samizdat series ls` has a `host_label` column with the same
+string.
 
 To share with friends, give them the public-key form on the public proxy:
 
@@ -119,32 +119,30 @@ https://series-<base32-public-key>.hubfederation.com/path/to/stuff
 The proxy uses the same host-form as the node, so the leftmost label maps
 to the same entity on both sides.
 
-Samizdat also supports a friendlier subdomain form using a blockchain
-identity (Polygon, via `samizdat identity create`), reachable at
-`http://<identity>.localhost:4510/` locally and
-`https://<identity>.hubfederation.com/` via the proxy. Registering
-an identity costs gas and the name has to be a valid DNS label
-(`[a-z0-9-]`, 1-63 chars, no leading or trailing hyphen). Most projects
-skip identities and just share the public-key URL.
+A friendlier subdomain form is also available via a blockchain identity
+(Polygon, `samizdat identity create`): `http://<identity>.localhost:4510/`
+locally and `https://<identity>.hubfederation.com/` via the proxy.
+Registering an identity costs gas, and the name must be a valid DNS
+label (`[a-z0-9-]`, 1-63 chars, no leading or trailing hyphen). Most
+projects skip identities and share the public-key URL.
 
-This is just the tip of the iceberg, however! Check out more under
-[docs/](docs/) in this repository.
+More under [docs/](docs/).
 
 
 ## Repository structure
 
-* `common`: Rust lib defining common code shared by other Samizdat crates. You will find here RPC definitions, Merkle tree implementation, etc...
+* `common`: code shared across crates -- RPC definitions, Merkle tree, etc.
 * `hub`: the Samizdat Hub crate.
 * `node`: the Samizdat Node crate.
 * `cli`: the Samizdat CLI crate.
-* `proxy`: a proxy to bridge a Samizdat Node to the open Web, used in [https://hubfederation.com](https://hubfederation.com).
-* `samizdat-up`: cross-platform installer / service manager (systemd, launchd, Windows SCM).
-* `js`: the SamizdatJS library, which enables Web applications to interface with the local Samizdat node.
+* `proxy`: bridges a Samizdat Node to the open Web. Used by [https://hubfederation.com](https://hubfederation.com).
+* `samizdat-up`: cross-platform installer and service manager (systemd, launchd, Windows SCM).
+* `js`: the SamizdatJS library, so Web apps can talk to the local Samizdat node.
 * `install`: installation artifacts for end users on different platforms.
-* `simulate-net`: spawn your own network locally. Necessary for integration tests.
+* `simulate-net`: spawn your own network locally. Needed for integration tests.
 * `blockchain`: smart contracts for the Samizdat identity.
 * `terraform`: infrastructure-as-code for the public testbed.
-* `docs`: architecture, threat model, conventions and operations runbook.
+* `docs`: architecture, threat model, conventions, operations runbook.
 
 ## Licensing
 

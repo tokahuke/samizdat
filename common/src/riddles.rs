@@ -144,14 +144,18 @@ impl Hint {
         }
     }
 
+    /// The leaked prefix bytes, truncated to [`Hint::len`].
     pub fn prefix(&self) -> &[u8] {
         &self.prefix.0[..(self.length as usize)]
     }
 
+    /// Number of bytes of content hash leaked by this hint.
     pub fn len(&self) -> usize {
         self.length as usize
     }
 
+    /// Whether this hint leaks zero bytes (and thus accepts every
+    /// candidate hash).
     pub fn is_empty(&self) -> bool {
         self.length == 0
     }

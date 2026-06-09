@@ -17,11 +17,16 @@ use tokio::{
     time::{Duration, sleep},
 };
 
+/// Lifecycle state of a wrapped reconnecting connection.
 #[derive(Debug, FromPrimitive, Serialize)]
 pub enum ConnectionStatus {
+    /// First connect attempt is in flight.
     Connecting,
+    /// Connection is live.
     Connected,
+    /// Live connection just dropped; supervisor is about to retry.
     Failing,
+    /// Retry attempt is in flight.
     Reconnecting,
 }
 

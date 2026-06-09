@@ -1,3 +1,6 @@
+//! Hub-admin routes for the IP blacklist. Loopback-only; see the
+//! TODO at the bottom of this file before exposing to anything else.
+
 use std::net::IpAddr;
 
 use axum::{
@@ -15,6 +18,8 @@ use crate::{http::ApiResponse, models::BlacklistedIp};
 // process can blacklist arbitrary IPs and there is no DELETE route to undo it.
 // Add an admin bearer-token middleware (env var `SAMIZDAT_HUB_ADMIN_TOKEN` or
 // similar) and a DELETE route before exposing the hub to shared infrastructure.
+
+/// Build the blacklist sub-router (`POST /` to add, `GET /` to list).
 pub fn api() -> Router {
     #[derive(Debug, Deserialize)]
     struct PostBlacklistedIPRequest {

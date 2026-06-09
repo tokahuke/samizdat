@@ -1,5 +1,4 @@
-//! Provides functionality for interacting with the smart contracts that store the
-//! identities for Samizdat.
+//! Interacts with the smart contracts that store Samizdat identities.
 
 use chrono::{Duration, Utc};
 use ethers::{abi::Abi, prelude::*};
@@ -59,8 +58,8 @@ pub fn identity_provider<'a>() -> &'a IdentityProvider {
         .expect("identity provider not initialized")
 }
 
-/// Represents an identity stored on the blockchain, containing entity information and
-///  validity period.
+/// An identity record as read from the on-chain storage: the entity it
+/// points at, its handle, the TTL, and when the record expires.
 #[derive(Debug)]
 pub struct Identity {
     /// The entity (usually a series reference) associated with this identity
@@ -90,8 +89,8 @@ impl Identity {
     }
 }
 
-/// Provides functionality to interact with identity-related smart contracts on the
-/// blockchain.
+/// Handle on the on-chain identity contract: holds the storage-contract
+/// instance the node uses to read identity records.
 pub struct IdentityProvider {
     /// Contract instance for the contract that stores identities
     storage_contract: RwLock<Contract<Provider<Http>>>,

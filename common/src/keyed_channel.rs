@@ -1,12 +1,13 @@
-//! A channel that can be multiplexed with a key.
+//! A channel multiplexed by key.
 //!
-//! Each registered listener carries a generation counter so that:
+//! Each listener carries a generation counter, so:
 //!   * a second `recv_stream` on the same key does NOT silently evict the first;
-//!   * when an old `RecvStream` is dropped, it removes its entry only if the slot still
-//!     belongs to it (preventing an outdated drop from killing a newer listener).
+//!   * when an old `RecvStream` drops, it removes its entry only if the slot still
+//!     belongs to it. An outdated drop cannot kill a newer listener.
 //!
-//! The underlying mpsc is bounded; a misbehaving sender cannot grow memory without
-//! limit. Overflow drops the message and logs at `warn` level.
+//! The underlying mpsc is bounded, so a misbehaving sender cannot grow
+//! memory without limit. On overflow the message is dropped and a `warn`
+//! is logged.
 
 use futures::{Stream, StreamExt, channel::mpsc};
 use std::{
@@ -21,26 +22,27 @@ use std::{
 
 use crate::address::ChannelId;
 
-/// Maximum in-flight messages buffered per listener before send pressure starts dropping.
-/// Picked to allow a healthy stream of candidates while still bounding worst-case memory.
+/// Per-listener buffer cap; once full, new sends are dropped. Big enough
+/// for a healthy candidate stream, small enough to bound worst-case
+/// memory.
 const CHANNEL_CAPACITY: usize = 1024;
 
 #[derive(Debug)]
 struct Slot<T> {
-    /// Monotonic id distinguishing one registration on a key from a later registration
-    /// on the same key. Used to defend the Drop impl against ABA.
+    /// Monotonic id distinguishing one registration on a key from a
+    /// later one on the same key. Defends Drop against ABA.
     generation: u64,
     sender: mpsc::Sender<T>,
 }
 
-/// A channel that can be multiplexed with a key.
+/// Inner state of a [`KeyedChannel`].
 #[derive(Debug)]
 struct KeyedChannelInner<T> {
     channels: RwLock<BTreeMap<ChannelId, Slot<T>>>,
     next_generation: AtomicU64,
 }
 
-/// A channel that can be multiplexed with a key.
+/// A channel multiplexed by [`ChannelId`].
 #[derive(Debug)]
 pub struct KeyedChannel<T>(Arc<KeyedChannelInner<T>>);
 
@@ -60,14 +62,14 @@ impl<T> Default for KeyedChannel<T> {
 }
 
 impl<T> KeyedChannel<T> {
-    /// Creates a new [`KeyedChannel`].
+    /// An empty [`KeyedChannel`].
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sends an item to a specified address. If nobody is listening on the specified key,
-    /// nothing happens. If the listener's queue is full, the message is dropped and a
-    /// warning is logged; this prevents memory growth under load.
+    /// Send `value` to whoever is listening on `key`. If nobody is, it's
+    /// a no-op. If the listener's queue is full, the message is dropped
+    /// and a warning is logged.
     pub fn send(&self, key: ChannelId, value: T) {
         let mut channels = self.0.channels.write().expect("poisoned");
         if let Some(slot) = channels.get_mut(&key) {
@@ -88,14 +90,13 @@ impl<T> KeyedChannel<T> {
         }
     }
 
-    /// Listens to a given key.
+    /// Subscribe to messages addressed to `key`.
     ///
     /// # Note
     ///
-    /// If there already exists a listener on that key, the existing listener is replaced.
-    /// The replaced listener's stream stops yielding new items. This is intentional but
-    /// uncommon; callers should pick `ChannelId`s with enough entropy that collisions
-    /// are negligible.
+    /// If a listener already exists for that key, it is replaced and its
+    /// stream stops yielding. This is on purpose but rare; pick
+    /// `ChannelId`s with enough entropy that collisions are negligible.
     pub fn recv_stream(&self, key: ChannelId) -> RecvStream<T> {
         let (sender, recv) = mpsc::channel(CHANNEL_CAPACITY);
         let generation = self.0.next_generation.fetch_add(1, Ordering::Relaxed);
@@ -113,15 +114,15 @@ impl<T> KeyedChannel<T> {
     }
 }
 
-/// A stream listening to a specific key on a [`KeyedChannel`].
+/// Stream listening on one key of a [`KeyedChannel`].
 pub struct RecvStream<T> {
-    /// The receiver stream.
+    /// The receiver half.
     recv: mpsc::Receiver<T>,
     /// The keyed channel this stream belongs to.
     channel: KeyedChannel<T>,
     /// The key being listened to.
     key: ChannelId,
-    /// Generation stamp of this listener; used to ensure Drop only removes our slot.
+    /// Generation stamp, so Drop only removes our slot.
     generation: u64,
 }
 
@@ -129,10 +130,11 @@ impl<T> Drop for RecvStream<T> {
     fn drop(&mut self) {
         let mut channels = self.channel.0.channels.write().expect("poisoned");
         if let Some(slot) = channels.get(&self.key)
-            && slot.generation == self.generation {
-                channels.remove(&self.key);
-            }
-            // else: a newer listener replaced us; leave its slot alone.
+            && slot.generation == self.generation
+        {
+            channels.remove(&self.key);
+        }
+        // else: a newer listener replaced us; leave its slot alone.
     }
 }
 

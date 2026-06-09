@@ -1,6 +1,5 @@
-//! Default configuration for QUIC used by Samizdat. Samizdat has its own way of dealing
-//! with security. Therefore, much of the complexity involving security in QUIC can be
-//! igonred.
+//! Default QUIC configuration. Samizdat handles its own end-to-end security, so most
+//! of QUIC's TLS surface is intentionally bypassed.
 
 use quinn::{
     ClientConfig, Connection, Endpoint, IdleTimeout, ServerConfig, TransportConfig, VarInt,

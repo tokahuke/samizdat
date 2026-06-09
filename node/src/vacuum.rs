@@ -1,7 +1,4 @@
-//! A process to keep the size of the database under control and to purge junk.
-//!
-//! This module implements database maintenance operations that run periodically to manage
-//! storage size and remove rarely accessed data.
+//! Periodic database maintenance: cap total size and drop rarely-accessed data.
 
 use ordered_float::NotNan;
 use samizdat_common::db::{Droppable, Table as _, WritableTx, readonly_tx, writable_tx};
@@ -37,9 +34,9 @@ pub enum VacuumStatus {
 
 /// Run a vacuum round in the database.
 ///
-/// This function performs two sequential cleanup operations:
-/// 1. Removes least-useful content if total storage exceeds configured maximum
-/// 2. Performs garbage collection of orphaned chunks and dangling items
+/// Two sequential cleanup passes:
+/// 1. Drop the least-useful content if total storage exceeds the configured maximum.
+/// 2. Garbage-collect orphaned chunks and dangling items.
 pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // STEP 1: make up space if needed, deleting rarely used stuff:
 

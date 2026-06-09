@@ -1,3 +1,6 @@
+//! Record of an IP address blocked from sending the hub queries. Rows
+//! are written via the admin API and consulted by the RPC entry path.
+
 use serde_derive::{Deserialize, Serialize};
 use std::net::IpAddr;
 
@@ -5,13 +8,19 @@ use samizdat_common::db::{Table as _, TxHandle, WritableTx};
 
 use crate::db::Table;
 
+/// An IP that the hub refuses to talk to, plus the timestamp at which
+/// it was blocked.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlacklistedIp {
+    /// The blocked address.
     address: IpAddr,
+    /// When the block was placed.
     since: chrono::DateTime<chrono::Utc>,
 }
 
 impl BlacklistedIp {
+    /// Build a `BlacklistedIp` for `address`, stamped with the current
+    /// time.
     pub fn new(address: IpAddr) -> BlacklistedIp {
         BlacklistedIp {
             address,

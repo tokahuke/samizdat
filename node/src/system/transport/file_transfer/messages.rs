@@ -1,3 +1,7 @@
+//! Wire messages for the file-transfer protocol: the header an object
+//! sender ships before chunks flow, the per-chunk request frames, and
+//! the validate-against-merkle entry point the receiver uses.
+
 use brotli::{CompressorReader, Decompressor};
 use chrono::TimeZone;
 use futures::prelude::*;

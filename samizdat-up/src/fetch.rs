@@ -257,9 +257,11 @@ fn resolve_latest_alias(doc: &InventoryDoc) -> Option<String> {
             continue;
         }
         if let Some(version) = path.strip_suffix("/install.sh")
-            && version != "latest" && !version.contains('/') {
-                return Some(version.to_owned());
-            }
+            && version != "latest"
+            && !version.contains('/')
+        {
+            return Some(version.to_owned());
+        }
     }
     None
 }

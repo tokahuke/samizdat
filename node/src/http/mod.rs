@@ -55,7 +55,8 @@ fn error_status_code(err: &crate::Error) -> http::StatusCode {
     }
 }
 
-/// Represents a timeout value extracted from the X-Samizdat-Timeout header.
+/// 400-rejection carrying the parse error for a malformed
+/// X-Samizdat-Timeout header.
 struct SamizdatTimeoutRejection(ParseIntError);
 
 impl IntoResponse for SamizdatTimeoutRejection {
@@ -67,7 +68,8 @@ impl IntoResponse for SamizdatTimeoutRejection {
     }
 }
 
-/// Represents a parsed timeout duration from the X-Samizdat-Timeout header.
+/// Parsed timeout from the X-Samizdat-Timeout header, defaulting to
+/// 10 seconds when the header is missing.
 struct SamizdatTimeout(Duration);
 
 impl<S: Send + Sync> FromRequestParts<S> for SamizdatTimeout {
@@ -90,7 +92,8 @@ impl<S: Send + Sync> FromRequestParts<S> for SamizdatTimeout {
     }
 }
 
-/// Represents the Content-Type header value for requests.
+/// The request's Content-Type, defaulting to `application/octet-stream`
+/// when the header is missing.
 struct ContentType(String);
 
 impl<S: Send + Sync> FromRequestParts<S> for ContentType {
@@ -308,9 +311,8 @@ async fn require_bare_host(request: Request, next: Next) -> Response {
     }
 }
 
-/// Creates a router for vacuum-related endpoints.
-///
-/// Provides endpoints for triggering manual vacuum operations and flushing all data.
+/// Router for the vacuum endpoints: trigger a manual vacuum or flush the
+/// entire object store.
 ///
 /// Gated by `authenticate_trusted_context`: either the request comes from the
 /// `/_register` trusted page OR it carries a valid bearer token (the local CLI does the

@@ -41,9 +41,10 @@ fn allow_refresh_attempt(series_key_hash: Hash) -> bool {
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     if let Some(&last) = guard.get(&series_key_hash)
-        && now < last + ANNOUNCE_COOLDOWN {
-            return false;
-        }
+        && now < last + ANNOUNCE_COOLDOWN
+    {
+        return false;
+    }
     guard.insert(series_key_hash, now);
     // Opportunistic GC: keep the map from growing unboundedly. Walk and prune
     // entries older than 10 cooldowns. This runs on every accepted attempt;
@@ -61,8 +62,13 @@ use crate::{
 
 use super::file_transfer;
 
+/// RPC server-side handler the node exposes back to its hubs. Each
+/// hub method (`resolve`, `recv_candidate`, ...) is implemented as
+/// an `async fn` below.
 #[derive(Clone)]
 pub struct NodeServer {
+    /// Keyed by the hub's `candidate_channel` id; each entry routes
+    /// an inbound candidate back to the matching outbound query.
     pub candidate_channels: KeyedChannel<Candidate>,
 }
 

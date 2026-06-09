@@ -1,7 +1,7 @@
 //! General utilities which don't fit anywhere else.
 //!
-//! Provides socket-address canonicalisation helpers and small VecDeque adaptors used
-//! by the chunk-based file transfer pipeline.
+//! Socket-address canonicalisation helpers and small VecDeque adaptors used by the
+//! chunk-based file transfer pipeline.
 
 use std::{collections::VecDeque, net::SocketAddr};
 

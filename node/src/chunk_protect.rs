@@ -17,8 +17,7 @@
 //!
 //! Two locks interact with this module:
 //!
-//! - **L_lmdb** -- LMDB's single-writer lock, held for the duration
-//!   of any `writable_tx`.
+//! - **L_lmdb** -- LMDB's single-writer lock, held for the duration of any `writable_tx`.
 //! - **L_protected** -- the `RwLock` around [`PROTECTED`].
 //!
 //! The canonical ordering is **L_lmdb -> L_protected**: code that
@@ -26,24 +25,23 @@
 //! Code holding `L_protected` MUST NOT acquire `L_lmdb`. The
 //! provided API satisfies this:
 //!
-//! - [`ChunkProtector::protect`] and [`ChunkProtector::drop`] mutate
-//!   only the in-memory `BTreeMap`; no LMDB call while the write
-//!   guard is held.
-//! - [`is_protected`] takes a `&WritableTx` witness so the compiler
-//!   refuses callers who are not already inside an LMDB writer tx.
-//!   Without that anchoring, a stale `false` could race a new
-//!   `protect` and produce a corrupted object.
+//! - [`ChunkProtector::protect`] and [`ChunkProtector::drop`] mutate only the in-memory
+//!   `BTreeMap`; no LMDB call while the write guard is held.
+//! - [`is_protected`] takes a `&WritableTx` witness so the compiler refuses callers who
+//!   are not already inside an LMDB writer tx. Without that anchoring, a stale `false`
+//!   could race a new `protect` and produce a corrupted object.
 //!
 //! Violating the ordering opens a deadlock cycle: a holder of
 //! `L_protected.write` waiting on `L_lmdb` while a holder of
 //! `L_lmdb` waits on `L_protected`. Do not add LMDB calls to
 //! `protect`/`drop` without re-evaluating this comment.
 
-use std::collections::BTreeMap;
-use std::sync::{LazyLock, RwLock};
+use std::{
+    collections::BTreeMap,
+    sync::{LazyLock, RwLock},
+};
 
-use samizdat_common::Hash;
-use samizdat_common::db::WritableTx;
+use samizdat_common::{Hash, db::WritableTx};
 
 /// Process-wide registry of chunks held by in-flight imports.
 ///

@@ -1,5 +1,4 @@
-//! Implements a pool of Nodes where any two nodes may be connected to each other by this
-//! Hub.
+//! Pool of nodes; any two members can be wired to each other through this hub.
 
 use futures::prelude::*;
 use std::{collections::BTreeMap, fmt::Debug, net::SocketAddr, sync::Arc};

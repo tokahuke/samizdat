@@ -1,3 +1,7 @@
+//! HTTPS entry point: terminates TLS, forwards each request to the
+//! local node over loopback, then streams the response back to the
+//! public client.
+
 use std::sync::LazyLock;
 
 use axum::{

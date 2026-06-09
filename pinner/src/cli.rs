@@ -1,8 +1,12 @@
+//! Command line / config-file definition for the pinner daemon.
+
 use serde_derive::Deserialize;
 use serde_inline_default::serde_inline_default;
 use std::{fs, sync::OnceLock};
 use structopt::StructOpt;
 
+/// Pinner daemon configuration; populated from CLI flags, env vars,
+/// or a TOML config file (in that precedence order).
 #[serde_inline_default]
 #[derive(Debug, StructOpt, Deserialize)]
 pub struct Cli {
@@ -54,6 +58,8 @@ impl Cli {
 
 static CLI: OnceLock<Cli> = OnceLock::new();
 
+/// Parse the command line (optionally overlaying a TOML config file)
+/// and stash the result in [`CLI`]. Call once at process startup.
 pub fn init_cli() -> Result<(), anyhow::Error> {
     let cli = Cli::from_args().or_read_from_file()?;
     tracing::debug!("Arguments from command line: {:#?}", cli);
@@ -62,6 +68,7 @@ pub fn init_cli() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Borrow the parsed configuration. Panics if [`init_cli`] has not run.
 pub fn cli<'a>() -> &'a Cli {
     CLI.get().expect("cli was initialized")
 }

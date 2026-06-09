@@ -1,3 +1,7 @@
+//! Rendezvous map: callers `expect` a key and wait, peers `arrive` with
+//! the matching key and hand off a value. Used to pair an outbound
+//! channel-open request with the inbound stream that fulfils it.
+
 use std::{collections::BTreeMap, fmt::Display, sync::Arc};
 use tokio::{
     sync::{Mutex, oneshot},

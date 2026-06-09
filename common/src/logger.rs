@@ -1,13 +1,10 @@
-//! Logging configuration module for Samizdat applications.
-//!
-//! This module provides initialization and configuration of the application's logging
-//! system using the tracing framework. It sets up appropriate log levels for different
-//! components and configures the logging output format.
+//! Tracing setup shared by every Samizdat binary. Picks per-target log
+//! levels and the output format.
 
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Initializes the logging system with predefined configuration.
+/// Install the tracing subscriber. Call once per process.
 pub fn init() {
     tracing_subscriber::registry()
         .with(

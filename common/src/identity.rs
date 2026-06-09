@@ -23,19 +23,29 @@
 /// Why a candidate identity handle is unservable as a subdomain.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Reason {
+    /// The candidate string was empty.
     #[error("identity is empty")]
     Empty,
+    /// Candidate exceeds the 63-byte DNS-label limit; payload is the
+    /// length actually seen.
     #[error("identity is {0} bytes; DNS labels are limited to 63 bytes")]
     TooLong(usize),
-    /// Carries the offending byte so the user knows what to remove.
+    /// Candidate contains a byte outside `[a-z0-9-]`. Carries the
+    /// offending byte so the user knows what to remove.
     #[error("{}", bad_byte_message(*.0))]
     BadByte(u8),
+    /// Candidate starts with `-`, which DNS forbids.
     #[error("identity starts with '-'")]
     LeadingHyphen,
+    /// Candidate ends with `-`, which DNS forbids.
     #[error("identity ends with '-'")]
     TrailingHyphen,
+    /// Candidate matches a reserved DNS label (e.g. `localhost`,
+    /// `example`).
     #[error("identity is a reserved DNS label")]
     Reserved,
+    /// Candidate is purely numeric; rejected to avoid ambiguity with
+    /// numeric host literals.
     #[error("identity is all digits; reserved against numeric host ambiguity")]
     AllNumeric,
     /// Carries the offending type-marker word so the error message tells the

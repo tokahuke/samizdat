@@ -1,3 +1,7 @@
+//! Multiplexes many logical channels over a single QUIC connection,
+//! routing incoming streams to the right per-channel receiver via the
+//! channel-id prefix.
+
 use futures::prelude::*;
 use samizdat_common::address::ChannelId;
 use std::{

@@ -17,10 +17,10 @@
 //!    classified by the auth middleware (see `http/auth.rs`); routes
 //!    declare the minimum [`TokenScope`] they accept.
 //!
-//! 2. Access rights: A permission system for web applications running in browsers. It
-//!    defines different levels of access (from public access to management capabilities)
-//!    that can be granted to web-based clients, ensuring fine-grained control over API
-//!    operations.
+//! 2. Access rights: the per-route permission set granted to a browser-resident web app.
+//!    Granularity runs from "read public content" up through "manage objects, bookmarks,
+//!    series, hubs"; the user opts in per right at `/_register`. See [`AccessRight`] for
+//!    the full list.
 
 use serde_derive::{Deserialize, Serialize};
 #[cfg(unix)]
@@ -141,7 +141,7 @@ pub fn init_access_token() -> Result<(), crate::Error> {
     Ok(())
 }
 
-/// Represents the access rights that can be granted to web applications.
+/// Rights that can be granted to a web application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum AccessRight {

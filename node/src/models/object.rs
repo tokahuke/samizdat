@@ -201,9 +201,10 @@ impl Iterator for BytesIter {
 
         // Try get running chunk:
         if let Some(chunk) = self.current_chunk.as_mut()
-            && let Some(byte) = chunk.next() {
-                return Some(Ok(byte));
-            }
+            && let Some(byte) = chunk.next()
+        {
+            return Some(Ok(byte));
+        }
 
         // Try get new chunk:
         if let Some(hash) = self.hashes.next() {
@@ -428,9 +429,8 @@ impl ObjectRef {
         Table::ObjectMetadata.has(tx, self.hash)
     }
 
-    /// Returns the metadata on this object. This function returns `Ok(None)` if the
-    /// object
-    /// does not actually exist.
+    /// Returns the metadata for this object, or `Ok(None)` if the object is not in the
+    /// database.
     pub fn metadata<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectMetadata>, crate::Error> {
         Table::ObjectMetadata.get(tx, self.hash, |serialized| {
             Ok(bincode::deserialize(serialized)?)
@@ -447,11 +447,8 @@ impl ObjectRef {
         })
     }
 
-    /// Update statistics indicating that this object was used. This will signal to the
-    /// vacuum daemon that this object is useful and therefore a worse candidate for
-    /// deletion.
-    ///
-    /// This function has no effect if the object does not exist.
+    /// Mark this object as used, so the vacuum daemon scores it higher and is less
+    /// likely to delete it. No-op if the object is not in the database.
     fn touch(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         let maybe_statistics: Option<ObjectStatistics> =
             Table::ObjectStatistics.get(tx, self.hash, |serialized| {
@@ -697,9 +694,8 @@ impl ObjectRef {
         // concurrent drop of a previous owner does not race the
         // chunk write that is about to land. RAII drop on any path
         // out, including `?` early-returns.
-        let _protector = crate::chunk_protect::ChunkProtector::protect(
-            merkle_tree.hashes().to_vec(),
-        );
+        let _protector =
+            crate::chunk_protect::ChunkProtector::protect(merkle_tree.hashes().to_vec());
 
         // Having a map allows us to receive chunks out of order.
         let hash = merkle_tree.root();
@@ -876,9 +872,8 @@ impl ObjectRef {
         outcome
     }
 
-    /// Create a copy of this object, but with a different nonce header value. This new
-    /// object
-    /// will have a new content hash.
+    /// Copy this object with a fresh nonce in the header, producing a new content
+    /// hash for the same bytes.
     pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter_bytes(false)? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
@@ -890,10 +885,8 @@ impl ObjectRef {
         }
     }
 
-    /// Iterates through the contents of an object, optionally including the header part
-    /// if `skip_header` is set.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Iterates through the contents of an object, skipping the header if `skip_header`
+    /// is set. Returns `Ok(None)` if the object is not in the database.
     pub fn iter_bytes(&self, skip_header: bool) -> Result<Option<BytesIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -913,11 +906,8 @@ impl ObjectRef {
         }))
     }
 
-    /// Streams the contents of an object, optionally including the header part if
-    /// `skip_header`
-    /// is set.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Streams the contents of an object, skipping the header if `skip_header` is set.
+    /// Returns `Ok(None)` if the object is not in the database.
     pub fn stream_content(&self, skip_header: bool) -> Result<Option<ContentStream>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -936,9 +926,8 @@ impl ObjectRef {
         }))
     }
 
-    /// Streams the contents of an object.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Streams the contents of an object. Returns `Ok(None)` if the object is not in
+    /// the database.
     pub fn iter_content(&self) -> Result<Option<ContentIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -960,8 +949,7 @@ impl ObjectRef {
     ///
     /// # Note
     ///
-    /// Be careful when using this method. If the file is too big, you might get out of
-    /// memory!
+    /// Loads everything into memory. Big files can OOM the process.
     pub fn content(&self) -> Result<Option<Vec<u8>>, crate::Error> {
         if let Some(iter) = self.iter_bytes(true)? {
             Ok(Some(iter.collect::<Result<Vec<_>, _>>()?))
@@ -974,18 +962,15 @@ impl ObjectRef {
     ///
     /// # Note
     ///
-    /// Make sure that the object exists before marking objects, since the bookmark will
-    /// leak
-    /// space in the database if it doesn't.
+    /// Check that the object exists before marking it: a bookmark on a missing object
+    /// leaks space in the database.
     pub fn bookmark(&self, ty: BookmarkType) -> Bookmark {
         Bookmark::new(ty, self.clone())
     }
 
-    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`]. If the
-    /// object
-    /// does not exist in the database, this function returns `Ok(false)`. You need to
-    /// further
-    /// check if the object actually exists.
+    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`].
+    /// Returns `Ok(false)` if the object is missing from the database -- callers that
+    /// care about the distinction must check existence separately.
     pub fn is_bookmarked<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         let reference = Bookmark::new(BookmarkType::Reference, self.clone());
         let user = Bookmark::new(BookmarkType::User, self.clone());
@@ -993,10 +978,9 @@ impl ObjectRef {
         Ok(reference.is_marked(tx)? || user.is_marked(tx)?)
     }
 
-    /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the
-    /// database, this function returns `Ok(true)`. You may need to further check if the
-    /// object
-    ///  actually exists.
+    /// Returns `Ok(true)` if this is a draft object, or if the object is missing from
+    /// the database. Callers that care about the distinction must check existence
+    /// separately.
     pub fn is_draft<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         Ok(self
             .metadata(tx)?
@@ -1004,13 +988,9 @@ impl ObjectRef {
             .unwrap_or(true))
     }
 
-    /// Create a self-sealed object for this object. A self-sealed object is an object
-    /// that is
-    /// generated by the contents of another object, ciphered using its own hash. This
-    /// allows the
-    /// contents of this object to be shared with third parties, without the risk of
-    /// leaking
-    /// either the content or the hash of this object.
+    /// Create a self-sealed copy of this object: the contents ciphered with the
+    /// object's own hash as key. Lets third parties hold the bytes without learning
+    /// either the cleartext or the underlying hash.
     pub fn self_seal(&self) -> Result<ObjectRef, crate::Error> {
         // Get the content bytes
         let Some(content) = self.content()? else {
@@ -1043,14 +1023,13 @@ impl ObjectRef {
     }
 }
 
-/// Statistics on object usage. This entity is used by the vacuum system to decide which
-/// objects
-/// are due for automatic deletion due to lack of usage.
+/// Per-object usage statistics. The vacuum system reads these to pick objects for
+/// automatic deletion when storage is tight.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectStatistics {
     /// The content size of this object.
     size: usize,
-    /// Time the object object was built or imported in this database.
+    /// Time this object was built or imported in this database.
     created_at: DateTime<Utc>,
     /// The last time somebody touched this object.
     last_touched_at: DateTime<Utc>,

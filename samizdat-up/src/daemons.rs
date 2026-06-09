@@ -25,6 +25,7 @@ pub struct Daemon {
     pub default_config: &'static str,
 }
 
+/// Metadata for `samizdat-node`.
 pub const NODE: Daemon = Daemon {
     name: "node",
     bin: "samizdat-node",
@@ -32,6 +33,7 @@ pub const NODE: Daemon = Daemon {
     default_config: include_str!("../defaults/node.toml"),
 };
 
+/// Metadata for `samizdat-hub`.
 pub const HUB: Daemon = Daemon {
     name: "hub",
     bin: "samizdat-hub",
@@ -39,6 +41,7 @@ pub const HUB: Daemon = Daemon {
     default_config: include_str!("../defaults/hub.toml"),
 };
 
+/// Metadata for `samizdat-proxy`.
 pub const PROXY: Daemon = Daemon {
     name: "proxy",
     bin: "samizdat-proxy",
@@ -46,6 +49,7 @@ pub const PROXY: Daemon = Daemon {
     default_config: include_str!("../defaults/proxy.toml"),
 };
 
+/// Metadata for `samizdat-pinner`.
 pub const PINNER: Daemon = Daemon {
     name: "pinner",
     bin: "samizdat-pinner",
@@ -53,6 +57,8 @@ pub const PINNER: Daemon = Daemon {
     default_config: include_str!("../defaults/pinner.toml"),
 };
 
+/// All daemons samizdat-up knows how to install. Order is stable and
+/// matches the order CLI subcommands iterate (`Component::All`).
 pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY, &PINNER];
 
 /// Every Samizdat binary samizdat-up knows how to install or query.
@@ -67,6 +73,8 @@ pub const KNOWN_BINARIES: &[&str] = &[
     "samizdat-up",
 ];
 
+/// Look a daemon up by its short name (`"node"`, `"hub"`, etc).
+/// Returns `None` if no daemon matches.
 pub fn by_name(name: &str) -> Option<&'static Daemon> {
     ALL.iter().copied().find(|d| d.name == name)
 }

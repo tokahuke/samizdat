@@ -1,6 +1,5 @@
-//! Implements the RPC client part of the Hub API _for the Samizdat Hub_. This describes
-//! how a Samizdat Hub can behave as another node to another Samizdat Hub. This confers
-//! recursion to the Samizdat network.
+//! Client side of the Hub RPC API, used by one hub when it speaks to another as if it
+//! were a node. This is what makes the hub federation recursive.
 
 use futures::{future::Either, prelude::*};
 use samizdat_common::keyed_channel::KeyedChannel;

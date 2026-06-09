@@ -1,19 +1,13 @@
-//! Authentication command implementations for the Samizdat CLI.
-//!
-//! This module provides functionality for managing authentication and authorization,
-//! including granting and revoking rights to Web applications, and listing current
-//! authorizations.
+//! Auth commands: grant and revoke rights to Web applications, and list
+//! the current authorizations.
 
 use tabled::Tabled;
 
 use super::show_table;
 use crate::api::{self, get_auths};
 
-/// Grants rights to a specific scope.
-///
-/// # Arguments
-/// * `scope` - The target scope for granting rights
-/// * `granted_rights` - List of rights to be granted
+/// Grants `granted_rights` to `scope`. Fails silently with a NOTE if the
+/// scope already has rights; revoke them first to replace.
 pub async fn grant(scope: String, granted_rights: Vec<String>) -> Result<(), anyhow::Error> {
     let granted = api::patch_auth(&scope, api::PatchAuthRequest { granted_rights }).await?;
 
@@ -24,10 +18,7 @@ pub async fn grant(scope: String, granted_rights: Vec<String>) -> Result<(), any
     Ok(())
 }
 
-/// Revokes all rights from a specific scope.
-///
-/// # Arguments
-/// * `scope` - The target scope from which to revoke rights
+/// Revokes all rights from `scope`. Prints a NOTE if there were none.
 pub async fn revoke(scope: String) -> Result<(), anyhow::Error> {
     let revoked = api::delete_auth(&scope).await?;
 
@@ -38,7 +29,7 @@ pub async fn revoke(scope: String) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Lists all current authorization scopes and their granted rights.
+/// Lists every scope with at least one granted right.
 pub async fn ls() -> Result<(), anyhow::Error> {
     let auths = get_auths().await?;
 

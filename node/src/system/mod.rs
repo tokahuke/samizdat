@@ -36,6 +36,9 @@ use crate::{
 
 use self::{node_server::NodeServer, transport::file_transfer};
 
+/// Maximum frame size for the bincode-over-tarpc transport between
+/// node and hub. Bounds memory usage on RPC reads and is reflected
+/// on the wire via `LengthDelimitedCodec::set_max_frame_length`.
 pub const MAX_TRANSFER_SIZE: usize = 2_048;
 
 /// A single connection instance, which will be recreated by [`Reconnect`] on connection

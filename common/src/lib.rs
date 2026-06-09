@@ -30,8 +30,8 @@ pub use riddles::{Hint, MessageRiddle, Riddle};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-/// Creates a cryptographically safe pseudo-random number generator, seeded with 32 bytes
-/// from the operating system's random number generator (the full state of `ChaChaRng`).
+/// A cryptographically secure PRNG, seeded with 32 bytes from the OS RNG
+/// (the full state of `ChaChaRng`).
 pub fn csprng() -> ChaChaRng {
     let mut seed = [0u8; 32];
     getrandom::getrandom(&mut seed).expect("getrandom failed");

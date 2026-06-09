@@ -1,3 +1,6 @@
+//! Samizdat pinner: long-running subscription holder that keeps a fixed
+//! set of series pinned on behalf of paying clients.
+
 mod cli;
 mod db;
 mod expiry;
