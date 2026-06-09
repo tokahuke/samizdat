@@ -1,4 +1,4 @@
-//! Command line interface for Samizdat node and hub.
+//! Samizdat CLI: talks to the local node over the loopback HTTP API.
 
 #![feature(try_blocks, once_cell_try)]
 

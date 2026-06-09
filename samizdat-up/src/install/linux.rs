@@ -11,23 +11,30 @@
 //!   data    /var/lib/samizdat/<role>/
 
 use anyhow::{Context, Result, bail};
-use std::fs;
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
-use crate::cli::{AdminAction, Component};
-use crate::daemons::{self, Daemon};
-use crate::fetch::{self, DEFAULT_ORIGIN};
+use crate::{
+    cli::{AdminAction, Component},
+    daemons::{self, Daemon},
+    fetch::{self, DEFAULT_ORIGIN},
+};
 
-use super::{InstallOpts, UninstallOpts, ADMIN_GROUP};
+use super::{ADMIN_GROUP, InstallOpts, UninstallOpts};
 
 pub(super) fn install(opts: InstallOpts) -> Result<()> {
     require_root()?;
 
     let version = opts.version.clone().unwrap_or_else(|| "latest".to_owned());
-    let origin = opts.from.clone().unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
+    let origin = opts
+        .from
+        .clone()
+        .unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
     let target = fetch::host_target_triple();
 
     // Ensure the admin group exists before any data-dir work, so the
@@ -178,8 +185,7 @@ pub(super) fn self_update() -> Result<()> {
     let target = fetch::host_target_triple();
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
-    let dest = std::env::current_exe()
-        .context("locating current samizdat-up binary")?;
+    let dest = std::env::current_exe().context("locating current samizdat-up binary")?;
 
     // Stage the new binary in a sibling file, run `--version` on it,
     // and only swap if it answers cleanly. Catches mismatched-arch
@@ -235,9 +241,7 @@ pub(super) fn uninstall(opts: UninstallOpts) -> Result<()> {
         // Best-effort stop + disable. systemctl returns non-zero if
         // the unit is already gone; that is fine.
         let _ = Command::new("systemctl").args(["stop", &unit]).status();
-        let _ = Command::new("systemctl")
-            .args(["disable", &unit])
-            .status();
+        let _ = Command::new("systemctl").args(["disable", &unit]).status();
         let unit_path = format!("/etc/systemd/system/{unit}");
         let _ = fs::remove_file(&unit_path);
 
@@ -268,12 +272,7 @@ pub(super) fn uninstall(opts: UninstallOpts) -> Result<()> {
     Ok(())
 }
 
-fn install_daemon_binary(
-    origin: &str,
-    version: &str,
-    target: &str,
-    d: &Daemon,
-) -> Result<()> {
+fn install_daemon_binary(origin: &str, version: &str, target: &str, d: &Daemon) -> Result<()> {
     let fetched =
         fetch::fetch_file(origin, version, target, d.name, d.bin).context("fetching daemon")?;
     let dest = PathBuf::from(format!("/usr/local/bin/{}", d.bin));
@@ -298,8 +297,7 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
 fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
     let data_dir = format!("/var/lib/samizdat/{}", d.name);
-    fs::create_dir_all(&data_dir)
-        .with_context(|| format!("creating {data_dir}"))?;
+    fs::create_dir_all(&data_dir).with_context(|| format!("creating {data_dir}"))?;
     // Mode 2755 (setgid bit on, world-traversable): the setgid bit
     // makes every file the daemon writes here inherit the
     // `samizdat` group, so admin-token (0640) is readable by group
@@ -367,7 +365,10 @@ fn ensure_proxy_env_file() -> Result<()> {
         .status()
         .with_context(|| format!("running chgrp {ADMIN_GROUP} {}", path.display()))?;
     if !status.success() {
-        bail!("chgrp {ADMIN_GROUP} {} exited with {status}", path.display());
+        bail!(
+            "chgrp {ADMIN_GROUP} {} exited with {status}",
+            path.display()
+        );
     }
     println!(
         "samizdat-up: created {} (mode 0640, owner root:{ADMIN_GROUP}). \

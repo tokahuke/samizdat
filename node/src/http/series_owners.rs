@@ -2,18 +2,23 @@
 
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Path};
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, Path},
+    routing::{delete, get, post},
+};
 use chrono::{SubsecRound, Utc};
 use futures::FutureExt;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
+use samizdat_common::db::{Droppable, readonly_tx, writable_tx};
 use serde_derive::Deserialize;
 
-use crate::access::AccessRight;
-use crate::http::ApiResponse;
-use crate::models::{CollectionRef, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner};
-use crate::{hubs, security_scope};
+use crate::{
+    access::AccessRight,
+    http::ApiResponse,
+    hubs,
+    models::{CollectionRef, EditionKind, Inventory, ItemPathBuf, ObjectRef, SeriesOwner},
+    security_scope,
+};
 
 /// The entrypoint of the series API.
 pub fn api() -> Router {
@@ -50,8 +55,8 @@ pub fn api() -> Router {
     // it up. Three things make this defensible today:
     //   1. The proxy strips Authorization/Referer, so external requests resolve to
     //      `granted=[Public]` and never reach `ManageSeries`.
-    //   2. `ManageSeries` is only granted via the `/_register` trusted context, an
-    //      explicit admin action by the human operator.
+    //   2. `ManageSeries` is only granted via the `/_register` trusted context, an explicit
+    //      admin action by the human operator.
     //   3. `deny_outside_requests` confines listener to loopback.
     // BUT: `ManageSeries` is flat (not per-entity), so a web page granted the right for
     // entity A can also list/read secrets of series owned by entity B. If you ever add
@@ -59,8 +64,8 @@ pub fn api() -> Router {
     // an explicit `/export-keypair/{nickname}` (bearer-only) for the backup flow.
     Router::new()
         .route(
-            // Creates a new series owner, i.e., a public-private keypair that allows one to push new
-            // collections to a series.
+            // Creates a new series owner, i.e., a public-private keypair that allows one to push
+            // new collections to a series.
             "/",
             post(|Json(request): Json<PostSeriesOwnerRequest>| {
                 async move {
@@ -126,8 +131,7 @@ pub fn api() -> Router {
             post(
                 |Path(nickname): Path<String>, Json(request): Json<PostEditionRequest>| {
                     async move {
-                        let Some(series_owner) =
-                            readonly_tx(|tx| SeriesOwner::get(tx, &nickname))?
+                        let Some(series_owner) = readonly_tx(|tx| SeriesOwner::get(tx, &nickname))?
                         else {
                             return Err(crate::Error::Message(format!(
                                 "Series owner {} not found",

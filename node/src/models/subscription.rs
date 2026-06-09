@@ -6,12 +6,11 @@ use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
 
 use samizdat_common::{
-    db::{Droppable, Table as _, TxHandle, WritableTx},
     Hint, Key, Riddle,
+    db::{Droppable, Table as _, TxHandle, WritableTx},
 };
 
-use crate::db::Table;
-use crate::hubs;
+use crate::{db::Table, hubs};
 
 use super::SeriesRef;
 
@@ -33,12 +32,28 @@ pub struct Subscription {
     public_key: Key,
     /// The regimen of this subscription.
     kind: SubscriptionKind,
+    /// Maximum total bytes the subscribed series's current edition
+    /// may occupy on this node. `None` falls back to
+    /// `cli().default_max_edition_size_mb * 1_000_000`. Enforced via
+    /// `node/src/cap.rs` as an atomic reservation at object-fetch
+    /// time; on cap-exceed the offending fetch is rejected and the
+    /// subscription itself is left untouched (other inventory items
+    /// can still proceed up to whatever budget is left).
+    max_bytes: Option<u64>,
 }
 
 impl Subscription {
     /// Creates a new subscription.
-    pub fn new(public_key: Key, kind: SubscriptionKind) -> Subscription {
-        Subscription { public_key, kind }
+    pub fn new(public_key: Key, kind: SubscriptionKind, max_bytes: Option<u64>) -> Subscription {
+        Subscription {
+            public_key,
+            kind,
+            max_bytes,
+        }
+    }
+
+    pub fn max_bytes(&self) -> Option<u64> {
+        self.max_bytes
     }
 }
 
@@ -147,9 +162,9 @@ impl SubscriptionRef {
         riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<SubscriptionRef>, crate::Error> {
-        let outcome = Table::Subscriptions.prefix(hint.prefix()).for_each(
-            tx,
-            |key, value| match Key::from_bytes(key) {
+        let outcome = Table::Subscriptions
+            .prefix(hint.prefix())
+            .for_each(tx, |key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
                         Ok(Some(bincode::deserialize(value)?))
@@ -161,8 +176,7 @@ impl SubscriptionRef {
                     tracing::warn!("{}", err);
                     Ok(None)
                 }
-            },
-        )?;
+            })?;
 
         Ok(outcome)
     }

@@ -1,3 +1,7 @@
+//! Hub records: the addresses a node should connect to as RPC clients
+//! to participate in the federation, plus how the address is to be
+//! resolved.
+
 use serde_derive::{Deserialize, Serialize};
 
 use samizdat_common::{
@@ -7,15 +11,19 @@ use samizdat_common::{
 
 use crate::db::Table;
 
+/// One hub the node should connect to: the addressable string and the
+/// resolution mode (DNS, raw socket, etc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hub {
+    /// Address the node will dial. Format depends on `resolution_mode`.
     pub address: String,
+    /// How `address` is to be turned into an IP/port pair.
     pub resolution_mode: AddrResolutionMode,
 }
 
 impl Droppable for Hub {
     fn drop_if_exists_with(&self, tx: &mut WritableTx<'_>) -> Result<(), crate::Error> {
-        let address = self.address.to_string();
+        let address = self.address.clone();
         Table::Hubs.delete(tx, &address)?;
         tokio::spawn(async move { crate::hubs().remove(&address).await });
         Ok(())
@@ -39,8 +47,9 @@ impl Hub {
 
     /// Lists all hubs currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Hub>, crate::Error> {
-        let collected: Result<Vec<Hub>, crate::Error> =
-            Table::Hubs.range::<_, [u8; 0]>(..).collect(tx, |_, value| {
+        let collected: Result<Vec<Hub>, crate::Error> = Table::Hubs
+            .range::<_, [u8; 0]>(..)
+            .collect(tx, |_, value| {
                 Ok::<Hub, crate::Error>(bincode::deserialize(value)?)
             })?;
         collected

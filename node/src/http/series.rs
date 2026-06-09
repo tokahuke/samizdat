@@ -5,15 +5,11 @@
 //! `node/src/http/content.rs`. This module only carries the admin "list all
 //! known public keys" endpoint.
 
-use axum::routing::get;
-use axum::Router;
+use axum::{Router, routing::get};
 use futures::FutureExt;
 use samizdat_common::db::readonly_tx;
 
-use crate::access::AccessRight;
-use crate::http::ApiResponse;
-use crate::models::SeriesRef;
-use crate::security_scope;
+use crate::{access::AccessRight, http::ApiResponse, models::SeriesRef, security_scope};
 
 /// The entrypoint of the series admin API.
 pub fn api() -> Router {

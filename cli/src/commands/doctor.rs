@@ -28,7 +28,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Ok(hubs) if hubs.is_empty() => println!("  (none)"),
         Ok(hubs) => {
             for h in &hubs {
-                println!("  - {} (resolution_mode = {})", h.address, h.resolution_mode);
+                println!(
+                    "  - {} (resolution_mode = {})",
+                    h.address, h.resolution_mode
+                );
             }
         }
         Err(e) => println!("  ERROR: {e}"),
@@ -87,7 +90,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // Cap the output so a node that has been running for months
             // does not spam the terminal.
             for e in editions.iter().take(20) {
-                println!("  - series={} timestamp={}", e.public_key, e.signed.timestamp);
+                println!(
+                    "  - series={} timestamp={}",
+                    e.public_key, e.signed.timestamp
+                );
             }
             if editions.len() > 20 {
                 println!("  ... and {} more", editions.len() - 20);

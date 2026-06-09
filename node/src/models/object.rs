@@ -3,23 +3,31 @@
 //! storage of similar content.
 
 use aes_gcm_siv::{
-    aead::{Aead, KeyInit},
     Aes256GcmSiv, Nonce,
+    aead::{Aead, KeyInit},
 };
 use chrono::{DateTime, TimeZone, Utc};
 use futures::prelude::*;
 use serde_derive::{Deserialize, Serialize};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
-use std::{collections::BTreeMap, convert::TryInto};
+use std::{
+    collections::BTreeMap,
+    convert::TryInto,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 use tokio::sync::mpsc;
 
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
-use samizdat_common::{Hash, Hint, MerkleTree, Riddle};
+use samizdat_common::{
+    Hash, Hint, MerkleTree, Riddle,
+    db::{Droppable, Table as _, TxHandle, WritableTx, readonly_tx, writable_tx},
+};
 
-use crate::db::{MergeOperation, Table};
+use crate::{
+    cap::{self, Cap},
+    db::{MergeOperation, Table},
+};
 
 use super::{Bookmark, BookmarkType};
 
@@ -150,7 +158,8 @@ pub struct ObjectMetadata {
     pub header: ObjectHeader,
     /// Sum of the sizes of all chunks. This includes the header size.
     pub content_size: usize,
-    /// The timestamp this object was received on. This field is not transmitted through the network.
+    /// The timestamp this object was received on. This field is not transmitted through
+    /// the network.
     pub received_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -191,10 +200,10 @@ impl Iterator for BytesIter {
         }
 
         // Try get running chunk:
-        if let Some(chunk) = self.current_chunk.as_mut() {
-            if let Some(byte) = chunk.next() {
-                return Some(Ok(byte));
-            }
+        if let Some(chunk) = self.current_chunk.as_mut()
+            && let Some(byte) = chunk.next()
+        {
+            return Some(Ok(byte));
         }
 
         // Try get new chunk:
@@ -350,29 +359,51 @@ impl Droppable for ObjectRef {
         //     batch.delete_cf(Table::ObjectChunks.get(), hash);
         // }
 
-        for chunk_hash in metadata.hashes {
-            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(-1).merger())?;
-        }
+        for chunk_hash in &metadata.hashes {
+            Table::ObjectChunkRefCount.map(
+                tx,
+                *chunk_hash,
+                MergeOperation::Increment(-1).merger(),
+            )?;
 
-        // leave the vacuum daemon to clean up unused chunks. It runs frequently.
+            // Inline orphan reclamation: if this object was the last
+            // referrer AND no in-flight import has the chunk protected,
+            // delete it in the same writable_tx. See
+            // `chunk_protect`'s module doc for the lock ordering that
+            // makes this safe.
+            let new_count = Table::ObjectChunkRefCount
+                .get(tx, *chunk_hash, |bytes| {
+                    Ok(bincode::deserialize::<MergeOperation>(bytes)?.eval_on_zero())
+                })?
+                .unwrap_or(0);
+            if new_count <= 0 && !crate::chunk_protect::is_protected(tx, chunk_hash) {
+                Table::ObjectChunks.delete(tx, *chunk_hash)?;
+                Table::ObjectChunkRefCount.delete(tx, *chunk_hash)?;
+            }
+        }
 
         // Only the User bookmark is cleared here. The Reference bookmark is a counter of
         // pinning entities (e.g. live editions of an owned series); clearing it
         // unconditionally would lose that information and let the count drift negative on
         // a subsequent series-owner advance. The two callers of this function that can
         // reach a "Reference > 0" object are:
-        //   1. `vacuum()`; guarded by `is_bookmarked(tx)?` (vacuum.rs), which returns
-        //      true when Reference > 0, so the call never actually happens then.
-        //   2. `flush_all` and `DELETE /_objects/{hash}`; admin actions; the count is
-        //      left in the table and naturally decays as editions are advanced/dropped.
-        //      Any non-zero count (incl. negative) is treated as "still bookmarked" by
-        //      `Bookmark::is_marked`, so vacuum does not collect mid-drift objects.
+        //   1. `vacuum()`; guarded by `is_bookmarked(tx)?` (vacuum.rs), which returns true when
+        //      Reference > 0, so the call never actually happens then.
+        //   2. `flush_all` and `DELETE /_objects/{hash}`; admin actions; the count is left in the
+        //      table and naturally decays as editions are advanced/dropped. Any non-zero count
+        //      (incl. negative) is treated as "still bookmarked" by `Bookmark::is_marked`, so
+        //      vacuum does not collect mid-drift objects.
         self.bookmark(BookmarkType::User).clear(tx)?;
 
         Table::ObjectStatistics.delete(tx, self.hash)?;
         Table::ObjectMetadata.delete(tx, self.hash)?;
-        Table::ObjectMetadata.delete(tx, self.hash)?;
         Table::Objects.delete(tx, self.hash)?;
+
+        // Return the dropped bytes to the node-wide budget. See
+        // `docs/cap-model.md`: `NODE_STORAGE_CAP` tracks real disk
+        // usage, so every object drop -- bookmarked or unowned --
+        // releases.
+        cap::NODE_STORAGE_CAP.release(metadata.content_size);
 
         Ok(())
     }
@@ -398,8 +429,8 @@ impl ObjectRef {
         Table::ObjectMetadata.has(tx, self.hash)
     }
 
-    /// Returns the metadata on this object. This function returns `Ok(None)` if the object
-    /// does not actually exist.
+    /// Returns the metadata for this object, or `Ok(None)` if the object is not in the
+    /// database.
     pub fn metadata<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<ObjectMetadata>, crate::Error> {
         Table::ObjectMetadata.get(tx, self.hash, |serialized| {
             Ok(bincode::deserialize(serialized)?)
@@ -416,10 +447,8 @@ impl ObjectRef {
         })
     }
 
-    /// Update statistics indicating that this object was used. This will signal to the
-    /// vacuum daemon that this object is useful and therefore a worse candidate for deletion.
-    ///
-    /// This function has no effect if the object does not exist.
+    /// Mark this object as used, so the vacuum daemon scores it higher and is less
+    /// likely to delete it. No-op if the object is not in the database.
     fn touch(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         let maybe_statistics: Option<ObjectStatistics> =
             Table::ObjectStatistics.get(tx, self.hash, |serialized| {
@@ -445,21 +474,23 @@ impl ObjectRef {
         content_riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<ObjectRef>, crate::Error> {
-        let outcome = Table::Objects.prefix(hint.prefix()).for_each(tx, |key, _| {
-            let hash: Hash = match key.try_into() {
-                Ok(hash) => hash,
-                Err(err) => {
-                    tracing::warn!("{}", err);
-                    return Ok(None);
+        let outcome = Table::Objects
+            .prefix(hint.prefix())
+            .for_each(tx, |key, _| {
+                let hash: Hash = match key.try_into() {
+                    Ok(hash) => hash,
+                    Err(err) => {
+                        tracing::warn!("{}", err);
+                        return Ok(None);
+                    }
+                };
+
+                if content_riddle.resolves(&hash) {
+                    return Ok(Some(ObjectRef { hash }));
                 }
-            };
 
-            if content_riddle.resolves(&hash) {
-                return Ok(Some(ObjectRef { hash }));
-            }
-
-            Ok(None)
-        })?;
+                Ok(None)
+            })?;
 
         Ok(outcome)
     }
@@ -490,7 +521,11 @@ impl ObjectRef {
         )?;
 
         for chunk_hash in &metadata.hashes {
-            Table::ObjectChunkRefCount.map(tx, chunk_hash, MergeOperation::Increment(1).merger())?;
+            Table::ObjectChunkRefCount.map(
+                tx,
+                chunk_hash,
+                MergeOperation::Increment(1).merger(),
+            )?;
         }
 
         if bookmark {
@@ -568,14 +603,35 @@ impl ObjectRef {
         Ok(ObjectRef { hash })
     }
 
-    /// Imports an existing object in the database from an external _already validated_ data source,
-    /// returning a _ContentStream_ to the incoming validated bytes.
+    /// Imports an existing object in the database from an external
+    /// _already validated_ data source, returning a `ContentStream` to
+    /// the incoming validated bytes.
+    ///
+    /// `caller_cap` is an optional scope-specific cap (typically a
+    /// subscription's per-edition budget). It is composed with the
+    /// ambient `OBJECT_SIZE_LIMIT` and `NODE_STORAGE_CAP` and
+    /// reserved against `supplied_metadata.content_size` BEFORE any
+    /// chunk bytes flow. The reservation drops automatically on any
+    /// error path; on a successful import its budget decrement is
+    /// committed permanently and only `Cap::release` (called by
+    /// vacuum on object delete) returns it.
     pub fn import(
         merkle_tree: MerkleTree,
         supplied_metadata: ObjectMetadata,
         query_duration: Duration,
         chunks: impl 'static + Send + Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
-    ) -> ContentStream {
+        caller_cap: Option<Arc<dyn Cap>>,
+    ) -> Result<ContentStream, crate::Error> {
+        // Reserve atomically against the composite of (per-object size
+        // limit, node-wide storage budget, caller's scope-specific
+        // cap). Any one rejection rolls back the others.
+        let composite = cap::Composite::new(vec![
+            cap::OBJECT_SIZE_LIMIT.clone(),
+            cap::NODE_STORAGE_CAP.clone(),
+            caller_cap.unwrap_or_else(|| Arc::new(cap::Unbounded)),
+        ]);
+        let reservation = composite.reserve(supplied_metadata.content_size)?;
+
         let (send, recv) = mpsc::unbounded_channel();
         let task_send = send.clone();
         let mut next_to_send = 0usize;
@@ -583,9 +639,15 @@ impl ObjectRef {
 
         // Spawn importing task
         tokio::spawn(async move {
-            if let Err(err) =
-                ObjectRef::do_import(merkle_tree, supplied_metadata, query_duration, send, chunks)
-                    .await
+            if let Err(err) = ObjectRef::do_import(
+                merkle_tree,
+                supplied_metadata,
+                query_duration,
+                send,
+                chunks,
+                reservation,
+            )
+            .await
             {
                 task_send.send(Err(err)).ok();
             }
@@ -610,21 +672,31 @@ impl ObjectRef {
         })
         .try_flatten();
 
-        ContentStream {
+        Ok(ContentStream {
             hashes: Box::pin(hashes),
             is_error: false,
             skip_header: true,
-        }
+        })
     }
 
-    /// Imports an existing object in the database from an external _already validated_ data source.
+    /// Imports an existing object in the database from an external _already validated_
+    /// data source.
     async fn do_import(
         merkle_tree: MerkleTree,
         supplied_metadata: ObjectMetadata,
         query_duration: Duration,
         sender: mpsc::UnboundedSender<Result<(usize, Hash), crate::Error>>,
         chunks: impl Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
+        reservation: cap::Reservation,
     ) -> Result<(), crate::Error> {
+        // Mark this object's chunks as in-flight for the lifetime of
+        // do_import. The orphan-drop path consults this so a
+        // concurrent drop of a previous owner does not race the
+        // chunk write that is about to land. RAII drop on any path
+        // out, including `?` early-returns.
+        let _protector =
+            crate::chunk_protect::ChunkProtector::protect(merkle_tree.hashes().to_vec());
+
         // Having a map allows us to receive chunks out of order.
         let hash = merkle_tree.root();
         let hashes = Arc::new(
@@ -674,13 +746,24 @@ impl ObjectRef {
                     maybe_header = Some(header);
                 }
 
-                // Warn of incompatible chunk size (big chunks are dealt with somewhere else):
-                if chunk.len() != CHUNK_SIZE && chunk_id != merkle_tree.len() - 1 {
-                    tracing::warn!(
-                        "Expected standard size chunk, but got chunk of size {}kB. Incompatibly \
-                        sized chunks might become illegal in the future.",
-                        chunk.len() / 1_000
-                    );
+                // Hard chunk-size invariant: every chunk MUST be <= CHUNK_SIZE.
+                // The merkle tree authenticates the chunk count and each chunk's
+                // identity, but the hash itself says nothing about per-chunk byte
+                // length -- `hash(256KB)` and `hash(1TB)` are both 28 bytes. Without
+                // this reject, an adversary can declare a small object then ship
+                // arbitrary bytes in one "chunk" that happens to hash to a merkle
+                // leaf, blowing past the per-object cap at validate time.
+                //
+                // The convention is wire-format-coupled now: changing CHUNK_SIZE
+                // is a coordinated workspace release. See `docs/upgrade-hazards.md`.
+                if chunk.len() > CHUNK_SIZE {
+                    return Err(format!(
+                        "object {hash}: chunk {chunk_id} is {} bytes; CHUNK_SIZE \
+                         is {} (chunks must not exceed this)",
+                        chunk.len(),
+                        CHUNK_SIZE,
+                    )
+                    .into());
                 }
 
                 // Put chunk in the database and record whether we added it fresh.
@@ -718,6 +801,24 @@ impl ObjectRef {
                 .into());
             }
 
+            // Exact-size invariant: the peer-supplied `content_size` is what the
+            // per-object cap at `messages.rs::validate` was checked against; the
+            // local accumulator is what we actually received. They must agree.
+            // Without this check the peer could declare any size at validate time
+            // (passing the cap) and then ship any number of bytes that
+            // independently hash correctly to the merkle leaves. The exact-size
+            // check pins declared == actual; combined with the per-chunk
+            // CHUNK_SIZE reject above, the per-object cap becomes a real bound
+            // on what lands on disk.
+            if content_size != supplied_metadata.content_size {
+                return Err(format!(
+                    "object {hash}: peer declared content_size = {} bytes but \
+                     actual received = {} bytes; declared must match actual",
+                    supplied_metadata.content_size, content_size,
+                )
+                .into());
+            }
+
             // Build object:
             let metadata = ObjectMetadata {
                 hashes: merkle_tree.hashes().to_vec(),
@@ -730,9 +831,18 @@ impl ObjectRef {
             writable_tx(|tx| {
                 ObjectRef::create_object_with(tx, hash, &metadata, &statistics, false)?;
                 tracing::info!("New object {} with metadata: {:#?}", hash, metadata);
-
                 Ok(())
-            })
+            })?;
+
+            // Past the LMDB commit: bytes are on disk. Mark the reservation
+            // permanent so the budget decrement persists until vacuum drops
+            // the object. This MUST stay immediately after the `writable_tx`
+            // ? -- inserting anything failable between them opens a drift
+            // window (LMDB committed but reservation released, or vice
+            // versa).
+            reservation.commit();
+
+            Ok(())
         }
         .await;
 
@@ -744,8 +854,7 @@ impl ObjectRef {
             let n = to_remove.len();
             let cleanup = writable_tx(|tx| {
                 for hash in &to_remove {
-                    let still_unreferenced =
-                        !Table::ObjectChunkRefCount.has(tx, hash.as_ref())?;
+                    let still_unreferenced = !Table::ObjectChunkRefCount.has(tx, hash.as_ref())?;
                     if still_unreferenced {
                         Table::ObjectChunks.delete(tx, hash.as_ref())?;
                     }
@@ -763,8 +872,8 @@ impl ObjectRef {
         outcome
     }
 
-    /// Create a copy of this object, but with a different nonce header value. This new object
-    /// will have a new content hash.
+    /// Copy this object with a fresh nonce in the header, producing a new content
+    /// hash for the same bytes.
     pub fn reissue(&self, bookmark: bool) -> Result<Option<ObjectRef>, crate::Error> {
         if let Some(mut iter) = self.iter_bytes(false)? {
             let (_, header) = ObjectHeader::read(&mut iter)?;
@@ -776,10 +885,8 @@ impl ObjectRef {
         }
     }
 
-    /// Iterates through the contents of an object, optionally including the header part
-    /// if `skip_header` is set.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Iterates through the contents of an object, skipping the header if `skip_header`
+    /// is set. Returns `Ok(None)` if the object is not in the database.
     pub fn iter_bytes(&self, skip_header: bool) -> Result<Option<BytesIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -799,10 +906,8 @@ impl ObjectRef {
         }))
     }
 
-    /// Streams the contents of an object, optionally including the header part if `skip_header`
-    /// is set.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Streams the contents of an object, skipping the header if `skip_header` is set.
+    /// Returns `Ok(None)` if the object is not in the database.
     pub fn stream_content(&self, skip_header: bool) -> Result<Option<ContentStream>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -815,15 +920,14 @@ impl ObjectRef {
         writable_tx(|tx| self.touch(tx))?;
 
         Ok(Some(ContentStream {
-            hashes: Box::pin(stream::iter(metadata.hashes.clone().into_iter().map(Ok))),
+            hashes: Box::pin(stream::iter(metadata.hashes.into_iter().map(Ok))),
             is_error: false,
             skip_header,
         }))
     }
 
-    /// Streams the contents of an object.
-    ///
-    /// This function returns `Ok(None)` if the object does not actually exist.
+    /// Streams the contents of an object. Returns `Ok(None)` if the object is not in
+    /// the database.
     pub fn iter_content(&self) -> Result<Option<ContentIter>, crate::Error> {
         let metadata: ObjectMetadata = if let Some(metadata) = readonly_tx(|tx| self.metadata(tx))?
         {
@@ -845,8 +949,7 @@ impl ObjectRef {
     ///
     /// # Note
     ///
-    /// Be careful when using this method. If the file is too big, you might get out of
-    /// memory!
+    /// Loads everything into memory. Big files can OOM the process.
     pub fn content(&self) -> Result<Option<Vec<u8>>, crate::Error> {
         if let Some(iter) = self.iter_bytes(true)? {
             Ok(Some(iter.collect::<Result<Vec<_>, _>>()?))
@@ -859,15 +962,15 @@ impl ObjectRef {
     ///
     /// # Note
     ///
-    /// Make sure that the object exists before marking objects, since the bookmark will leak
-    /// space in the database if it doesn't.
+    /// Check that the object exists before marking it: a bookmark on a missing object
+    /// leaks space in the database.
     pub fn bookmark(&self, ty: BookmarkType) -> Bookmark {
         Bookmark::new(ty, self.clone())
     }
 
-    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`]. If the object
-    /// does not exist in the database, this function returns `Ok(false)`. You need to further
-    /// check if the object actually exists.
+    /// Returns `Ok(true)` if this object is bookmarked by any [`BookmarkType`].
+    /// Returns `Ok(false)` if the object is missing from the database -- callers that
+    /// care about the distinction must check existence separately.
     pub fn is_bookmarked<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         let reference = Bookmark::new(BookmarkType::Reference, self.clone());
         let user = Bookmark::new(BookmarkType::User, self.clone());
@@ -875,9 +978,9 @@ impl ObjectRef {
         Ok(reference.is_marked(tx)? || user.is_marked(tx)?)
     }
 
-    /// Returns `Ok(true)` if this is a draft object. If the object does not exist in the
-    /// database, this function returns `Ok(true)`. You may need to further check if the object
-    ///  actually exists.
+    /// Returns `Ok(true)` if this is a draft object, or if the object is missing from
+    /// the database. Callers that care about the distinction must check existence
+    /// separately.
     pub fn is_draft<Tx: TxHandle>(&self, tx: &Tx) -> Result<bool, crate::Error> {
         Ok(self
             .metadata(tx)?
@@ -885,15 +988,13 @@ impl ObjectRef {
             .unwrap_or(true))
     }
 
-    /// Create a self-sealed object for this object. A self-sealed object is an object that is
-    /// generated by the contents of another object, ciphered using its own hash. This allows the
-    /// contents of this object to be shared with third parties, without the risk of leaking
-    /// either the content or the hash of this object.
+    /// Create a self-sealed copy of this object: the contents ciphered with the
+    /// object's own hash as key. Lets third parties hold the bytes without learning
+    /// either the cleartext or the underlying hash.
     pub fn self_seal(&self) -> Result<ObjectRef, crate::Error> {
         // Get the content bytes
-        let content = match self.content()? {
-            Some(bytes) => bytes,
-            None => return Err(crate::Error::ObjectNotFound),
+        let Some(content) = self.content()? else {
+            return Err(crate::Error::ObjectNotFound);
         };
 
         // Create a new object header
@@ -922,19 +1023,20 @@ impl ObjectRef {
     }
 }
 
-/// Statistics on object usage. This entity is used by the vacuum system to decide which objects
-/// are due for automatic deletion due to lack of usage.
+/// Per-object usage statistics. The vacuum system reads these to pick objects for
+/// automatic deletion when storage is tight.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObjectStatistics {
     /// The content size of this object.
     size: usize,
-    /// Time the object object was built or imported in this database.
+    /// Time this object was built or imported in this database.
     created_at: DateTime<Utc>,
     /// The last time somebody touched this object.
     last_touched_at: DateTime<Utc>,
     /// Total number of touches on this object.
     touches: usize,
-    /// The time it took for the network to respond with a valid candidate for this object.
+    /// The time it took for the network to respond with a valid candidate for this
+    /// object.
     #[serde(default)]
     query_duration: Duration,
 }

@@ -11,9 +11,13 @@ use crate::api;
 ///
 /// # Arguments
 /// * `public_key` - Public key of the series to subscribe to
-pub async fn new(public_key: String) -> Result<(), anyhow::Error> {
+/// * `max_size_mb` - Optional cap (MB) on the size of a single edition for this series.
+///   `None` falls back to the node's `default_max_edition_size_mb`. Enforced atomically
+///   by the cap module at object-fetch time.
+pub async fn new(public_key: String, max_size_mb: Option<u64>) -> Result<(), anyhow::Error> {
     api::post_subscription(api::PostSubscriptionRequest {
         public_key: &public_key,
+        max_size_mb,
     })
     .await?;
 
@@ -54,6 +58,19 @@ pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
         public_key: Key,
         /// Type of subscription
         kind: String,
+        /// Per-edition size cap in MB, or "default" when the
+        /// operator's `default_max_edition_size_mb` applies.
+        max_size: String,
+    }
+
+    /// Renders an optional byte count as a human-readable MB string,
+    /// returning "default" when None. Suitable for any column that
+    /// shows a configured-or-defaulted size; not specific to caps.
+    fn render_size_or_default(bytes: Option<u64>) -> String {
+        match bytes {
+            None => "default".to_owned(),
+            Some(bytes) => format!("{} MB", bytes / 1_000_000),
+        }
     }
 
     async fn list_subscription(public_key: String) -> Result<(), anyhow::Error> {
@@ -62,6 +79,7 @@ pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
         show_table(vec![Row {
             public_key: subscription.public_key,
             kind: subscription.kind,
+            max_size: render_size_or_default(subscription.max_bytes),
         }]);
 
         Ok(())
@@ -77,6 +95,7 @@ pub async fn ls(public_key: Option<String>) -> Result<(), anyhow::Error> {
                 .map(|subscription| Row {
                     public_key: subscription.public_key,
                     kind: subscription.kind,
+                    max_size: render_size_or_default(subscription.max_bytes),
                 })
                 .collect::<Vec<_>>(),
         );

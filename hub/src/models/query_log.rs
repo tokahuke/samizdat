@@ -1,13 +1,18 @@
+//! One row per query the hub received: the question, the response, and
+//! how long it took to assemble.
+
 use std::time::Duration;
 
 use samizdat_common::rpc::{Query, QueryResponse};
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DurationMilliSecondsWithFrac};
+use serde_with::{DurationMilliSecondsWithFrac, serde_as};
 
 use crate::db::Table;
 
 use super::{Id, Indexable};
 
+/// One entry in the query-log table: the inbound query plus the
+/// response the hub returned and how long it took.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryLog {

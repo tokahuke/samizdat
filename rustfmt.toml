@@ -1,0 +1,6 @@
+edition = "2024"
+max_width = 100
+comment_width = 90
+wrap_comments = true
+imports_granularity = "Crate"
+unstable_features = true

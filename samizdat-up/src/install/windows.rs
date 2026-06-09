@@ -2,17 +2,15 @@
 //!
 //! On Windows samizdat-up plays two roles in one binary:
 //!
-//!   1. **Installer / CLI**: the user-facing entry. `install` lays out
-//!      binaries, registers a service with the Service Control
-//!      Manager via `sc.exe create`, and starts it.
+//!   1. **Installer / CLI**: the user-facing entry. `install` lays out binaries,
+//!      registers a service with the Service Control Manager via `sc.exe create`, and
+//!      starts it.
 //!
-//!   2. **SCM service wrapper**: SCM is configured to launch the
-//!      service with `binPath = "...\samizdat-up.exe" daemon <role>`.
-//!      When SCM starts that process, `samizdat-up daemon <role>`
-//!      hands control to `windows_service::service_dispatcher::start`
-//!      and then supervises the actual daemon binary in a child
-//!      process, forwarding Stop/Shutdown signals from SCM into a
-//!      child-kill.
+//!   2. **SCM service wrapper**: SCM is configured to launch the service with `binPath =
+//!      "...\samizdat-up.exe" daemon <role>`. When SCM starts that process, `samizdat-up
+//!      daemon <role>` hands control to `windows_service::service_dispatcher::start` and
+//!      then supervises the actual daemon binary in a child process, forwarding
+//!      Stop/Shutdown signals from SCM into a child-kill.
 //!
 //! Daemons (`samizdat-node`, `samizdat-hub`, `samizdat-proxy`) are
 //! therefore SCM-unaware -- the wrapper here speaks the SCM protocol
@@ -30,14 +28,18 @@
 //!   logs      C:\ProgramData\Samizdat\<role>\stdout.log + stderr.log
 
 use anyhow::{Context, Result, bail};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
-use crate::cli::Component;
-use crate::daemons::{self, Daemon};
-use crate::fetch::{self, DEFAULT_ORIGIN};
+use crate::{
+    cli::Component,
+    daemons::{self, Daemon},
+    fetch::{self, DEFAULT_ORIGIN},
+};
 
 use super::{InstallOpts, UninstallOpts};
 
@@ -81,7 +83,10 @@ pub(super) fn install(opts: InstallOpts) -> Result<()> {
     require_admin()?;
 
     let version = opts.version.clone().unwrap_or_else(|| "latest".to_owned());
-    let origin = opts.from.clone().unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
+    let origin = opts
+        .from
+        .clone()
+        .unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
     let target = fetch::host_target_triple();
 
     fs::create_dir_all(install_dir())
@@ -146,10 +151,7 @@ pub(super) fn uninstall(opts: UninstallOpts) -> Result<()> {
     if opts.purge {
         let _ = fs::remove_dir_all(data_root());
         // Keep the install_dir intact for samizdat-up itself.
-        println!(
-            "samizdat-up: purged {}.",
-            data_root().display()
-        );
+        println!("samizdat-up: purged {}.", data_root().display());
     } else {
         println!(
             "samizdat-up: uninstalled. {} preserved.\n\
@@ -186,7 +188,9 @@ pub(super) fn update(component: Option<Component>, to: Option<String>) -> Result
     // refuses to overwrite a file that is mapped by a running process.
     for name in &candidates {
         let d = daemons::by_name(name).expect("known");
-        let _ = Command::new("sc.exe").args(["stop", &service_name(d)]).status();
+        let _ = Command::new("sc.exe")
+            .args(["stop", &service_name(d)])
+            .status();
     }
 
     for name in &candidates {
@@ -242,9 +246,8 @@ pub(super) fn self_update() -> Result<()> {
     require_admin()?;
     let origin = DEFAULT_ORIGIN.to_owned();
     let target = fetch::host_target_triple();
-    let fetched =
-        fetch::fetch_file(&origin, "latest", target, "samizdat-up", SAMIZDAT_UP_EXE)
-            .context("fetching new samizdat-up.exe")?;
+    let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", SAMIZDAT_UP_EXE)
+        .context("fetching new samizdat-up.exe")?;
     let dest = wrapper_path();
 
     // Stage the new exe + smoke-test it before parking the running
@@ -262,13 +265,15 @@ pub(super) fn self_update() -> Result<()> {
     let parked = dest.with_extension("exe.old");
     let _ = fs::remove_file(&parked);
     if dest.exists() {
-        fs::rename(&dest, &parked)
-            .with_context(|| format!("parking {}", dest.display()))?;
+        fs::rename(&dest, &parked).with_context(|| format!("parking {}", dest.display()))?;
     }
     fs::rename(&staged, &dest)
         .with_context(|| format!("renaming {} -> {}", staged.display(), dest.display()))?;
     println!("samizdat-up: self-updated -> {}", dest.display());
-    println!("(previous samizdat-up.exe parked at {}; remove later if you like)", parked.display());
+    println!(
+        "(previous samizdat-up.exe parked at {}; remove later if you like)",
+        parked.display()
+    );
     Ok(())
 }
 
@@ -298,12 +303,7 @@ fn smoke_test(path: &Path) -> Result<()> {
 
 // ---------- helpers ----------
 
-fn install_daemon_binary(
-    origin: &str,
-    version: &str,
-    target: &str,
-    d: &Daemon,
-) -> Result<()> {
+fn install_daemon_binary(origin: &str, version: &str, target: &str, d: &Daemon) -> Result<()> {
     let file = format!("{}.exe", d.bin);
     let fetched = fetch::fetch_file(origin, version, target, d.name, &file)?;
     let dest = binary_path(d);
@@ -337,8 +337,7 @@ fn place_self() -> Result<()> {
             }
         }
     }
-    let bytes = fs::read(&here)
-        .with_context(|| format!("reading {}", here.display()))?;
+    let bytes = fs::read(&here).with_context(|| format!("reading {}", here.display()))?;
     atomic_write(&dest, &bytes)?;
     println!("samizdat-up: wrapper at {}", dest.display());
     Ok(())
@@ -403,11 +402,7 @@ fn sc_create(d: &Daemon) -> Result<()> {
     // inner quotes around the exe path are escaped so a path with
     // spaces (the default `C:\Program Files\Samizdat\...`) survives.
     let wrapper = wrapper_path();
-    let bin_value = format!(
-        "\"{}\" daemon {}",
-        wrapper.display(),
-        d.name
-    );
+    let bin_value = format!("\"{}\" daemon {}", wrapper.display(), d.name);
     sc(&[
         "create",
         &service_name(d),
@@ -480,18 +475,25 @@ fn print_post_install(names: &[&str]) {
 // SCM-side: `samizdat-up daemon <role>` runs HERE.
 // ============================================================
 
-use std::ffi::OsString;
-use std::process::{Child, Stdio};
-use std::sync::OnceLock;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::time::Duration;
-
-use windows_service::define_windows_service;
-use windows_service::service::{
-    ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
+use std::{
+    ffi::OsString,
+    process::{Child, Stdio},
+    sync::{
+        OnceLock,
+        mpsc::{self, RecvTimeoutError, Sender},
+    },
+    time::Duration,
 };
-use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
-use windows_service::service_dispatcher;
+
+use windows_service::{
+    define_windows_service,
+    service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    },
+    service_control_handler::{self, ServiceControlHandlerResult},
+    service_dispatcher,
+};
 
 /// Poll interval for the child-exit / shutdown-request loop.
 const SUPERVISE_POLL: Duration = Duration::from_millis(500);
@@ -507,11 +509,9 @@ static DAEMON: OnceLock<&'static Daemon> = OnceLock::new();
 define_windows_service!(ffi_service_main, service_main);
 
 pub(super) fn run_as_service(component: Component) -> Result<()> {
-    let role_name = component
-        .daemons()
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("daemon subcommand needs a daemon component (node/hub/proxy)"))?;
+    let role_name = component.daemons().into_iter().next().ok_or_else(|| {
+        anyhow::anyhow!("daemon subcommand needs a daemon component (node/hub/proxy)")
+    })?;
     let d = daemons::by_name(role_name).expect("known component");
     DAEMON.set(d).ok();
     service_dispatcher::start(service_name(d), ffi_service_main)

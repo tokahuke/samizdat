@@ -25,6 +25,7 @@ pub struct Daemon {
     pub default_config: &'static str,
 }
 
+/// Metadata for `samizdat-node`.
 pub const NODE: Daemon = Daemon {
     name: "node",
     bin: "samizdat-node",
@@ -32,6 +33,7 @@ pub const NODE: Daemon = Daemon {
     default_config: include_str!("../defaults/node.toml"),
 };
 
+/// Metadata for `samizdat-hub`.
 pub const HUB: Daemon = Daemon {
     name: "hub",
     bin: "samizdat-hub",
@@ -39,6 +41,7 @@ pub const HUB: Daemon = Daemon {
     default_config: include_str!("../defaults/hub.toml"),
 };
 
+/// Metadata for `samizdat-proxy`.
 pub const PROXY: Daemon = Daemon {
     name: "proxy",
     bin: "samizdat-proxy",
@@ -46,20 +49,32 @@ pub const PROXY: Daemon = Daemon {
     default_config: include_str!("../defaults/proxy.toml"),
 };
 
-pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY];
+/// Metadata for `samizdat-pinner`.
+pub const PINNER: Daemon = Daemon {
+    name: "pinner",
+    bin: "samizdat-pinner",
+    description: "Samizdat Pinner",
+    default_config: include_str!("../defaults/pinner.toml"),
+};
+
+/// All daemons samizdat-up knows how to install. Order is stable and
+/// matches the order CLI subcommands iterate (`Component::All`).
+pub const ALL: &[&Daemon] = &[&NODE, &HUB, &PROXY, &PINNER];
 
 /// Every Samizdat binary samizdat-up knows how to install or query.
-/// Includes the three daemons plus the CLI (`samizdat`) and
-/// samizdat-up itself. Order is the order `samizdat-up versions`
-/// prints them.
+/// Includes the daemons plus the CLI (`samizdat`) and samizdat-up
+/// itself. Order is the order `samizdat-up versions` prints them.
 pub const KNOWN_BINARIES: &[&str] = &[
     "samizdat-node",
     "samizdat-hub",
     "samizdat-proxy",
+    "samizdat-pinner",
     "samizdat",
     "samizdat-up",
 ];
 
+/// Look a daemon up by its short name (`"node"`, `"hub"`, etc).
+/// Returns `None` if no daemon matches.
 pub fn by_name(name: &str) -> Option<&'static Daemon> {
     ALL.iter().copied().find(|d| d.name == name)
 }
@@ -78,12 +93,11 @@ pub fn launchd_label(d: &Daemon) -> String {
 /// default). The named user must already exist on the system.
 ///
 /// Notes:
-///   - `RunAtLoad` makes the service start the moment launchctl loads
-///     the plist, mirroring systemd's `enable --now`.
+///   - `RunAtLoad` makes the service start the moment launchctl loads the plist,
+///     mirroring systemd's `enable --now`.
 ///   - `KeepAlive` ensures the daemon comes back after a crash.
-///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat,
-///     /var/lib/samizdat) so users can administer a Mac install with
-///     the same paths they would on a Linux box.
+///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat, /var/lib/samizdat) so
+///     users can administer a Mac install with the same paths they would on a Linux box.
 #[allow(dead_code)]
 pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
     let label = launchd_label(d);
@@ -233,10 +247,20 @@ mod tests {
     }
 
     #[test]
+    fn systemd_unit_for_pinner_matches_golden() {
+        let actual = render_systemd_unit(&PINNER, None);
+        let golden = include_str!("../tests/golden/samizdat-pinner.service");
+        assert_eq!(actual, golden);
+    }
+
+    #[test]
     fn launchd_plist_for_node_matches_golden() {
         let actual = render_launchd_plist(&NODE, None);
         let golden = include_str!("../tests/golden/com.samizdat.node.plist");
-        assert_eq!(actual, golden, "plist drift; update the golden if intentional");
+        assert_eq!(
+            actual, golden,
+            "plist drift; update the golden if intentional"
+        );
     }
 
     #[test]
@@ -254,9 +278,17 @@ mod tests {
     }
 
     #[test]
+    fn launchd_plist_for_pinner_matches_golden() {
+        let actual = render_launchd_plist(&PINNER, None);
+        let golden = include_str!("../tests/golden/com.samizdat.pinner.plist");
+        assert_eq!(actual, golden);
+    }
+
+    #[test]
     fn launchd_label_uses_reverse_dns() {
         assert_eq!(launchd_label(&NODE), "com.samizdat.node");
         assert_eq!(launchd_label(&HUB), "com.samizdat.hub");
         assert_eq!(launchd_label(&PROXY), "com.samizdat.proxy");
+        assert_eq!(launchd_label(&PINNER), "com.samizdat.pinner");
     }
 }

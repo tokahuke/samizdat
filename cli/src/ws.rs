@@ -1,4 +1,4 @@
-//! WebSocket server for page refresh functionality.
+//! WebSocket server that pings the browser to reload the page.
 //!
 //! Listens for WebSocket upgrades on a loopback port and broadcasts a "refresh"
 //! string whenever the watcher publishes a new edition. Used by
@@ -14,26 +14,23 @@
 
 use std::{
     net::SocketAddr,
-    sync::{mpsc, Arc, RwLock},
+    sync::{Arc, RwLock, mpsc},
     thread,
 };
 
-/// A WebSocket server that handles page refresh signals.
-///
-/// Maintains a list of connected clients and provides functionality to trigger page
-/// refreshes across all active connections.
+/// A WebSocket server that fans out a refresh signal to every connected
+/// client.
 pub struct RefreshSocket {
-    /// The socket address where the server is listening
+    /// Address the server is listening on.
     addr: SocketAddr,
-    /// List of channels to send refresh signals to connected clients
+    /// One channel per connected client. Sending `()` makes that client's
+    /// connection thread push a `refresh` frame and close.
     refresh_triggers: Arc<RwLock<Vec<mpsc::Sender<()>>>>,
 }
 
 impl RefreshSocket {
-    /// Initializes a new WebSocket server on a random port.
-    ///
-    /// Creates a TCP listener and spawns a background thread to handle incoming WebSocket
-    /// connections. Each connection is handled in its own thread.
+    /// Binds the server on a random loopback port and spawns the accept
+    /// loop. Each incoming connection runs on its own thread.
     pub fn init() -> Result<RefreshSocket, anyhow::Error> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let refresh_triggers: Arc<RwLock<Vec<_>>> = Arc::default();
@@ -57,6 +54,10 @@ impl RefreshSocket {
                         // user's machine (including one served by `evil.com`)
                         // can connect to the refresh port and observe rebuild
                         // pings as a side-channel.
+                        // The closure's Err type is dictated by tungstenite's
+                        // accept_hdr signature; boxing would require trait
+                        // gymnastics for one error site.
+                        #[allow(clippy::result_large_err)]
                         let mut conn = tungstenite::accept_hdr(
                             stream,
                             |req: &tungstenite::handshake::server::Request,
@@ -94,15 +95,14 @@ impl RefreshSocket {
         })
     }
 
-    /// Returns the socket address where the server is listening.
+    /// The address the server is listening on.
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
 
-    /// Triggers a page refresh for all connected clients.
-    ///
-    /// Sends a refresh signal to each connected client and removes disconnected clients
-    /// from the list of active connections.
+    /// Refresh every connected client and clear the client list. Failed
+    /// sends are dropped; the connection thread will notice on the next
+    /// poll and exit.
     pub fn trigger_refresh(&self) {
         let refresh_trigger =
             std::mem::take(&mut *self.refresh_triggers.write().expect("poisoned"));
@@ -112,10 +112,10 @@ impl RefreshSocket {
     }
 }
 
-/// Returns true if the `Origin` header on a WebSocket upgrade looks like a
-/// localhost page. Accepts missing `Origin` (curl / native ws clients) so
-/// non-browser callers still work; rejects only when a browser explicitly
-/// states a non-loopback origin.
+/// True if the `Origin` header on a WebSocket upgrade looks like a
+/// localhost page. A missing `Origin` is accepted (curl and native ws
+/// clients omit it); only browsers that explicitly name a non-loopback
+/// origin are rejected.
 fn origin_is_local(req: &tungstenite::handshake::server::Request) -> bool {
     let Some(origin) = req.headers().get("Origin") else {
         return true;
@@ -130,9 +130,9 @@ fn origin_is_local(req: &tungstenite::handshake::server::Request) -> bool {
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(origin_str);
-    let host = after_scheme.rsplit_once(':')
+    let host = after_scheme
+        .rsplit_once(':')
         .map(|(host, _port)| host)
         .unwrap_or(after_scheme);
-    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
-        || host.starts_with("127.")
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]") || host.starts_with("127.")
 }

@@ -1,29 +1,32 @@
-//! Implements the RPC client part of the Hub API _for the Samizdat Hub_. This describes
-//! how a Samizdat Hub can behave as another node to another Samizdat Hub. This confers
-//! recursion to the Samizdat network.
+//! Client side of the Hub RPC API, used by one hub when it speaks to another as if it
+//! were a node. This is what makes the hub federation recursive.
 
-use futures::future::Either;
-use futures::prelude::*;
+use futures::{future::Either, prelude::*};
 use samizdat_common::keyed_channel::KeyedChannel;
-use std::net::SocketAddr;
-use std::pin::pin;
-use std::sync::Arc;
-use std::time::Duration;
-use tarpc::client::NewClient;
-use tarpc::context;
-use tarpc::server::{self, Channel};
-use tokio::sync::{oneshot, Mutex, Semaphore};
-use tokio::task::{JoinError, JoinHandle};
-use tokio::time;
-use tokio::time::{interval, Interval, MissedTickBehavior};
+use std::{net::SocketAddr, pin::pin, sync::Arc, time::Duration};
+use tarpc::{
+    client::NewClient,
+    context,
+    server::{self, Channel},
+};
+use tokio::{
+    sync::{Mutex, Semaphore, oneshot},
+    task::{JoinError, JoinHandle},
+    time,
+    time::{Interval, MissedTickBehavior, interval},
+};
 
-use samizdat_common::address::ChannelId;
-use samizdat_common::quinn::{Connection, Endpoint};
-use samizdat_common::{quic, rpc::*, transport};
+use samizdat_common::{
+    address::ChannelId,
+    quic,
+    quinn::{Connection, Endpoint},
+    rpc::*,
+    transport,
+};
 
 use crate::cli::cli;
 
-use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
+use super::{REPLAY_RESISTANCE, announce_edition, candidates_for_resolution, edition_for_request};
 
 /// The maximum length in bytes that a message in the RPC connections can have. This is
 /// set to a low value because all messages sent and received through the RPC are quite

@@ -14,8 +14,11 @@
 //! inner entry point so the unit tests can pin a fixed timestamp.
 
 use chrono::{DateTime, Utc};
-use ring::digest::{digest, SHA256};
-use ring::hmac;
+use ring::{
+    digest::{SHA256, digest},
+    hmac,
+};
+use std::fmt::Write;
 
 /// Inputs to a single SigV4 signing operation. All slices are borrowed;
 /// the signer produces owned `String`s in `SignedHeaders`. `query` is
@@ -115,9 +118,7 @@ pub(crate) fn sign_at(req: SigV4Request, now: DateTime<Utc>) -> SignedHeaders {
         service = req.service,
     );
     let canonical_hash = hex::encode(digest(&SHA256, canonical_request.as_bytes()).as_ref());
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{canonical_hash}",
-    );
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{canonical_hash}",);
 
     // Step 6: derive the signing key via the four-step HMAC chain.
     let k_date = hmac_sha256(
@@ -174,7 +175,7 @@ fn encode_path(path: &str) -> String {
         if unreserved {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{:02X}", b));
+            let _ = write!(out, "%{:02X}", b);
         }
     }
     out
@@ -257,7 +258,10 @@ mod tests {
             .next()
             .expect("Signature= present");
         assert_eq!(sig.len(), 64);
-        assert!(sig.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(
+            sig.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
     }
 
     /// The session token, when present, appears as

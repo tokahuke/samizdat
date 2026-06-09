@@ -7,21 +7,21 @@
 //! page-refresh snippet that `samizdat watch` uses in dev mode.
 
 use regex::Regex;
-use std::borrow::Cow;
-use std::net::SocketAddr;
-use std::path::Path;
+use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use std::sync::LazyLock;
 
-/// Regular expression to match HTML file extensions.
+/// Matches `.html` and `.htm` file extensions.
 static MATCH_HTML: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\.html?$"#).expect("valid regex"));
 
-/// Regular expression to match the closing body tag.
+/// Matches the closing `</body>` tag.
 static FIND_FOOT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"</body>"#).expect("valid regex"));
 
-/// Processes an HTML page, optionally adding refresh functionality.
+/// If `path` is an HTML file and `refresh_server_addr` is set, injects the
+/// `samizdat watch` reload snippet before `</body>`. Otherwise returns
+/// the bytes unchanged.
 pub fn proxy_page(
     path: impl AsRef<Path>,
     raw: &'_ [u8],

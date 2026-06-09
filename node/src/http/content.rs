@@ -1,33 +1,35 @@
 //! HTTP handlers for content served at typed-subdomain origins.
 //!
 //! Routes:
-//! - `GET /` -- dispatches on the [`HostScope`] extractor: bare loopback
-//!   returns the welcome HTML; series/identity/object/collection/edition
-//!   subdomains resolve their respective content.
-//! - `GET /{*name}` -- same dispatch with a content path. Object hosts
-//!   ignore the path (objects are atomic blobs).
+//! - `GET /` -- dispatches on the [`HostScope`] extractor: bare loopback returns the
+//!   welcome HTML; series/identity/object/collection/edition subdomains resolve their
+//!   respective content.
+//! - `GET /{*name}` -- same dispatch with a content path. Object hosts ignore the path
+//!   (objects are atomic blobs).
 
-use axum::extract::Path;
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
+use axum::{
+    extract::Path,
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+};
 use tokio::time::Instant;
 
-use samizdat_common::db::readonly_tx;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, db::readonly_tx};
 
-use crate::http::host_scope::HostScope;
-use crate::http::resolvers::{resolve_identity, resolve_item, resolve_object, resolve_series};
-use crate::http::{PageResponse, SamizdatTimeout};
-use crate::models::{CollectionRef, Edition, ObjectRef, SeriesRef};
+use crate::{
+    http::{
+        PageResponse, SamizdatTimeout,
+        host_scope::HostScope,
+        resolvers::{resolve_identity, resolve_item, resolve_object, resolve_series},
+    },
+    models::{CollectionRef, Edition, ObjectRef, SeriesRef},
+};
 
 /// Welcome HTML served at `GET /` on the bare-loopback admin host.
 const WELCOME_HTML: &str = include_str!("../index.html");
 
 /// Handles `GET /`.
-pub async fn content_root(
-    scope: HostScope,
-    SamizdatTimeout(timeout): SamizdatTimeout,
-) -> Response {
+pub async fn content_root(scope: HostScope, SamizdatTimeout(timeout): SamizdatTimeout) -> Response {
     serve(scope, "", timeout).await
 }
 
@@ -63,8 +65,7 @@ async fn serve(scope: HostScope, name: &str, timeout: std::time::Duration) -> Re
             PageResponse(resolve_series(series, name.into(), [], deadline).await).into_response()
         }
         HostScope::Identity(handle) => {
-            PageResponse(resolve_identity(&handle, name.into(), [], deadline).await)
-                .into_response()
+            PageResponse(resolve_identity(&handle, name.into(), [], deadline).await).into_response()
         }
         HostScope::Object(hash) => {
             // Objects are atomic blobs; the request path is ignored.

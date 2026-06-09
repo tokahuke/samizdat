@@ -10,11 +10,11 @@ use std::time::Duration;
 
 use serde_derive::Deserialize;
 
-pub mod digitalocean;
+mod aws_sigv4;
 pub mod cloudflare;
+pub mod digitalocean;
 pub mod route53;
 pub mod script;
-mod aws_sigv4;
 pub(crate) mod util;
 
 /// Opaque in-process token returned by `set_txt` and handed back to

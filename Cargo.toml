@@ -6,6 +6,7 @@ members = [
     "hub",
     "cli",
     "proxy",
+    "pinner",
     "samizdat-up",
 ]
 resolver = "2"

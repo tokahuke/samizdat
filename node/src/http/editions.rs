@@ -1,12 +1,10 @@
 //! Editions API.
 
-use axum::routing::get;
-use axum::Router;
+use axum::{Router, routing::get};
 use futures::FutureExt;
 use samizdat_common::db::readonly_tx;
 
-use crate::models::Edition;
-use crate::{access::AccessRight, security_scope};
+use crate::{access::AccessRight, models::Edition, security_scope};
 
 use super::ApiResponse;
 

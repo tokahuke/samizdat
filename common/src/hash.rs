@@ -2,10 +2,12 @@
 
 use serde_derive::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_224};
-use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Debug, Display};
-use std::ops::Deref;
-use std::str::FromStr;
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt::{self, Debug, Display},
+    ops::Deref,
+    str::FromStr,
+};
 
 /// The lenght in bytes of the hash used in Samizdat.
 pub const HASH_LEN: usize = 28;

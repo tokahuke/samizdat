@@ -11,27 +11,27 @@
 //! require a server-side edit.
 
 use anyhow::{Context, anyhow};
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use crate::cli::cli;
 
-/// Highest-scope token the CLI was able to read from the data dir.
-/// Loaded lazily, cached for the rest of the process.
+/// Highest-scope token the CLI could read from the data dir. Loaded
+/// lazily, cached for the process.
 static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
-/// Retrieves the highest-scope access token the CLI can read. Must be
-/// called after initialization.
+/// Highest-scope access token the CLI can read. Must be called after
+/// `init_port`.
 pub fn access_token<'a>() -> Result<&'a str, anyhow::Error> {
     Ok(ACCESS_TOKEN.get_or_try_init(init_access_token)?.as_str())
 }
 
-/// Resolve a usable access token. Tries `admin-token` first; falls back
-/// to `read-token` if admin-token is not readable by this process (the
-/// common no-sudo case). The node writes both at startup.
+/// Pick a usable access token. Tries `admin-token` first, falls back to
+/// `read-token` if admin-token is not readable (the common no-sudo
+/// case). The node writes both at startup.
 fn init_access_token() -> Result<String, anyhow::Error> {
     let admin = data_file("admin-token");
     match fs::read_to_string(&admin) {
@@ -66,16 +66,16 @@ fn init_access_token() -> Result<String, anyhow::Error> {
         })
 }
 
-/// Port number used by the Samizdat HTTP API. The port is loaded from a file in the local
-/// filesystem and cached in memory.
+/// Samizdat HTTP API port, loaded from the `port` file in the data dir
+/// and cached in memory.
 static PORT: OnceLock<u16> = OnceLock::new();
 
-/// Retrieves the HTTP server port. Must be called after initialization.
+/// HTTP server port. Must be called after `init_port`.
 pub fn port() -> Result<u16, anyhow::Error> {
     Ok(*PORT.get_or_try_init(init_port)?)
 }
 
-/// Initializes HTTP port value.
+/// Read the port file once and cache it.
 pub fn init_port() -> Result<u16, anyhow::Error> {
     let path = data_file("port");
     let contents = fs::read_to_string(&path).with_context(|| {
@@ -85,15 +85,16 @@ pub fn init_port() -> Result<u16, anyhow::Error> {
             cli().data.display()
         )
     })?;
-    contents
-        .trim()
-        .parse::<u16>()
-        .with_context(|| format!("port file at {} does not contain a valid u16", path.display()))
+    contents.trim().parse::<u16>().with_context(|| {
+        format!(
+            "port file at {} does not contain a valid u16",
+            path.display()
+        )
+    })
 }
 
-/// Build a path inside the configured data dir. Uses `Path::join` so the
-/// result is a real `PathBuf` (no non-UTF8 panic) and so non-ASCII data
-/// dirs work as well as ASCII ones.
+/// Build a path inside the configured data dir using `Path::join`, so
+/// non-ASCII data dirs work and there is no non-UTF8 panic.
 fn data_file(name: &str) -> PathBuf {
     let mut p: PathBuf = cli().data.clone();
     p.push(Path::new(name));

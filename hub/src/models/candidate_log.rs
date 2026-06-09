@@ -1,5 +1,8 @@
+//! One row per peer-candidate the hub forwarded to a querying client,
+//! plus the outcome (delivered, errored, or pending).
+
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DurationMilliSecondsWithFrac};
+use serde_with::{DurationMilliSecondsWithFrac, serde_as};
 use std::time::Duration;
 
 use samizdat_common::rpc::Candidate;
@@ -8,9 +11,12 @@ use crate::db::Table;
 
 use super::{Id, Indexable};
 
+/// One entry in the candidate-log table: the candidate the hub picked
+/// for some query, plus the result of sending it to the client.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CandidateLog {
+    /// Primary key for this log row.
     candidate_log_id: Id,
     /// The id of the query log.
     query_log_id: Id,

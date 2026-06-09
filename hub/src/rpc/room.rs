@@ -1,16 +1,10 @@
-//! Implements a pool of Nodes where any two nodes may be connected to each other by this
-//! Hub.
+//! Pool of nodes; any two members can be wired to each other through this hub.
 
 use futures::prelude::*;
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{collections::BTreeMap, fmt::Debug, net::SocketAddr, sync::Arc};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
-use super::node_sampler;
-use super::node_sampler::PrioritySampler;
-use super::Node;
+use super::{Node, node_sampler, node_sampler::PrioritySampler};
 
 /// Implements a pool of Nodes where any two nodes may be connected to each other by this
 /// Hub.
@@ -50,7 +44,8 @@ impl Room {
     /// Lists the peers in a random (but clever) order, as defined by a priority sampler
     /// (each priority sampler looks to a different metric in the node). The current node
     /// that has cause the invoking of this function is needed so as to avoid, e.g., the
-    /// hub sending the query to the same node that has sent that query, initiating a loop.
+    /// hub sending the query to the same node that has sent that query, initiating a
+    /// loop.
     pub async fn stream_peers<'a>(
         &'a self,
         sampler: impl 'a + PrioritySampler,

@@ -13,13 +13,13 @@ use async_trait::async_trait;
 use serde_derive::Deserialize;
 use tokio::sync::OnceCell;
 
-use super::{http_client, DnsError, DnsProvider, TxtHandle};
+use super::{DnsError, DnsProvider, TxtHandle, http_client};
 
 /// Cloudflare v4 API root. No trailing slash; paths are appended with a
 /// leading slash.
 const API_BASE: &str = "https://api.cloudflare.com/client/v4";
 
-use crate::dns::util::{truncate_on_boundary, ERROR_BODY_LIMIT};
+use crate::dns::util::{ERROR_BODY_LIMIT, truncate_on_boundary};
 
 /// Local wrapper so existing call sites read `truncate(&body)` without
 /// re-stating the cap. Delegates to the shared util.
@@ -231,10 +231,22 @@ fn first_error_message(errors: &[CfError]) -> String {
 
 #[derive(Debug, Deserialize)]
 struct ZoneListResponse {
+    // Cloudflare returns `"result": null` (not an empty array) when
+    // `success` is false. Treat null as an empty list so the error path
+    // can still read `success` + `errors` to build a useful message.
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     result: Vec<ZoneEntry>,
     success: bool,
     #[serde(default)]
     errors: Vec<CfError>,
+}
+
+fn deserialize_null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    Ok(<Option<T> as serde::Deserialize>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]

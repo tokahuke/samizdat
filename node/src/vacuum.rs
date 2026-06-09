@@ -1,23 +1,25 @@
-//! A process to keep the size of the database under control and to purge junk.
-//!
-//! This module implements database maintenance operations that run periodically to manage
-//! storage size and remove rarely accessed data.
+//! Periodic database maintenance: cap total size and drop rarely-accessed data.
 
 use ordered_float::NotNan;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, WritableTx};
+use samizdat_common::db::{Droppable, Table as _, WritableTx, readonly_tx, writable_tx};
 use serde_derive::{Deserialize, Serialize};
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
-use std::time::Duration;
-use tokio::runtime::Handle;
-use tokio::time::{sleep, Instant};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+    time::Duration,
+};
+use tokio::{
+    runtime::Handle,
+    time::{Instant, sleep},
+};
 
-use samizdat_common::heap_entry::HeapEntry;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, heap_entry::HeapEntry};
 
-use crate::cli::cli;
-use crate::db::{MergeOperation, Table};
-use crate::models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior};
+use crate::{
+    cli::cli,
+    db::{MergeOperation, Table},
+    models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior},
+};
 
 /// Status for a vacuum task.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -32,9 +34,9 @@ pub enum VacuumStatus {
 
 /// Run a vacuum round in the database.
 ///
-/// This function performs two sequential cleanup operations:
-/// 1. Removes least-useful content if total storage exceeds configured maximum
-/// 2. Performs garbage collection of orphaned chunks and dangling items
+/// Two sequential cleanup passes:
+/// 1. Drop the least-useful content if total storage exceeds the configured maximum.
+/// 2. Garbage-collect orphaned chunks and dangling items.
 pub fn vacuum() -> Result<VacuumStatus, crate::Error> {
     // STEP 1: make up space if needed, deleting rarely used stuff:
 
@@ -286,10 +288,16 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
                 Ok::<Option<()>, crate::Error>(None)
             })?;
 
-        let dropped = chunks_to_drop.len();
+        let mut dropped = 0;
         for hash in chunks_to_drop {
+            // Skip chunks held by an in-flight import. See
+            // `chunk_protect`'s module doc.
+            if crate::chunk_protect::is_protected(tx, &hash) {
+                continue;
+            }
             Table::ObjectChunks.delete(tx, hash)?;
             Table::ObjectChunkRefCount.delete(tx, hash)?;
+            dropped += 1;
         }
 
         Ok(dropped)
@@ -335,8 +343,8 @@ pub fn sweep_crash_leaked_chunks() -> Result<usize, crate::Error> {
 
 /// Drop items that don't point to anything anymore.
 ///
-/// Removes collection items whose referenced objects no longer exist, cleaning up dangling
-/// references from the database.
+/// Removes collection items whose referenced objects no longer exist, cleaning up
+/// dangling references from the database.
 fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 

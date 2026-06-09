@@ -8,32 +8,33 @@ mod room;
 
 use futures::prelude::*;
 use node_sampler::StatisticsType;
-use samizdat_common::db::readonly_tx;
-use samizdat_common::keyed_channel::KeyedChannel;
-use std::collections::HashMap;
-use std::io;
-use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::LazyLock;
-use std::sync::Mutex as StdMutex;
-use std::time::Duration;
-use tarpc::context;
-use tarpc::server::{self, Channel};
-use tokio::sync::{Mutex, Semaphore};
-use tokio::time::{interval, Interval, MissedTickBehavior};
+use samizdat_common::{db::readonly_tx, keyed_channel::KeyedChannel};
+use std::{
+    collections::HashMap,
+    io,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    sync::{Arc, LazyLock, Mutex as StdMutex},
+    time::Duration,
+};
+use tarpc::{
+    context,
+    server::{self, Channel},
+};
+use tokio::{
+    sync::{Mutex, Semaphore},
+    time::{Interval, MissedTickBehavior, interval},
+};
 
-use samizdat_common::{quic, Riddle};
-use samizdat_common::{quinn, rpc::*, transport};
+use samizdat_common::{Riddle, quic, quinn, rpc::*, transport};
 
-use crate::cli::cli;
-use crate::models::BlacklistedIp;
-use crate::replay_resistance::ReplayResistance;
-use crate::utils;
+use crate::{cli::cli, models::BlacklistedIp, replay_resistance::ReplayResistance, utils};
 
-use self::hub_server::HubServer;
-use self::node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler};
-use self::room::Room;
+use self::{
+    hub_server::HubServer,
+    node_sampler::{EditionSampler, QuerySampler, Statistics, UniformSampler},
+    room::Room,
+};
 
 /// The maximum length in bytes that a message in the RPC connections can have. This is
 /// set to a low value because all messages sent and received through the RPC are quite
@@ -49,10 +50,10 @@ pub static ROOM: LazyLock<Room> = LazyLock::new(Room::new);
 /// `LazyLock<ReplayResistance>` can be shared across all RPC handlers without
 /// serialising them. The previous design wrapped this in a `tokio::sync::Mutex`
 /// and made every replay check the global hub bottleneck.
-pub static REPLAY_RESISTANCE: LazyLock<ReplayResistance> =
-    LazyLock::new(ReplayResistance::new);
+pub static REPLAY_RESISTANCE: LazyLock<ReplayResistance> = LazyLock::new(ReplayResistance::new);
 
-/// Represents a connection to a Samizdat node.
+/// A node connected to this hub: the RPC client, the address, per-node
+/// throttle and semaphore, and the running statistics used by the sampler.
 #[derive(Debug)]
 pub struct Node {
     /// Gathers statics on the ability of this node to answer queries.
@@ -100,8 +101,8 @@ impl Node {
     //     self.call_semaphore.try_acquire().is_err()
     // }
 
-    /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
-    /// client. This may mitigate DoS.
+    /// Does the whole API throttling thing. Using `Box` denies any allocations to the
+    /// throttled client. This may mitigate DoS.
     async fn throttle<'a, F, Fut, T>(&'a self, f: F) -> T
     where
         F: 'a + Send + FnOnce(&'a Self) -> Fut,
@@ -181,7 +182,8 @@ fn candidates_for_resolution(
                 tracing::debug!("resolve done for {peer_id}");
 
                 let validate_riddles = move |riddles: &[Riddle]| {
-                    // `>=`: there can be more added nonces down the line because of further redirects.
+                    // `>=`: there can be more added nonces down the line because of further
+                    // redirects.
                     riddles.len() >= resolution.validation_nonces.len()
                     // Check that *your* riddle is correct
                     && riddles[resolution.validation_nonces.len() - 1] == validation_riddle
@@ -378,6 +380,11 @@ impl Drop for PerIpPermit {
             return;
         };
         if let Some(c) = guard.get_mut(&self.ip) {
+            // A count at this point should always be > 0 because we are
+            // the live token for that count. saturating_sub keeps us
+            // running in release; debug_assert flags a torn invariant
+            // (PerIpPermit constructed without a paired increment, etc.).
+            debug_assert!(*c > 0, "PerIpPermit dropped when count was already 0");
             *c = c.saturating_sub(1);
             if *c == 0 {
                 guard.remove(&self.ip);
@@ -486,45 +493,31 @@ async fn setup_connection(
 ) -> Result<(), crate::Error> {
     // Acquire all three permits up front, before we negotiate transports or
     // spawn anything. Two reasons:
-    // - Atomicity: if any cap is exhausted, we must NOT bring up only some
-    //   of the others. The previous design acquired permits in separate
-    //   spawned tasks, so a flood would leave many half-open connections
-    //   where the node sees the QUIC handshake succeed but every `do_query`
-    //   returns `NoReverseConnection` (or vice versa).
-    // - Resource cap: `accept_bincode_transports` allocates two transports
-    //   per inbound connection. Acquiring the permits first makes
-    //   `max_connections` and `max_connections_per_ip` actual caps on
-    //   resource allocation rather than reject-after-allocation half-measures.
-    let ip_permit = match per_ip_cap.try_acquire(client_addr.ip()) {
-        Some(p) => p,
-        None => {
-            tracing::warn!(
-                "per-IP connection cap reached for {}; dropping connection from {client_addr}",
-                client_addr.ip()
-            );
-            connection.close(0u32.into(), b"per-ip cap reached");
-            return Ok(());
-        }
+    // - Atomicity: if any cap is exhausted, we must NOT bring up only some of the others. The
+    //   previous design acquired permits in separate spawned tasks, so a flood would leave
+    //   many half-open connections where the node sees the QUIC handshake succeed but every
+    //   `do_query` returns `NoReverseConnection` (or vice versa).
+    // - Resource cap: `accept_bincode_transports` allocates two transports per inbound
+    //   connection. Acquiring the permits first makes `max_connections` and
+    //   `max_connections_per_ip` actual caps on resource allocation rather than
+    //   reject-after-allocation half-measures.
+    let Some(ip_permit) = per_ip_cap.try_acquire(client_addr.ip()) else {
+        tracing::warn!(
+            "per-IP connection cap reached for {}; dropping connection from {client_addr}",
+            client_addr.ip()
+        );
+        connection.close(0u32.into(), b"per-ip cap reached");
+        return Ok(());
     };
-    let server_permit = match server_semaphore.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::warn!(
-                "server connection cap reached; dropping connection from {client_addr}"
-            );
-            connection.close(0u32.into(), b"server cap reached");
-            return Ok(());
-        }
+    let Ok(server_permit) = server_semaphore.clone().try_acquire_owned() else {
+        tracing::warn!("server connection cap reached; dropping connection from {client_addr}");
+        connection.close(0u32.into(), b"server cap reached");
+        return Ok(());
     };
-    let client_permit = match client_semaphore.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::warn!(
-                "client connection cap reached; dropping connection from {client_addr}"
-            );
-            connection.close(0u32.into(), b"client cap reached");
-            return Ok(());
-        }
+    let Ok(client_permit) = client_semaphore.clone().try_acquire_owned() else {
+        tracing::warn!("client connection cap reached; dropping connection from {client_addr}");
+        connection.close(0u32.into(), b"client cap reached");
+        return Ok(());
     };
 
     let (direct_transport, reverse_transport) =
@@ -586,8 +579,8 @@ async fn setup_connection(
     Ok(())
 }
 
-/// This runs the current Hub taking the role of a Node to other hubs. This is what makes the
-/// network recursive.
+/// This runs the current Hub taking the role of a Node to other hubs. This is what makes
+/// the network recursive.
 pub async fn run_partners() {
     let endpoint = quic::new_default("[::]:0".parse().expect("valid address"));
 

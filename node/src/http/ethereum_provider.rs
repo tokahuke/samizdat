@@ -1,15 +1,14 @@
 //! Identities API.
 
-use axum::routing::{get, put};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    routing::{get, put},
+};
 use futures::FutureExt;
-use samizdat_common::db::{readonly_tx, Table as _};
+use samizdat_common::db::{Table as _, readonly_tx};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::db::Table;
-use crate::http::ApiResponse;
-use crate::identity_dapp::identity_provider;
-use crate::security_scope;
+use crate::{db::Table, http::ApiResponse, identity_dapp::identity_provider, security_scope};
 
 /// The entrypoint of the object API.
 pub fn api() -> Router {

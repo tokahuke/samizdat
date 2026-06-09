@@ -153,3 +153,78 @@ entry), so the on-disk sub-database named `KVStore` is simply no longer
 opened on startup. Its bytes stay in the LMDB file as dead weight until
 the node is wiped; `samizdat vacuum` does not reclaim them. Operators
 upgrading an existing data directory should expect that residual size.
+
+## 10. `CHUNK_SIZE` is now a wire commitment
+
+`node/src/models/object.rs::CHUNK_SIZE` (256_000 bytes) used to be a
+soft convention -- chunks of a different size produced a warning but
+were accepted. As of the per-subscription size-cap work, three
+invariants are enforced at fetch time:
+
+1. **Per-chunk size after decompression**
+   (`ObjectRef::do_import`, `models/object.rs`). Any received chunk
+   whose `chunk.len() > CHUNK_SIZE` is rejected outright. Chunks
+   smaller than `CHUNK_SIZE` are still fine (a short last chunk, or
+   any earlier short chunk a publisher chooses to produce).
+2. **Bounded decompression** (`system/transport/file_transfer/{mod,
+   messages}.rs`). The brotli `Decompressor` is wrapped with
+   `.take((CHUNK_SIZE as u64) + 1)` so even a few-KB zip-bomb that
+   would inflate to 1 TB+ stops at `CHUNK_SIZE + 1` bytes and gets
+   rejected, rather than filling memory before the per-chunk check
+   fires. Closes the obvious zip-bomb path through brotli.
+3. **Exact total size** (`ObjectRef::do_import`). After every chunk
+   has arrived, the locally-accumulated `content_size` must equal
+   the peer-supplied `supplied_metadata.content_size` exactly. A
+   mismatch aborts the import.
+
+Together these turn `metadata.content_size` from a peer-asserted hint
+into a cryptographically supported bound, and let the per-object cap
+at `messages.rs::validate` be trusted as a real ceiling on bytes that
+will land on disk.
+
+**Upgrade impact:** none for existing on-disk content. The invariants
+are checked at *receive* time, not at any background scan, so
+historical objects already in `Table::ObjectChunks` continue to load
+and serve normally regardless of their original chunk sizes. New
+fetches from older peers that happen to ship oversized chunks will
+fail to import; the operator sees a clear error.
+
+**Change cost:** changing `CHUNK_SIZE` (or any of the two invariants
+above) is now a coordinated workspace release -- a node running the
+old value next to a node running the new value will reject each
+other's content at object boundaries. Pair with any other wire change
+already on the schedule rather than burning a release on this alone.
+
+## 11. Per-object cap moved into `ObjectRef::import`
+
+Where the cap is enforced shifted, the cap itself did not. Operators
+see no on-disk migration; an existing node upgrading sees the same
+1 GB per-object ceiling and the same `max_storage` ceiling as
+before.
+
+What changed at the code layer (relevant only when reading logs or
+writing new callers):
+
+1. The per-object size check that lived at
+   `node/src/system/transport/file_transfer/messages.rs::validate`
+   moved into `ObjectRef::import` via the `Cap` abstraction
+   (`node/src/cap.rs`). Same enforcement, different layer.
+2. New `Cap` trait + flavours (`SizeLimit`, `Budget`, `Composite`,
+   `Unbounded`) and a `Reservation` RAII handle. The full model is
+   in `docs/cap-model.md`; read it before adding a new cap dimension.
+3. Per-subscription budgets are **ephemeral**: a fresh `Budget` is
+   built at the start of every `Edition::refresh` and discarded at
+   the end. There is no on-disk per-subscription cap state; nothing
+   to migrate, nothing to seed.
+4. `NODE_STORAGE_CAP` is reconstructed at startup by
+   `cap::reconstruct_from_disk` summing `Table::ObjectStatistics`
+   over every persisted object. A node whose pre-upgrade disk usage
+   exceeds its configured `max_storage` boots with zero remaining
+   budget and refuses new commitments until vacuum drains enough.
+   This is the same behaviour an over-cap node would have had before
+   the abstraction; just made explicit at the cap layer.
+
+Error message shape changed: rejections that used to read
+`"content too big: max size is 1000Mb, but content is 5000Mb"` now
+read `"cap object_size_limit exceeded: asked 5.00 GB, bound 1.00 GB"`.
+Same root cause, uniform format across all cap rejections.

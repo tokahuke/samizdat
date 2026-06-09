@@ -1,13 +1,21 @@
+//! Periodic snapshot of the per-node sampler statistics, kept for
+//! offline analysis of hub-side routing quality.
+
 use serde_derive::{Deserialize, Serialize};
 
-use crate::db::Table;
-use crate::models::Id;
-use crate::models::Indexable;
-use crate::rpc::node_sampler::StatisticsSnapshot;
+use crate::{
+    db::Table,
+    models::{Id, Indexable},
+    rpc::node_sampler::StatisticsSnapshot,
+};
 
+/// One snapshot row: the sampler's full per-node state at a point in
+/// time.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatisticsLog {
+    /// Primary key.
     id: Id,
+    /// Sampler statistics captured at the snapshot moment.
     statistics: StatisticsSnapshot,
 }
 

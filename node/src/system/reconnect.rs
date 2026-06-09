@@ -3,19 +3,30 @@
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive as _;
 use serde_derive::Serialize;
-use std::fmt::Display;
-use std::future::Future;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard};
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use std::{
+    fmt::Display,
+    future::Future,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+};
+use tokio::{
+    sync::{RwLock, RwLockReadGuard},
+    task::JoinHandle,
+    time::{Duration, sleep},
+};
 
+/// Lifecycle state of a wrapped reconnecting connection.
 #[derive(Debug, FromPrimitive, Serialize)]
 pub enum ConnectionStatus {
+    /// First connect attempt is in flight.
     Connecting,
+    /// Connection is live.
     Connected,
+    /// Live connection just dropped; supervisor is about to retry.
     Failing,
+    /// Retry attempt is in flight.
     Reconnecting,
 }
 
@@ -61,8 +72,14 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
             loop {
                 tracing::info!("connection reset triggered");
 
+                // Publish "disconnected" so concurrent readers get
+                // `None` (and respond "Not yet connected" promptly)
+                // instead of parking on the writer while we sleep
+                // through backoff. The write is brief; subsequent
+                // attempts run without any lock held.
+                *task_current.write().await = None;
+
                 let mut backoff = backoff_factory();
-                let mut lock = task_current.write().await;
                 let (connection, reset) = 'inner: loop {
                     match connect().await {
                         Ok(success) => {
@@ -78,8 +95,11 @@ impl<T: 'static + Send + Sync> Reconnect<T> {
                     }
                 };
 
-                *lock = Some(connection);
-                drop(lock);
+                // Briefly take the writer to publish the new
+                // connection, then drop it before awaiting reset so
+                // queries against the now-live connection get the
+                // read lock immediately.
+                *task_current.write().await = Some(connection);
                 reset.await;
                 task_status.store(ConnectionStatus::Reconnecting as u8, Ordering::Relaxed);
             }

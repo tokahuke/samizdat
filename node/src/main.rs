@@ -1,6 +1,11 @@
+//! Samizdat node: the peer process that publishes, serves and replicates
+//! content over the federation.
+
 #![feature(try_blocks)]
 
 mod access;
+mod cap;
+mod chunk_protect;
 mod cli;
 mod db;
 mod http;
@@ -33,7 +38,8 @@ async fn init_hubs() -> Result<(), crate::Error> {
     Ok(())
 }
 
-/// Retrieves a reference to the list of hubs. Needs to be called just after initialization.
+/// Retrieves a reference to the list of hubs. Needs to be called just after
+/// initialization.
 pub fn hubs<'a>() -> &'a Hubs {
     HUBS.get().expect("hubs not initialized")
 }
@@ -60,6 +66,10 @@ async fn main() -> Result<(), crate::Error> {
     // any task that calls `ObjectRef::do_import` is spawned; otherwise we'd race a
     // legitimate in-flight import.
     crate::vacuum::sweep_crash_leaked_chunks()?;
+
+    // Seed `NODE_STORAGE_CAP` from on-disk truth before anything else
+    // tries to reserve against it. See `docs/cap-model.md`.
+    crate::cap::reconstruct_from_disk()?;
 
     init_hubs().await?;
 

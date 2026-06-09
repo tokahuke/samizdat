@@ -1,19 +1,18 @@
-//! A sampling scheme based on the idea of Thompson Sampling to make the hub capable of
-//! discerning the best node in the network. This is a very simple implementation and can
-//! be vastly improved upon in the future.
+//! Thompson-sampling-inspired scheme the hub uses to pick which node to ask next.
+//! Bare-bones today; plenty of room to refine.
 
 use rand::distributions::Distribution;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BinaryHeap};
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::sync::RwLock;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{BTreeMap, BinaryHeap},
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, RwLock},
+    time::{Duration, Instant},
+};
 
 use samizdat_common::heap_entry::HeapEntry;
 
-use crate::models::StatisticsLog;
-use crate::models::{Id, Indexable};
+use crate::models::{Id, Indexable, StatisticsLog};
 
 use super::Node;
 
@@ -198,8 +197,9 @@ pub struct StatisticsSnapshot {
 }
 
 /// A representation of the ongoing act of sending a request and waiting for the final
-/// outcome. If this experiment is dropped without a call to [`Experiment::end_with_success`],
-/// this marks that the node was not able to respond in time.
+/// outcome. If this experiment is dropped without a call to
+/// [`Experiment::end_with_success`], this marks that the node was not able to respond in
+/// time.
 pub struct Experiment {
     /// The statistics object that this experiment relates to.
     statistics: Statistics,
@@ -230,7 +230,11 @@ pub(super) fn sample<S: PrioritySampler>(
         // park it permanently at the front of the queue. Clamp non-finite
         // values to the worst priority so honest signals always win.
         let raw = sampler.sample_priority(node) * 1e6;
-        let priority = if raw.is_finite() { raw as i64 } else { i64::MIN };
+        let priority = if raw.is_finite() {
+            raw as i64
+        } else {
+            i64::MIN
+        };
 
         queue.push(HeapEntry {
             priority,

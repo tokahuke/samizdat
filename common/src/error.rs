@@ -1,3 +1,6 @@
+//! The workspace-wide error type. Every fallible API on this crate, the
+//! node, the hub and the CLI ultimately returns `Result<T, Error>`.
+
 use base64_url::base64;
 use std::io;
 use tarpc::client::RpcError;
@@ -54,7 +57,10 @@ pub enum Error {
     /// visible state of a series.
     #[error("stale edition: candidate timestamp {candidate} is not after current latest {current}")]
     StaleEdition {
+        /// Timestamp on the rejected peer-supplied edition.
         candidate: chrono::DateTime<chrono::Utc>,
+        /// Timestamp on the locally-known latest edition we already
+        /// trusted; the candidate must be strictly after this.
         current: chrono::DateTime<chrono::Utc>,
     },
 }

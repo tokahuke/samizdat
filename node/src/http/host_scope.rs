@@ -9,12 +9,16 @@
 //! attacker cannot spoof Host into something the routing logic would
 //! mis-interpret.
 
-use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
-use axum::response::{IntoResponse, Response};
+use axum::{
+    extract::FromRequestParts,
+    http::request::Parts,
+    response::{IntoResponse, Response},
+};
 use http::StatusCode;
-use samizdat_common::identity::{check_servable_identity, Reason};
-use samizdat_common::{Hash, Key};
+use samizdat_common::{
+    Hash, Key,
+    identity::{Reason, check_servable_identity},
+};
 
 /// Which origin the request is targeting. Produced by parsing the `Host`
 /// header; consumed by content / admin handlers.
@@ -85,15 +89,21 @@ impl IntoResponse for HostScopeRejection {
             ),
             HostScopeRejection::BadSeriesKey(label) => (
                 StatusCode::BAD_REQUEST,
-                format!("subdomain `{label}` has the `series-` prefix but the rest is not a valid key"),
+                format!(
+                    "subdomain `{label}` has the `series-` prefix but the rest is not a valid key"
+                ),
             ),
             HostScopeRejection::BadObjectHash(label) => (
                 StatusCode::BAD_REQUEST,
-                format!("subdomain `{label}` has the `object-` prefix but the rest is not a valid hash"),
+                format!(
+                    "subdomain `{label}` has the `object-` prefix but the rest is not a valid hash"
+                ),
             ),
             HostScopeRejection::BadCollectionHash(label) => (
                 StatusCode::BAD_REQUEST,
-                format!("subdomain `{label}` has the `collection-` prefix but the rest is not a valid hash"),
+                format!(
+                    "subdomain `{label}` has the `collection-` prefix but the rest is not a valid hash"
+                ),
             ),
             HostScopeRejection::BadEditionId(label) => (
                 StatusCode::BAD_REQUEST,
@@ -134,7 +144,15 @@ impl<S: Send + Sync> FromRequestParts<S> for HostScope {
 pub fn classify(raw: &str) -> Result<HostScope, HostScopeRejection> {
     let authority = http::uri::Authority::try_from(raw.trim())
         .map_err(|_| HostScopeRejection::Malformed(raw.to_owned()))?;
-    let host = authority.host().to_ascii_lowercase();
+    // `Authority::host()` returns IPv6 literals with the brackets included
+    // (`[::1]`, not `::1`). Strip them once here so downstream string
+    // comparisons see the canonical literal.
+    let raw_host = authority.host().to_ascii_lowercase();
+    let host = raw_host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .map(str::to_owned)
+        .unwrap_or(raw_host);
 
     if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         return Ok(HostScope::BareLoopback);
@@ -191,11 +209,26 @@ mod tests {
 
     #[test]
     fn classifies_bare_localhost() {
-        assert!(matches!(classify("localhost").unwrap(), HostScope::BareLoopback));
-        assert!(matches!(classify("localhost:4510").unwrap(), HostScope::BareLoopback));
-        assert!(matches!(classify("127.0.0.1:4510").unwrap(), HostScope::BareLoopback));
-        assert!(matches!(classify("[::1]:4510").unwrap(), HostScope::BareLoopback));
-        assert!(matches!(classify("[::1]").unwrap(), HostScope::BareLoopback));
+        assert!(matches!(
+            classify("localhost").unwrap(),
+            HostScope::BareLoopback
+        ));
+        assert!(matches!(
+            classify("localhost:4510").unwrap(),
+            HostScope::BareLoopback
+        ));
+        assert!(matches!(
+            classify("127.0.0.1:4510").unwrap(),
+            HostScope::BareLoopback
+        ));
+        assert!(matches!(
+            classify("[::1]:4510").unwrap(),
+            HostScope::BareLoopback
+        ));
+        assert!(matches!(
+            classify("[::1]").unwrap(),
+            HostScope::BareLoopback
+        ));
     }
 
     #[test]

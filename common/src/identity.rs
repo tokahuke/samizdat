@@ -23,19 +23,29 @@
 /// Why a candidate identity handle is unservable as a subdomain.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Reason {
+    /// The candidate string was empty.
     #[error("identity is empty")]
     Empty,
+    /// Candidate exceeds the 63-byte DNS-label limit; payload is the
+    /// length actually seen.
     #[error("identity is {0} bytes; DNS labels are limited to 63 bytes")]
     TooLong(usize),
-    /// Carries the offending byte so the user knows what to remove.
+    /// Candidate contains a byte outside `[a-z0-9-]`. Carries the
+    /// offending byte so the user knows what to remove.
     #[error("{}", bad_byte_message(*.0))]
     BadByte(u8),
+    /// Candidate starts with `-`, which DNS forbids.
     #[error("identity starts with '-'")]
     LeadingHyphen,
+    /// Candidate ends with `-`, which DNS forbids.
     #[error("identity ends with '-'")]
     TrailingHyphen,
+    /// Candidate matches a reserved DNS label (e.g. `localhost`,
+    /// `example`).
     #[error("identity is a reserved DNS label")]
     Reserved,
+    /// Candidate is purely numeric; rejected to avoid ambiguity with
+    /// numeric host literals.
     #[error("identity is all digits; reserved against numeric host ambiguity")]
     AllNumeric,
     /// Carries the offending type-marker word so the error message tells the
@@ -111,7 +121,7 @@ pub fn check_servable_identity(s: &str) -> Result<(), Reason> {
         return Err(Reason::TrailingHyphen);
     }
 
-    if RESERVED_LABELS.iter().any(|r| *r == s) {
+    if RESERVED_LABELS.contains(&s) {
         return Err(Reason::Reserved);
     }
 
@@ -139,8 +149,15 @@ mod tests {
 
     #[test]
     fn happy_path_accepts_realistic_identities() {
-        for ok in &["samizdat-blog", "alice", "blog-2026", "abc", "a-b-c-d", "x", "get-samizdat"]
-        {
+        for ok in &[
+            "samizdat-blog",
+            "alice",
+            "blog-2026",
+            "abc",
+            "a-b-c-d",
+            "x",
+            "get-samizdat",
+        ] {
             assert!(check_servable_identity(ok).is_ok(), "expected ok: {ok}");
         }
     }
@@ -190,8 +207,14 @@ mod tests {
 
     #[test]
     fn rejects_leading_and_trailing_hyphen() {
-        assert_eq!(check_servable_identity("-alice"), Err(Reason::LeadingHyphen));
-        assert_eq!(check_servable_identity("alice-"), Err(Reason::TrailingHyphen));
+        assert_eq!(
+            check_servable_identity("-alice"),
+            Err(Reason::LeadingHyphen)
+        );
+        assert_eq!(
+            check_servable_identity("alice-"),
+            Err(Reason::TrailingHyphen)
+        );
     }
 
     #[test]

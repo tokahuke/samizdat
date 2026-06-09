@@ -1,18 +1,22 @@
 //! Subscriptions API.
 
-use axum::extract::Path;
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    extract::Path,
+    routing::{delete, get, post},
+};
 use futures::FutureExt;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
+use samizdat_common::db::{Droppable, readonly_tx, writable_tx};
 use serde_derive::Deserialize;
 
 use samizdat_common::Key;
 
-use crate::access::AccessRight;
-use crate::http::ApiResponse;
-use crate::models::{Subscription, SubscriptionKind, SubscriptionRef};
-use crate::security_scope;
+use crate::{
+    access::AccessRight,
+    http::ApiResponse,
+    models::{BookmarkType, SeriesRef, Subscription, SubscriptionKind, SubscriptionRef},
+    security_scope,
+};
 
 /// The entrypoint of the subscriptions API.
 pub fn api() -> Router {
@@ -21,6 +25,13 @@ pub fn api() -> Router {
         public_key: String,
         #[serde(default)]
         kind: SubscriptionKind,
+        /// Cap on total bytes the subscribed series's current edition
+        /// may occupy on this node, expressed in megabytes. `None`
+        /// falls back to the node's `default_max_edition_size_mb`
+        /// config. The node converts to bytes internally; the wire
+        /// stays in human units.
+        #[serde(default)]
+        max_size_mb: Option<u64>,
     }
 
     Router::new()
@@ -30,10 +41,11 @@ pub fn api() -> Router {
             "/",
             post(|Json(request): Json<PostSubscriptionRequest>| {
                 async move {
+                    let max_bytes = request.max_size_mb.map(|mb| mb.saturating_mul(1_000_000));
                     let subscription = writable_tx(|tx| {
                         SubscriptionRef::build(
                             tx,
-                            Subscription::new(request.public_key.parse()?, request.kind),
+                            Subscription::new(request.public_key.parse()?, request.kind, max_bytes),
                         )
                     });
                     Ok(subscription?.public_key.to_string())
@@ -62,14 +74,39 @@ pub fn api() -> Router {
             .layer(security_scope!(AccessRight::ManageSubscriptions)),
         )
         .route(
-            // Removes a subscription.
+            // Removes a subscription. Atomically releases the Reference
+            // bookmarks `SeriesRef::advance` placed on the subscribed
+            // series's last edition; without this the vacuum cannot
+            // reclaim the storage after an unsubscribe.
             "/{key}",
             delete(|Path(public_key): Path<String>| {
                 async move {
                     let public_key: Key = public_key.parse()?;
-                    let subscription = SubscriptionRef::new(public_key);
-                    let existed = readonly_tx(|tx| subscription.get(tx))?.is_some();
-                    subscription.drop_if_exists()?;
+                    let subscription = SubscriptionRef::new(public_key.clone());
+                    let series = SeriesRef::new(public_key);
+
+                    let existed = writable_tx(|tx| {
+                        let existed = subscription.exists(tx)?;
+                        if !existed {
+                            return Ok(false);
+                        }
+
+                        if let Some(edition) = series.get_last_edition(tx)? {
+                            // The Vec is forced: `list_objects` borrows `tx`
+                            // immutably for the iterator while
+                            // `.bookmark(...).unmark(tx)` needs &mut tx.
+                            // Collecting first releases the immutable borrow.
+                            let collection = edition.collection();
+                            let objects: Vec<_> = collection.list_objects(tx)?.collect();
+                            for object in objects {
+                                object?.bookmark(BookmarkType::Reference).unmark(tx)?;
+                            }
+                        }
+
+                        subscription.drop_if_exists_with(tx)?;
+                        Ok(true)
+                    })?;
+
                     Ok(existed)
                 }
                 .map(ApiResponse)

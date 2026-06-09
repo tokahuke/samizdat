@@ -1,20 +1,22 @@
-//! The Samizdat Hub database, based on top of RocksDb.
+//! The Samizdat DB layer, backed by LMDB. Used by both the node and the
+//! hub.
 
 use lmdb::{Cursor, DatabaseFlags, Transaction, WriteFlags};
-use std::any::TypeId;
-use std::cell::RefCell;
-use std::fmt::Debug;
-use std::ops::{Bound, RangeBounds};
-use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::{
+    any::TypeId,
+    cell::RefCell,
+    fmt::Debug,
+    ops::{Bound, RangeBounds},
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
-/// Maximum lmdb size. Approx. 68GB; may be changed later...
+/// LMDB map size. About 68GB; may be raised later.
 const MAP_SIZE: usize = 1 << 36;
 static DB: OnceLock<Database> = OnceLock::new();
 
-/// Initializes the database at the suppiled path using the supplied table type. This
-/// function can only be called once per process and will panic at the second and
-/// consecutive invocations.
+/// Open the database at `root` using the supplied table type. Call once
+/// per process; the second call panics.
 pub fn init_db<T: Table>(root: &str) -> Result<(), crate::Error> {
     let database = Database::init::<T>(root)?;
     DB.set(database).expect("DB was already initialized");
@@ -147,11 +149,11 @@ where
         }
 
         let outcome = match ret {
-            Ok(value) => tx
-                .0
-                .commit()
-                .map(|()| value)
-                .map_err(|err| format!("cannot commit writable transaction: {err}").into()),
+            Ok(value) => {
+                tx.0.commit()
+                    .map(|()| value)
+                    .map_err(|err| format!("cannot commit writable transaction: {err}").into())
+            }
             Err(err) => Err(err),
         };
 
@@ -232,6 +234,8 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
     /// Returns the numeric discriminant for this table variant.
     fn discriminant(self) -> usize;
 
+    /// LMDB handle for this table variant. Asserts the table type
+    /// matches the one the DB was initialised with.
     #[inline]
     fn get_handle(self) -> lmdb::Database {
         assert_eq!(
@@ -258,6 +262,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    /// Whether `key` is present in the table.
     #[inline]
     fn has<Tx, K>(self, tx: &Tx, key: K) -> Result<bool, crate::Error>
     where
@@ -271,6 +276,7 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    /// Writes `value` under `key`, overwriting any existing entry.
     #[inline]
     fn put<K, V>(self, tx: &mut WritableTx, key: K, value: V) -> Result<(), crate::Error>
     where
@@ -311,6 +317,9 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
             .map_err(|err| format!("db map (write step) failed: {err}").into())
     }
 
+    /// Build a range-iterator handle for the half-open / inclusive
+    /// `range`. The actual scan happens inside the returned handle's
+    /// `for_each` / `collect`.
     #[inline]
     #[must_use]
     fn range<R, K>(self, range: R) -> TableRange<Self, R, K>
@@ -325,6 +334,8 @@ pub trait Table: Copy + strum::VariantArray + Into<&'static str> {
         }
     }
 
+    /// Build a prefix-iterator handle for keys starting with `prefix`.
+    /// The scan happens inside the returned handle.
     #[inline]
     #[must_use]
     fn prefix<P>(self, prefix: P) -> TablePrefix<Self, P>
@@ -361,11 +372,7 @@ where
     /// Iterates over entries in range; the closure returns `Ok(Some(value))` to break
     /// early, `Ok(None)` to continue, or `Err(_)` to abort with that error. Returns the
     /// break value if any, or `None` after exhausting the range.
-    pub fn for_each<Tx, F, U>(
-        self,
-        tx: &Tx,
-        mut map: F,
-    ) -> Result<Option<U>, crate::Error>
+    pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Result<Option<U>, crate::Error>
     where
         Tx: TxHandle,
         F: FnMut(&[u8], &[u8]) -> Result<Option<U>, crate::Error>,
@@ -400,6 +407,8 @@ where
         Ok(None)
     }
 
+    /// Run the range scan to completion, applying `map` to each
+    /// `(key, value)` pair and collecting the results into a `C`.
     pub fn collect<Tx, C, F, V>(self, tx: &Tx, mut map: F) -> Result<C, crate::Error>
     where
         Tx: TxHandle,
@@ -450,6 +459,9 @@ where
     T: Table,
     P: AsRef<[u8]>,
 {
+    /// Delete every key starting with this prefix. Two-phase: collect
+    /// the keys first, then delete them, to avoid invalidating the
+    /// cursor mid-iteration.
     pub fn delete(self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         let mut to_delete = vec![];
         {
@@ -471,11 +483,10 @@ where
         Ok(())
     }
 
-    pub fn for_each<Tx, F, U>(
-        self,
-        tx: &Tx,
-        mut map: F,
-    ) -> Result<Option<U>, crate::Error>
+    /// Iterate keys starting with this prefix; `map` returns
+    /// `Ok(Some(value))` to break early, `Ok(None)` to continue, or
+    /// `Err(_)` to abort.
+    pub fn for_each<Tx, F, U>(self, tx: &Tx, mut map: F) -> Result<Option<U>, crate::Error>
     where
         Tx: TxHandle,
         F: FnMut(&[u8], &[u8]) -> Result<Option<U>, crate::Error>,
@@ -498,6 +509,8 @@ where
         Ok(None)
     }
 
+    /// Run the prefix scan to completion, applying `map` to each
+    /// `(key, value)` pair and collecting the results into a `C`.
     pub fn collect<Tx, C, F, V>(self, tx: &Tx, mut map: F) -> Result<C, crate::Error>
     where
         Tx: TxHandle,
@@ -526,14 +539,22 @@ pub trait Migration<T>: Debug
 where
     T: Table,
 {
+    /// The migration to run after this one, or `None` if this is the
+    /// terminal migration in the chain.
     fn next(&self) -> Option<Box<dyn Migration<T>>>;
+    /// Apply this migration. Called inside a writable transaction;
+    /// success commits, failure rolls back.
     fn up(&self, tx: &mut WritableTx) -> Result<(), crate::Error>;
 
+    /// Whether this migration has already been applied (recorded in
+    /// `T::MIGRATIONS`).
     fn is_up(&self, tx: &mut WritableTx) -> Result<bool, crate::Error> {
         let migration_key = format!("{self:?}");
         T::MIGRATIONS.has(tx, migration_key)
     }
 
+    /// Apply this migration and any chained successors, skipping ones
+    /// already recorded as applied.
     fn migrate(&self) -> Result<(), crate::Error> {
         writable_tx(|tx| {
             if !self.is_up(tx)? {
@@ -614,6 +635,7 @@ pub mod test_harness {
         /// # Panics
         ///
         /// Panics if a previous call initialized the DB with a different `Table` type.
+        #[allow(clippy::new_without_default)]
         pub fn new() -> Self {
             let guard = TEST_LOCK
                 .lock()
@@ -621,8 +643,8 @@ pub mod test_harness {
             let tempdir = tempfile::TempDir::new().expect("create tempdir");
 
             if DB.get().is_none() {
-                let database = Database::init::<T>(&tempdir.path().to_string_lossy())
-                    .expect("init test DB");
+                let database =
+                    Database::init::<T>(&tempdir.path().to_string_lossy()).expect("init test DB");
                 DB.set(database).ok();
                 T::base_migration()
                     .migrate()
@@ -715,10 +737,9 @@ mod tests {
             })
             .unwrap();
 
-            let got = readonly_tx(|tx| {
-                TestTable::ScratchA.get(tx, b"k", |bytes| Ok(bytes.to_vec()))
-            })
-            .unwrap();
+            let got =
+                readonly_tx(|tx| TestTable::ScratchA.get(tx, b"k", |bytes| Ok(bytes.to_vec())))
+                    .unwrap();
             assert_eq!(got, Some(b"v".to_vec()));
 
             writable_tx(|tx| {
@@ -728,10 +749,7 @@ mod tests {
             })
             .unwrap();
 
-            let after = readonly_tx(|tx| {
-                TestTable::ScratchA.has(tx, b"k")
-            })
-            .unwrap();
+            let after = readonly_tx(|tx| TestTable::ScratchA.has(tx, b"k")).unwrap();
             assert!(!after);
         });
     }
@@ -752,7 +770,7 @@ mod tests {
     fn get_propagates_transform_error() {
         TestDb::<TestTable>::with(|| {
             writable_tx(|tx| {
-                TestTable::ScratchB.put(tx, b"bad", &[0u8, 1, 2])?;
+                TestTable::ScratchB.put(tx, b"bad", [0u8, 1, 2])?;
                 Ok(())
             })
             .unwrap();

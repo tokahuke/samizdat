@@ -1,20 +1,22 @@
-//! Default configuration for QUIC used by Samizdat. Samizdat has its own way of dealing
-//! with security. Therefore, much of the complexity involving security in QUIC can be igonred.
+//! Default QUIC configuration. Samizdat handles its own end-to-end security, so most
+//! of QUIC's TLS surface is intentionally bypassed.
 
-use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{
     ClientConfig, Connection, Endpoint, IdleTimeout, ServerConfig, TransportConfig, VarInt,
+    crypto::rustls::QuicClientConfig,
 };
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
-use std::net::SocketAddr;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 /// Default server name used for all QUIC connections ("I am Spartacus!")
 const DEFAULT_SERVER_NAME: &str = "spartacus";
 
-/// We don't need all trust built into QUIC. Using "dangerous configuration", which is simpler.
-/// Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
+/// We don't need all trust built into QUIC. Using "dangerous configuration", which is
+/// simpler. Taken from the tutorial: https://quinn-rs.github.io/quinn/quinn/certificate.html
 ///
 /// Implementation of `ServerCertVerifier` that verifies everything as trustworthy.
 #[derive(Debug)]
@@ -88,7 +90,8 @@ fn install_crypto_provider() {
 /// Creates a default transport configuration for QUIC.
 ///
 /// # Arguments
-/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
+/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive
+///   will be unilaterally terminated after the idle timeout.
 fn transport_config(keep_alive: bool) -> TransportConfig {
     const IDLE_TIMEOUT_MS: u32 = 10_000;
 
@@ -96,7 +99,7 @@ fn transport_config(keep_alive: bool) -> TransportConfig {
     transport.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(IDLE_TIMEOUT_MS))));
 
     if keep_alive {
-        transport.keep_alive_interval(Some(Duration::from_millis(IDLE_TIMEOUT_MS as u64 / 4)));
+        transport.keep_alive_interval(Some(Duration::from_millis(u64::from(IDLE_TIMEOUT_MS) / 4)));
     } else {
         transport.keep_alive_interval(None);
     }
@@ -107,7 +110,8 @@ fn transport_config(keep_alive: bool) -> TransportConfig {
 /// Creates a default client configuration for QUIC.
 ///
 /// # Arguments
-/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
+/// * `keep_alive` - Whether to enable keep-alive pinging. Connections without keep-alive
+///   will be unilaterally terminated after the idle timeout.
 fn client_config(keep_alive: bool) -> ClientConfig {
     install_crypto_provider();
 
@@ -150,7 +154,8 @@ pub fn new_default(bind_addr: SocketAddr) -> Endpoint {
 /// # Arguments
 /// * `endpoint` - The local QUIC endpoint to use for the connection
 /// * `remote_addr` - The remote address to connect to
-/// * `keep_alive` -  Whether to enable keep-alive pinging. Connections without keep-alive will be unilaterally terminated after the idle timeout.
+/// * `keep_alive` -  Whether to enable keep-alive pinging. Connections without keep-alive
+///   will be unilaterally terminated after the idle timeout.
 pub async fn connect(
     endpoint: &Endpoint,
     remote_addr: SocketAddr,

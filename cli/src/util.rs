@@ -1,17 +1,14 @@
-//! General utilities for the CLI application.
-//!
-//! This module provides utility functions and types for common operations across the CLI.
+//! Small utilities used across the CLI.
 
 use std::collections::BTreeMap;
 
-/// A constant marker used for visual emphasis in CLI output. It's a red asterisk.
+/// Red bold asterisk, used as a visual marker in CLI output.
 pub const MARKER: &str = "\u{001b}[1m\u{001b}[31m*\u{001b}[0m";
 
-/// Prints a list of paths in a tree-like structure.
+/// Prints a list of paths as a tree, like the `tree(1)` command.
 ///
-/// Takes a list of paths and a delimiter character, then outputs them in a hierarchical
-/// format similar to the `tree` command, with branch indicators (├── and └──) showing the
-/// relationships between path segments.
+/// Splits each path on `delimiter` and groups by shared prefix, drawing the
+/// branches with `|--` style indicators between segments.
 pub fn print_paths(paths: &[String], delimiter: char) {
     struct Node(BTreeMap<String, Node>);
 
@@ -50,4 +47,3 @@ pub fn print_paths(paths: &[String], delimiter: char) {
 
     print_level(&tree, vec![]);
 }
-

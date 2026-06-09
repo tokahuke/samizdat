@@ -1,7 +1,5 @@
-//! Connection information model for tracking node connections to the hub.
-//!
-//! This module provides functionality for storing and managing information about
-//! connected nodes, including their connection IDs and network addresses.
+//! Records of nodes that have connected to the hub: connection id and
+//! socket address, keyed for later lookup.
 
 use serde_derive::{Deserialize, Serialize};
 use std::net::SocketAddr;

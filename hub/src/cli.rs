@@ -53,8 +53,8 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_NODE", long, default_value = "12")]
     #[serde_inline_default(12)]
     pub max_queries_per_node: usize,
-    /// The inverse of the interval that we delay if a node is requesting too many queries.
-    /// (e.g., 2 => delay 500ms).
+    /// The inverse of the interval that we delay if a node is requesting too many
+    /// queries. (e.g., 2 => delay 500ms).
     #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_NODE", long, default_value = "12")]
     #[serde_inline_default(12.0)]
     pub max_query_rate_per_node: f64,
@@ -63,8 +63,8 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_HUB", long, default_value = "120")]
     #[serde_inline_default(120)]
     pub max_queries_per_hub: usize,
-    /// The maximum number of requests per second that other hubs can query this hub. This is sent
-    /// to the peers as part of the hub-as-node configuration.
+    /// The maximum number of requests per second that other hubs can query this hub. This
+    /// is sent to the peers as part of the hub-as-node configuration.
     #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_HUB", long, default_value = "120")]
     #[serde_inline_default(120.0)]
     pub max_query_rate_per_hub: f64,
@@ -77,8 +77,9 @@ pub struct Cli {
     #[serde(default)]
     pub partners: Option<Vec<String>>,
     /// The mode of resolution to be used with domain names. Must be one of `ensure-ipv4`,
-    /// `ensure-ipv6`, `prefer-ipv6`, `prefer-ipv4` or `use-both`. Note that the `prefer-*` options
-    /// will resolve to the other IP version if no address is available for the current version.
+    /// `ensure-ipv6`, `prefer-ipv6`, `prefer-ipv4` or `use-both`. Note that the
+    /// `prefer-*` options will resolve to the other IP version if no address is
+    /// available for the current version.
     #[structopt(env = "SAMIZDAT_RESOLUTION_MODE", long, default_value = "use-both")]
     #[serde_inline_default(AddrResolutionMode::UseBoth)]
     pub resolution_mode: AddrResolutionMode,

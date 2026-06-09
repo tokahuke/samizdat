@@ -1,26 +1,26 @@
-//! Implements the RPC server part of the Hub API.
+//! Server side of the Hub RPC API.
 
 use futures::prelude::*;
-use std::net::SocketAddr;
-use std::pin::pin;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{net::SocketAddr, pin::pin, sync::Arc, time::Instant};
 use tarpc::context;
-use tokio::sync::{Mutex, Semaphore};
-use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
+use tokio::{
+    sync::{Mutex, Semaphore},
+    time::{Duration, Interval, MissedTickBehavior, interval},
+};
 
-use samizdat_common::address::{ChannelAddr, ChannelId};
-use samizdat_common::keyed_channel::KeyedChannel;
-use samizdat_common::rpc::*;
+use samizdat_common::{
+    address::{ChannelAddr, ChannelId},
+    keyed_channel::KeyedChannel,
+    rpc::*,
+};
 
-use crate::cli::cli;
-use crate::models::CandidateLog;
-use crate::models::ConnectionLog;
-use crate::models::QueryLog;
-use crate::models::{Id, Indexable};
-use crate::rpc::ROOM;
+use crate::{
+    cli::cli,
+    models::{CandidateLog, ConnectionLog, Id, Indexable, QueryLog},
+    rpc::ROOM,
+};
 
-use super::{announce_edition, candidates_for_resolution, edition_for_request, REPLAY_RESISTANCE};
+use super::{REPLAY_RESISTANCE, announce_edition, candidates_for_resolution, edition_for_request};
 
 /// The Hub server side of a client-server RPC connection.
 struct HubServerInner {
@@ -60,8 +60,8 @@ impl HubServer {
         }))
     }
 
-    /// Does the whole API throttling thing. Using `Box` denies any allocations to the throttled
-    /// client. This may mitigate DoS.
+    /// Does the whole API throttling thing. Using `Box` denies any allocations to the
+    /// throttled client. This may mitigate DoS.
     async fn throttle<'a, F, Fut, T>(&'a self, f: F) -> T
     where
         F: 'a + Send + FnOnce(&'a Self) -> Fut,

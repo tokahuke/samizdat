@@ -1,7 +1,5 @@
-//! Models for storing and managing data in the hub.
-//!
-//! This module contains the data structures and traits used to represent and manipulate
-//! various types of information tracked by the hub.
+//! Models for the entities the hub tracks: per-IP blacklist, connection log,
+//! query log, candidate log, statistics log.
 
 mod blacklisted_ip;
 mod candidate_log;
@@ -15,14 +13,14 @@ pub use connection_log::ConnectionLog;
 pub use query_log::QueryLog;
 pub use statistics_log::StatisticsLog;
 
-use samizdat_common::db::Table as _;
-use samizdat_common::db::TableRange;
+use samizdat_common::db::{Table as _, TableRange};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
-use std::ops::Range;
-use std::sync::Mutex as StdMutex;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use std::{
+    ops::Range,
+    sync::Mutex as StdMutex,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use samizdat_common::db::writable_tx;
 
@@ -172,7 +170,12 @@ mod tests {
             ids.push(generate_id());
         }
         for w in ids.windows(2) {
-            assert!(w[0] < w[1], "ids not strictly increasing: {} >= {}", w[0], w[1]);
+            assert!(
+                w[0] < w[1],
+                "ids not strictly increasing: {} >= {}",
+                w[0],
+                w[1]
+            );
         }
     }
 
@@ -191,24 +194,24 @@ mod tests {
 
         // Ascending: lexicographic order matches integer order.
         let mut asc: Vec<[u8; 8]> = ids.iter().map(|i| i.to_bytes(false)).collect();
-        asc.sort();
-        let asc_ids: Vec<Id> = asc
-            .iter()
-            .map(|b| Id(u64::from_be_bytes(*b)))
-            .collect();
+        asc.sort_unstable();
+        let asc_ids: Vec<Id> = asc.iter().map(|b| Id(u64::from_be_bytes(*b))).collect();
         let mut expected = ids.clone();
         expected.sort();
         assert_eq!(asc_ids, expected, "ascending bytes did not sort by id");
 
         // Descending: lexicographic order is reverse of integer order.
         let mut desc: Vec<[u8; 8]> = ids.iter().map(|i| i.to_bytes(true)).collect();
-        desc.sort();
+        desc.sort_unstable();
         let desc_ids: Vec<Id> = desc
             .iter()
             .map(|b| Id(u64::from_be_bytes(*b) ^ u64::MAX))
             .collect();
         let mut expected_desc = ids;
         expected_desc.sort_by(|a, b| b.cmp(a));
-        assert_eq!(desc_ids, expected_desc, "descending bytes did not sort by reversed id");
+        assert_eq!(
+            desc_ids, expected_desc,
+            "descending bytes did not sort by reversed id"
+        );
     }
 }

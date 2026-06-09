@@ -1,45 +1,44 @@
 //! The `Samizdat.toml` manifest format.
 //!
-//! This module handles the configuration files for Samizdat projects, managing both public
-//! (`Samizdat.toml`) and private (`.Samizdat.priv`) manifests. These files store project
-//! metadata, build settings, and cryptographic keys for series management.
+//! Handles both the public manifest (`Samizdat.toml`, project metadata
+//! and build settings) and the private one (`.Samizdat.priv`, series
+//! keypairs). The private one is secrets-only and must be in
+//! `.gitignore`.
 
 use askama::Template;
 use serde_derive::Deserialize;
-use std::path::PathBuf;
-use std::process::Command;
-use std::{fs, io};
+use std::{fs, io, path::PathBuf, process::Command};
 
 use samizdat_common::{Key, PrivateKey};
 
 use crate::api;
 
-/// Template for generating new Samizdat.toml files.
+/// Template for new `Samizdat.toml` files.
 #[derive(askama::Template)]
 #[template(path = "Samizdat.toml.txt")]
 pub struct ManifestTemplate<'a> {
     /// Node-local nickname for the series owner.
     pub nickname: &'a str,
-    /// Public key for the series
+    /// Public key for the series.
     pub public_key: &'a Key,
-    /// Time-to-live duration for series content
+    /// TTL for series content, as a human-readable duration string.
     pub ttl: &'a str,
 }
 
-/// Configuration for a Samizdat project.
+/// A loaded Samizdat project manifest.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Manifest {
-    /// Series-specific configuration
+    /// Series configuration.
     pub series: Series,
-    /// Debug environment settings
+    /// Debug-environment overrides.
     pub debug: Debug,
-    /// Build process configuration
+    /// How to build this project.
     pub build: Build,
 }
 
 impl Manifest {
-    /// Possible filenames for the manifest, in order of preference.
+    /// Manifest filenames the loader tries, in order of preference.
     const FILENAME_HIERARCHY: [&'static str; 4] = [
         "./Samizdat.toml",
         "./Samizdat.tml",
@@ -47,8 +46,8 @@ impl Manifest {
         "./samizdat.tml",
     ];
 
-    /// Attempts to find and load an existing manifest file. Returns `None` if no
-    /// manifest is found.
+    /// Load the manifest from the current directory. Returns `None` if
+    /// none of the candidate filenames exist.
     pub fn find_opt() -> Result<Option<Manifest>, anyhow::Error> {
         for filename in Manifest::FILENAME_HIERARCHY {
             match fs::read_to_string(filename) {
@@ -61,10 +60,8 @@ impl Manifest {
         Ok(None)
     }
 
-    /// Creates a new manifest and associated debug keypair.
-    ///
-    /// # Arguments
-    /// * `nickname` - Node-local nickname for the series owner.
+    /// Create a new manifest plus the associated debug keypair. Bails if
+    /// a manifest already exists in the current directory.
     pub async fn create(nickname: &str) -> Result<(Manifest, PrivateKey), anyhow::Error> {
         if Manifest::find_opt()?.is_some() {
             anyhow::bail!("`Samizdat.toml` already exists.");
@@ -101,25 +98,26 @@ impl Manifest {
         ))
     }
 
-    /// Executes the build process according to manifest configuration.
+    /// Run the build defined by the manifest. `is_release` switches
+    /// between the release and debug build scripts.
     pub fn run_build(&self, is_release: bool) -> Result<(), anyhow::Error> {
         self.build.run(&self.series.public_key, is_release)
     }
 }
 
-/// Series-specific configuration settings.
+/// `[series]` section of the manifest.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Series {
     /// Node-local nickname for this series owner.
     pub nickname: String,
-    /// Public key for the series
+    /// Public key for the series.
     pub public_key: String,
-    /// Optional time-to-live duration for series content
+    /// Optional TTL for series content (human-readable duration).
     pub ttl: Option<String>,
 }
 
-/// Debug environment configuration.
+/// `[debug]` section of the manifest.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Debug {
@@ -127,32 +125,29 @@ pub struct Debug {
     pub nickname: String,
 }
 
-/// Returns the default shell path.
-///
-/// Attempts to get the shell from the SHELL environment variable, falling back to
-/// "/bin/sh" if not set.
+/// Default shell: `$SHELL`, or `/bin/sh` if not set.
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
 }
 
-/// Build process configuration.
+/// `[build]` section of the manifest.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Build {
-    /// Base directory where Samizdat will read the produced content and create a
-    /// new edition of the series.
+    /// Directory Samizdat reads the produced content from when creating
+    /// a new edition of the series.
     pub base: PathBuf,
-    /// Command to run for release builds
+    /// Command for release builds.
     pub run: Option<String>,
-    /// Command to run for debug builds
+    /// Command for debug builds.
     pub run_debug: Option<String>,
-    /// Shell to use for running commands
+    /// Shell used to run the build command.
     #[serde(default = "default_shell")]
     pub shell: String,
 }
 
 impl Build {
-    /// Executes the build process with the specified configuration.
+    /// Run the build script and wait for it to finish.
     pub fn run(&self, public_key: &str, is_release: bool) -> Result<(), anyhow::Error> {
         let script = if is_release {
             self.run.as_ref()
@@ -181,35 +176,36 @@ impl Build {
     }
 }
 
-/// Template for generating new .Samizdat.priv files.
+/// Template for new `.Samizdat.priv` files.
 #[derive(askama::Template)]
 #[template(path = "Samizdat.priv.txt")]
 pub struct PrivateManifestTemplate<'a> {
-    /// Optional production private key
+    /// Optional production private key.
     pub private_key: Option<&'a PrivateKey>,
-    /// Debug environment private key
+    /// Debug-environment private key.
     pub private_key_debug: &'a PrivateKey,
-    /// Debug environment public key
+    /// Debug-environment public key.
     pub public_key_debug: &'a Key,
 }
 
-/// Private configuration for a Samizdat project.
+/// The secrets-only side of a Samizdat project manifest.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PrivateManifest {
-    /// Optional production private key
+    /// Optional production private key.
     pub private_key: Option<String>,
-    /// Debug environment private key
+    /// Debug-environment private key.
     pub private_key_debug: String,
-    /// Debug environment public key
+    /// Debug-environment public key.
     pub public_key_debug: String,
 }
 
 impl PrivateManifest {
-    /// Possible filenames for the private manifest, in order of preference.
+    /// Private-manifest filenames the loader tries.
     const FILENAME_HIERARCHY: [&'static str; 1] = ["./.Samizdat.priv"];
 
-    /// Attempts to find and load an existing private manifest file. Returns `None` if no
+    /// Load the private manifest from the current directory. Returns
+    /// `None` if no candidate filename exists.
     pub fn find_opt() -> Result<Option<PrivateManifest>, anyhow::Error> {
         for filename in PrivateManifest::FILENAME_HIERARCHY {
             match fs::read_to_string(filename) {
@@ -222,11 +218,9 @@ impl PrivateManifest {
         Ok(None)
     }
 
-    /// Creates a new private manifest with the specified keys.
-    ///
-    /// # Arguments
-    /// * `debug_nickname` - Node-local nickname for the debug series owner.
-    /// * `private_key` - The private key for the series owner
+    /// Create a new private manifest. The debug keypair is allocated by
+    /// the node; `private_key` is the optional production key (created
+    /// elsewhere). Bails if `.Samizdat.priv` already exists.
     pub async fn create(
         debug_nickname: &str,
         private_key: Option<&PrivateKey>,
@@ -257,14 +251,16 @@ impl PrivateManifest {
     }
 }
 
-/// Validates a series-owner nickname before it is rendered into `Samizdat.toml`.
+/// Validate a series-owner nickname before it gets rendered into
+/// `Samizdat.toml`.
 ///
-/// The Askama template uses the no-op `Text` escaper because the output is
-/// TOML, not HTML; the nickname is dropped raw inside `nickname = "{{ nickname }}"`.
-/// If we let through `"`, `\`, or newlines we either produce a malformed file or
-/// allow an attacker (or a careless directory naming) to inject extra TOML
-/// keys. The allowed alphabet is the same one paths/URLs use, plus a few
-/// punctuation marks; anything more exotic is rejected.
+/// The Askama template uses the no-op `Text` escaper because the output
+/// is TOML, not HTML; the nickname is dropped raw inside
+/// `nickname = "{{ nickname }}"`. Letting `"`, `\`, or newlines through
+/// would produce a malformed file or let a careless directory name
+/// (or an attacker) inject extra TOML keys. Allowed: the same alphabet
+/// paths and URLs use, plus a few punctuation marks. Anything else is
+/// rejected.
 fn validate_nickname(nickname: &str) -> Result<(), anyhow::Error> {
     if nickname.is_empty() {
         anyhow::bail!("nickname must not be empty");
@@ -273,8 +269,7 @@ fn validate_nickname(nickname: &str) -> Result<(), anyhow::Error> {
         anyhow::bail!("nickname is too long (max 128 chars)");
     }
     for c in nickname.chars() {
-        let ok = c.is_ascii_alphanumeric()
-            || matches!(c, '-' | '_' | '.' | '/' | ' ');
+        let ok = c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ' ');
         if !ok {
             anyhow::bail!(
                 "nickname contains disallowed character {c:?}; \
@@ -285,9 +280,9 @@ fn validate_nickname(nickname: &str) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Writes a file containing secret material. On Unix the file is created mode
-/// 0o600 (owner read/write only). On other platforms we still set `create_new`
-/// to avoid clobbering an existing file by mistake.
+/// Write a file containing secret material. On Unix the file is created
+/// mode 0o600 (owner read/write only). Elsewhere, `create_new` keeps us
+/// from clobbering an existing file by accident.
 fn write_priv_file(path: &str, contents: &[u8]) -> io::Result<()> {
     use std::io::Write;
     let mut opts = fs::OpenOptions::new();

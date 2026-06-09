@@ -1,21 +1,21 @@
-//! Provides address-related types and functionality for the Samizdat network.
-//!
-//! This module contains definitions for channel addresses, socket addresses, and IP address
-//! resolution modes used in peer-to-peer communication.
+//! Address types used in Samizdat's peer-to-peer transport: channel
+//! addresses, channel ids, and DNS resolution modes.
 
 use serde_derive::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
-use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
+use std::{
+    fmt::{self, Debug, Display},
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+};
 
 use crate::Hash;
 
-/// Represents a channel for a multiplexed QUIC connection.
+/// Channel id inside a multiplexed QUIC connection.
 ///
-/// Widened to 64 bits so randomly-assigned channel ids have a negligible birthday-bound
-/// collision probability: ~50% at ~4 billion concurrent ids, vs. ~65k for the previous
-/// 32-bit version. Collisions in the 32-bit form were a remote-triggerable panic via the
-/// asserts in `Matcher::expect/arrive`.
+/// 64 bits: random allocation has a negligible birthday-bound collision
+/// probability (~50% at ~4 billion concurrent ids, vs ~65k for the
+/// previous 32-bit form). Collisions in 32-bit were a remote-triggerable
+/// panic via the asserts in `Matcher::expect/arrive`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ChannelId(u64);
 
@@ -32,19 +32,19 @@ impl From<ChannelId> for u64 {
 }
 
 impl ChannelId {
-    /// Allocates a cryptographically random channel id.
+    /// A cryptographically random channel id.
     pub fn random() -> Self {
         let mut buf = [0u8; 8];
         getrandom::getrandom(&mut buf).expect("getrandom failed");
         Self(u64::from_le_bytes(buf))
     }
 
-    /// Encodes the id as 8 big-endian bytes, suitable for sending on a wire.
+    /// Encode as 8 big-endian bytes for the wire.
     pub fn to_be_bytes(self) -> [u8; 8] {
         self.0.to_be_bytes()
     }
 
-    /// Decodes the id from 8 big-endian bytes.
+    /// Decode from 8 big-endian bytes.
     pub fn from_be_bytes(bytes: [u8; 8]) -> Self {
         Self(u64::from_be_bytes(bytes))
     }
@@ -61,13 +61,13 @@ impl fmt::Display for ChannelId {
     }
 }
 
-/// A channel is a sub-division of a QUIC connection. Channels are used in connections
-/// between peers to enable them to keep simultaneous requests in the same connection.
+/// A channel is one sub-division of a QUIC connection between two peers,
+/// so multiple requests can share a single connection.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct ChannelAddr {
-    /// The socket address for this channel address.
+    /// The peer's socket address.
     peer_addr: SocketAddr,
-    /// The specific channel identifier within the connection.
+    /// The channel id within that connection.
     channel_id: ChannelId,
 }
 
@@ -84,8 +84,7 @@ impl Debug for ChannelAddr {
 }
 
 impl ChannelAddr {
-    /// Creates a new channel address from a given socket address (IP+port) and an
-    /// identifier for this specific channel.
+    /// Build a channel address from a socket address and a channel id.
     pub fn new(peer_addr: SocketAddr, channel_id: ChannelId) -> ChannelAddr {
         ChannelAddr {
             peer_addr,
@@ -93,8 +92,8 @@ impl ChannelAddr {
         }
     }
 
-    /// Derives a special channel address from a given hash value. Uses the first 8 bytes
-    /// of the hash as the channel id.
+    /// Derive a channel address from a socket address plus a hash, using
+    /// the first 8 bytes of the hash as the channel id.
     pub fn from_socket_and_hash(peer_addr: SocketAddr, hash: Hash) -> ChannelAddr {
         let mut id_bytes = [0u8; 8];
         id_bytes.copy_from_slice(&hash[..8]);
@@ -104,33 +103,30 @@ impl ChannelAddr {
         }
     }
 
-    /// The channel id for this channel address.
+    /// The channel id.
     pub fn channel_id(&self) -> ChannelId {
         self.channel_id
     }
 
-    /// The socket address for this channel address.
+    /// The peer's socket address.
     pub fn peer_addr(&self) -> SocketAddr {
         self.peer_addr
     }
 }
 
-/// Specifies how DNS resolution should handle IPv4 and IPv6 addresses.
-///
-/// Controls the preference and filtering of IP address types when resolving hostnames,
-/// allowing for explicit version requirements or flexible fallback behavior.
+/// How DNS resolution picks between IPv4 and IPv6 addresses for a host.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AddrResolutionMode {
-    /// Only use IPv6 addresses and ignore IPv4 entries.
+    /// IPv6 only; drop IPv4 entries.
     EnsureIpv6,
-    /// Only use IPv4 addresses and ignore IPv6 entries.
+    /// IPv4 only; drop IPv6 entries.
     EnsureIpv4,
-    /// Use IPv6 addresses when possible, but default to an IPv4 if necessary.
+    /// Prefer IPv6; fall back to IPv4 if no IPv6 is available.
     PreferIpv6,
-    /// Use IPv4 addresses when possible, but default to an IPv6 if necessary.
+    /// Prefer IPv4; fall back to IPv6 if no IPv4 is available.
     PreferIpv4,
-    /// Use both IPv6 and IPv4 addresses. If both are present, two addresses will be
-    /// resolved for the same name.
+    /// Keep both. When both are present, two addresses are resolved for
+    /// the same name.
     UseBoth,
 }
 
@@ -149,7 +145,7 @@ impl FromStr for AddrResolutionMode {
 }
 
 impl AddrResolutionMode {
-    /// Choose from a list of addresses which ones to use.
+    /// Pick which addresses to keep, per the resolution mode.
     fn filter_hosts(self, hosts: &[SocketAddr]) -> Vec<SocketAddr> {
         // Iterator factory (makes IPs canonical).
         let iter_hosts = || {
@@ -188,6 +184,10 @@ impl AddrResolutionMode {
         }
     }
 
+    /// Resolve `host` to one or more `(label, socket)` pairs using the
+    /// resolution mode configured on `self`. A bare `SocketAddr` or
+    /// `IpAddr` is returned as-is (defaulting the port to the
+    /// federation default when needed).
     pub async fn resolve(&self, host: &str) -> Result<Vec<(String, SocketAddr)>, crate::Error> {
         if let Ok(socket) = host.parse::<SocketAddr>() {
             return Ok(vec![(host.to_owned(), socket)]);

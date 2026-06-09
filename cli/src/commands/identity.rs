@@ -1,24 +1,24 @@
-//! Identity management commands for interacting with the identity service.
-//! Provides functionality to set/get providers and manage identity-entity mappings.
+//! Identity management commands: set and read the Polygon provider, and
+//! create or update identity-to-entity mappings.
 
 use samizdat_common::identity::check_servable_identity;
 
 use crate::api::{get_polygon_provider, put_polygon_provider};
 
-/// Sets the Polygon provider endpoint for identity operations.
+/// Sets the Polygon provider endpoint used by identity operations.
 pub async fn set_provider(endpoint: &str) -> Result<(), anyhow::Error> {
     put_polygon_provider(endpoint.to_owned()).await?;
     Ok(())
 }
 
-/// Retrieves and displays the current Polygon provider endpoint.
+/// Prints the current Polygon provider endpoint.
 pub async fn get_provider() -> Result<(), anyhow::Error> {
     let endpoint = get_polygon_provider().await?.endpoint;
     print!("{endpoint}");
     Ok(())
 }
 
-/// Creates a new identity-entity mapping with the specified parameters.
+/// Creates a new identity pointing at `entity`, valid for `ttl` seconds.
 pub async fn create(
     identity: String,
     entity: String,

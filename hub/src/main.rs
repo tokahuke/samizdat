@@ -1,3 +1,6 @@
+//! Samizdat hub: the federation server that routes node-to-node queries
+//! and arbitrates candidate selection.
+
 mod cli;
 mod db;
 mod http;
@@ -16,10 +19,10 @@ use samizdat_common::keyed_channel::KeyedChannel;
 
 /// Utility for propagating panics through tasks.
 fn maybe_resume_panic<T>(r: Result<T, task::JoinError>) {
-    if let Err(err) = r {
-        if let Ok(panic) = err.try_into_panic() {
-            panic::resume_unwind(panic);
-        }
+    if let Err(err) = r
+        && let Ok(panic) = err.try_into_panic()
+    {
+        panic::resume_unwind(panic);
     }
 }
 

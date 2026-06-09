@@ -1,23 +1,18 @@
 //! Hubs API.
 
-use axum::extract::Path;
-use axum::routing::delete;
-use axum::routing::get;
-use axum::routing::post;
-use axum::Json;
-use axum::Router;
+use axum::{
+    Json, Router,
+    extract::Path,
+    routing::{delete, get, post},
+};
 use futures::FutureExt;
-use samizdat_common::address::AddrResolutionMode;
-use samizdat_common::db::readonly_tx;
-use samizdat_common::db::writable_tx;
-use samizdat_common::db::Droppable;
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use samizdat_common::{
+    address::AddrResolutionMode,
+    db::{Droppable, readonly_tx, writable_tx},
+};
+use serde_derive::{Deserialize, Serialize};
 
-use crate::access::AccessRight;
-use crate::http::ApiResponse;
-use crate::models::Hub;
-use crate::security_scope;
+use crate::{access::AccessRight, http::ApiResponse, models::Hub, security_scope};
 
 /// The entrypoint of the hub API.
 pub fn api() -> Router {

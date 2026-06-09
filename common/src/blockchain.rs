@@ -1,7 +1,5 @@
-//! Constants and configuration for blockchain interaction in the Samizdat network.
-//!
-//! This module defines the essential constants for interacting with the Polygon blockchain,
-//! including API endpoints, contract addresses, and network parameters.
+//! Constants for Samizdat's Polygon interaction: RPC endpoint, contract
+//! addresses, throttle limit.
 
 use std::time::Duration;
 

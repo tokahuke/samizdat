@@ -10,10 +10,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::process::Command;
-use std::time::Duration;
+use std::{collections::BTreeMap, path::PathBuf, process::Command, time::Duration};
 
 /// Default origin for the published get-samizdat collection. Override
 /// at install-time with `--from <URL>` (used by the integration test
@@ -73,10 +70,7 @@ pub fn fetch_file(
     if let Some(local_path) = strip_file_scheme(&url) {
         let bytes = std::fs::read(&local_path)
             .with_context(|| format!("reading local artifact at {}", local_path.display()))?;
-        return Ok(Fetched {
-            bytes,
-            source: url,
-        });
+        return Ok(Fetched { bytes, source: url });
     }
 
     let client = reqwest::blocking::Client::builder()
@@ -135,11 +129,7 @@ pub fn list_versions(remote: bool) -> Result<()> {
             // clap reports "<bin-name> X.Y.Z"; the binary name is
             // already in the first column, so collapse to just the
             // version token for readability.
-            let version = raw
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or(&raw)
-                .to_owned();
+            let version = raw.split_whitespace().nth(1).unwrap_or(&raw).to_owned();
             if version != "unknown" {
                 bins_at.entry(version.clone()).or_default().push(name);
             }
@@ -192,11 +182,7 @@ fn query_version(path: &std::path::Path) -> Result<String> {
         .output()
         .with_context(|| format!("running `{} --version`", path.display()))?;
     if !out.status.success() {
-        bail!(
-            "{} --version exited with {}",
-            path.display(),
-            out.status
-        );
+        bail!("{} --version exited with {}", path.display(), out.status);
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let first = stdout.lines().next().unwrap_or("").trim();
@@ -237,7 +223,8 @@ fn fetch_remote_inventory(origin: &str) -> Result<InventoryDoc> {
         if !resp.status().is_success() {
             bail!("GET {url} returned HTTP {}", resp.status());
         }
-        resp.text().with_context(|| format!("reading body of {url}"))?
+        resp.text()
+            .with_context(|| format!("reading body of {url}"))?
     };
     serde_json::from_str(&body).with_context(|| format!("parsing inventory JSON from {url}"))
 }
@@ -269,10 +256,11 @@ fn resolve_latest_alias(doc: &InventoryDoc) -> Option<String> {
         if hash != target {
             continue;
         }
-        if let Some(version) = path.strip_suffix("/install.sh") {
-            if version != "latest" && !version.contains('/') {
-                return Some(version.to_owned());
-            }
+        if let Some(version) = path.strip_suffix("/install.sh")
+            && version != "latest"
+            && !version.contains('/')
+        {
+            return Some(version.to_owned());
         }
     }
     None

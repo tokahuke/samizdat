@@ -1,0 +1,176 @@
+//! Local persistence for the pinner: a single sub-database tracking which
+//! series the pinner is keeping alive and until when.
+//!
+//! Schema is small enough to never need a migration beyond the base; the
+//! `Migrations` table is here only because `samizdat_common::db::Table`
+//! requires it.
+
+use chrono::{DateTime, Utc};
+use samizdat_common::{
+    Key,
+    db::{Migration, Table as _, WritableTx, init_db, readonly_tx, writable_tx},
+};
+use serde_derive::{Deserialize, Serialize};
+use strum_macros::{IntoStaticStr, VariantArray};
+
+/// Pinner sub-databases. Variant order is part of the on-disk schema:
+/// `samizdat_common::db::Table::discriminant` derives the LMDB table
+/// id from it, so do not reorder or remove variants.
+#[derive(Debug, Clone, Copy, IntoStaticStr, VariantArray)]
+#[non_exhaustive]
+pub enum Table {
+    /// Required by `samizdat_common::db::Table` to track applied migrations.
+    Migrations,
+    /// Maps `Key::as_bytes()` (the series public key) to a bincode-serialized
+    /// [`PinnedRow`].
+    PinnedSeries,
+}
+
+impl samizdat_common::db::Table for Table {
+    const MIGRATIONS: Self = Table::Migrations;
+
+    fn base_migration() -> Box<dyn Migration<Self>> {
+        Box::new(BaseMigration)
+    }
+
+    fn discriminant(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Debug)]
+struct BaseMigration;
+
+impl Migration<Table> for BaseMigration {
+    fn next(&self) -> Option<Box<dyn Migration<Table>>> {
+        None
+    }
+
+    fn up(&self, _tx: &mut WritableTx) -> Result<(), samizdat_common::Error> {
+        Ok(())
+    }
+}
+
+/// What the pinner records for each subscription it is managing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinnedRow {
+    /// When the pin lapses; the expiry loop sweeps anything past this.
+    pub expires_at: DateTime<Utc>,
+    /// Opaque customer identifier, optional, set at first pin and kept
+    /// through renewals.
+    pub customer: Option<String>,
+    /// When the row was first written; preserved across renewals.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Open the pinner's LMDB environment at `data_dir`. Call once at
+/// process startup before any of the `upsert`/`get`/`list` helpers
+/// below.
+pub fn init(data_dir: &str) -> Result<(), anyhow::Error> {
+    init_db::<Table>(data_dir).map_err(|e| anyhow::anyhow!("db init: {e}"))?;
+    Ok(())
+}
+
+/// Upserts a pin. On re-pin extends `expires_at` to the later of (existing,
+/// new) so a customer re-POSTing before expiry renews their slot.
+pub fn upsert(
+    key: &Key,
+    new_expires_at: DateTime<Utc>,
+    customer: Option<String>,
+) -> Result<DateTime<Utc>, anyhow::Error> {
+    writable_tx(|tx| {
+        let existing: Option<PinnedRow> = Table::PinnedSeries
+            .get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))?;
+
+        let row = match existing {
+            Some(mut existing) => {
+                if new_expires_at > existing.expires_at {
+                    existing.expires_at = new_expires_at;
+                }
+                // Preserve customer + created_at on renewal.
+                existing
+            }
+            None => PinnedRow {
+                expires_at: new_expires_at,
+                customer,
+                created_at: Utc::now(),
+            },
+        };
+
+        Table::PinnedSeries.put(tx, key.as_bytes(), bincode::serialize(&row)?)?;
+
+        Ok::<_, samizdat_common::Error>(row.expires_at)
+    })
+    .map_err(|e| anyhow::anyhow!("db upsert: {e}"))
+}
+
+/// Read the `PinnedRow` for `key`. `Ok(None)` means the pinner is not
+/// holding that series.
+pub fn get(key: &Key) -> Result<Option<PinnedRow>, anyhow::Error> {
+    readonly_tx(|tx| {
+        Table::PinnedSeries
+            .get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))
+            .map_err(|e| anyhow::anyhow!("db get: {e}"))
+    })
+}
+
+/// Every pinned series and its row. Used by the expiry loop and by
+/// the admin API.
+pub fn list() -> Result<Vec<(Key, PinnedRow)>, anyhow::Error> {
+    // Inner result short-circuits on the first per-row failure, outer
+    // result reports a transaction-level failure. Two `?`s unwrap both.
+    let collected: Result<Vec<(Key, PinnedRow)>, samizdat_common::Error> = readonly_tx(|tx| {
+        Table::PinnedSeries
+            .range::<_, [u8; 0]>(..)
+            .collect(
+                tx,
+                |key, value| -> Result<(Key, PinnedRow), samizdat_common::Error> {
+                    let parsed_key = Key::from_bytes(key)
+                        .map_err(|e| samizdat_common::Error::from(format!("bad key: {e}")))?;
+                    let row: PinnedRow = bincode::deserialize(value)?;
+                    Ok((parsed_key, row))
+                },
+            )
+            .and_then(|res| res)
+    });
+    collected.map_err(|e| anyhow::anyhow!("db list: {e}"))
+}
+
+/// Drop the pinner's interest in `key`. The on-node subscription is
+/// separate; call the node's DELETE route too.
+pub fn delete(key: &Key) -> Result<(), anyhow::Error> {
+    writable_tx(|tx| {
+        Table::PinnedSeries.delete(tx, key.as_bytes())?;
+        Ok::<_, samizdat_common::Error>(())
+    })
+    .map_err(|e| anyhow::anyhow!("db delete: {e}"))
+}
+
+/// Atomic claim-and-delete for the expiry loop: re-read inside one
+/// writable_tx, and only delete if `row.expires_at <= now`. Returns
+/// `Ok(true)` if the row was actually deleted, `Ok(false)` if it was
+/// renewed in the race window between `list_expired` and the sweep call.
+/// Closes the TOCTOU where a renewal POST landing between the read and
+/// the delete would otherwise drop a still-paid pin.
+pub fn delete_if_expired(key: &Key, now: DateTime<Utc>) -> Result<bool, anyhow::Error> {
+    let deleted: Result<bool, samizdat_common::Error> = writable_tx(|tx| {
+        let row: Option<PinnedRow> = Table::PinnedSeries
+            .get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))?;
+        let still_expired = row.is_some_and(|row| row.expires_at <= now);
+        if still_expired {
+            Table::PinnedSeries.delete(tx, key.as_bytes())?;
+        }
+        Ok(still_expired)
+    });
+    deleted.map_err(|e| anyhow::anyhow!("db delete_if_expired: {e}"))
+}
+
+/// Returns keys + rows whose `expires_at` is in the past, for the expiry loop.
+pub fn list_expired(now: DateTime<Utc>) -> Result<Vec<Key>, anyhow::Error> {
+    let all = list()?;
+    Ok(all
+        .into_iter()
+        .filter(|(_, row)| row.expires_at <= now)
+        .map(|(key, _)| key)
+        .collect())
+}

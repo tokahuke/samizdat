@@ -1,14 +1,16 @@
 //! Collections are a set of objects indexed by human-readable names. Collections are
 //! powered by Patricia trees and inclusion proofs.
 
-use samizdat_common::db::{writable_tx, Droppable, Table as _, TxHandle, WritableTx};
+use samizdat_common::db::{Droppable, Table as _, TxHandle, WritableTx, writable_tx};
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
-use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::convert::TryInto;
-use std::fmt::{self, Display};
-use std::str::FromStr;
+use serde_with::{DisplayFromStr, serde_as};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    convert::TryInto,
+    fmt::{self, Display},
+    str::FromStr,
+};
 
 use samizdat_common::{Hash, Hint, PatriciaMap, PatriciaProof, Riddle};
 
@@ -104,6 +106,18 @@ impl ItemPath<'_> {
 /// are automatically included in all collections as a JSON file under the key
 /// `_inventory` in base editions and `_changelogs/<edition timestamp>` in layer editions.
 /// They work much the same way like sitemaps do on the regular Web.
+///
+/// ## Ordering and priority
+///
+/// The map is a `BTreeMap`, so iteration is *path-sorted ascending*. Publishers
+/// who care which items survive when a subscriber's size cap clips the eager
+/// fetch can use path naming as the priority signal: paths that sort earlier
+/// (e.g. prefixed with `00_`, `01_`) are retained first under the cap; later-
+/// sorted paths are the first to be left unfetched when the running download
+/// total crosses the subscriber's `Subscription::max_bytes`. The convention is
+/// behavioural, not a wire-format constraint: there is no separate priority
+/// field on the wire; the order is whatever lexicographic sort of the path
+/// strings produces.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Inventory {

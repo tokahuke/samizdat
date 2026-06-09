@@ -1,22 +1,27 @@
+//! Wire messages for the file-transfer protocol: the header an object
+//! sender ships before chunks flow, the per-chunk request frames, and
+//! the validate-against-merkle entry point the receiver uses.
+
 use brotli::{CompressorReader, Decompressor};
 use chrono::TimeZone;
 use futures::prelude::*;
-use samizdat_common::db::readonly_tx;
-use samizdat_common::MerkleTree;
+use samizdat_common::{MerkleTree, db::readonly_tx};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use serde_derive::{Deserialize, Serialize};
-use std::io::{Cursor, Read};
-use std::time::Duration;
+use std::{
+    io::{Cursor, Read},
+    time::Duration,
+};
 
-use samizdat_common::cipher::TransferCipher;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, cipher::TransferCipher};
 
-use crate::cli;
-use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
-use crate::models::{ContentStream, CHUNK_SIZE};
-use crate::system::transport::{ChannelReceiver, ChannelSender};
+use crate::{
+    models::{CHUNK_SIZE, CollectionItem, ContentStream, ObjectMetadata, ObjectRef},
+    system::transport::{ChannelReceiver, ChannelSender},
+};
 
-/// The maximum number of bytes allowed for a header. This puts a hard cap on the maximum file size
+/// The maximum number of bytes allowed for a header. This puts a hard cap on the maximum
+/// file size
 /// at around 2.34GB.
 pub const MAX_HEADER_LENGTH: usize = CHUNK_SIZE;
 /// The maximum size of the stream, with plenty of room for errors.
@@ -54,7 +59,8 @@ pub trait Message: 'static + Send + Sync + SerdeSerialize + for<'a> SerdeDeseria
     }
 }
 
-/// Sends a _nonce_ (a number used only once) that will be used for deriving a key to transfer
+/// Sends a _nonce_ (a number used only once) that will be used for deriving a key to
+/// transfer
 /// the stream.
 #[derive(Default, Serialize, Deserialize)]
 pub struct NonceMessage {
@@ -75,7 +81,8 @@ impl NonceMessage {
         TransferCipher::new(&hash, &self.nonce)
     }
 
-    /// Receive a header from a channel and creates a cipher for all further transmissions.
+    /// Receive a header from a channel and creates a cipher for all further
+    /// transmissions.
     pub async fn recv_negotiate(
         receiver: &mut ChannelReceiver,
         hash: Hash,
@@ -167,23 +174,14 @@ impl ObjectMessage {
         })
     }
 
-    /// Validates if this messge corresponds to specific hash, among other things,
-    /// returning a tustred merkle tree in the end, or a validation error.
+    /// Validates that this message's merkle tree resolves to `hash`,
+    /// returning the trusted merkle tree or a validation error.
+    ///
+    /// The per-object size cap (formerly here) now lives in
+    /// `ObjectRef::import`, composed with the per-subscription and
+    /// node-wide caps under a single atomic reserve. See
+    /// `node/src/cap.rs::OBJECT_SIZE_LIMIT`.
     pub fn validate(&self, hash: Hash) -> Result<MerkleTree, crate::Error> {
-        // Size cap FIRST (cheap), before constructing the merkle tree from peer-supplied
-        // hashes (each level is a SHA3-224 over its children; non-trivial CPU on long
-        // hash lists). `saturating_mul` defangs an absurd `max_content_size` config that
-        // would otherwise wrap.
-        let max_bytes = (cli().max_content_size).saturating_mul(1_000_000);
-        if self.metadata.content_size > max_bytes {
-            return Err(format!(
-                "content too big: max size is {}Mb, but content is {}Mb",
-                cli().max_content_size,
-                self.metadata.content_size / 1_000_000,
-            )
-            .into());
-        }
-
         let merkle_tree = MerkleTree::from(self.metadata.hashes.clone());
 
         // Check if content actually corresponds to advertized hash:
@@ -221,10 +219,26 @@ impl ObjectMessage {
                         // Decrypt and decompress:
                         cipher.decrypt(&mut compressed_chunk)?;
 
-                        // Decompress chunk:
+                        // Decompress chunk with a hard cap on the OUTPUT length.
+                        // Without `.take()`, a brotli zip-bomb (a few KB
+                        // compressed that inflates to 1+ TB) would fill memory
+                        // here before the post-decompress
+                        // `transferred_size > content_size` check below could
+                        // fire. Reading one byte past CHUNK_SIZE lets us
+                        // distinguish "decompressed to CHUNK_SIZE" from
+                        // "source wanted more."
                         let mut chunk = Vec::with_capacity(CHUNK_SIZE);
-                        Decompressor::new(Cursor::new(compressed_chunk), 4096)
-                            .read_to_end(&mut chunk)?;
+                        let mut limited = Decompressor::new(Cursor::new(compressed_chunk), 4096)
+                            .take((CHUNK_SIZE as u64) + 1);
+                        limited.read_to_end(&mut chunk)?;
+                        if chunk.len() > CHUNK_SIZE {
+                            return Err(format!(
+                                "decompressed chunk exceeds CHUNK_SIZE \
+                                 ({} bytes); rejecting (zip-bomb defense)",
+                                chunk.len(),
+                            )
+                            .into());
+                        }
 
                         transferred_size += chunk.len();
 
@@ -240,13 +254,16 @@ impl ObjectMessage {
                     })
                 });
 
-        // Build content from stream (this limits content size to the advertised amount)
+        // Build content from stream (this limits content size to the advertised amount).
+        // `caller_cap` is None at this layer; the subscription-side caller passes its
+        // cap through the higher-level fetch loop.
         let tee = ObjectRef::import(
             merkle_tree,
             self.metadata,
             query_duration,
             Box::pin(content_stream),
-        );
+            None,
+        )?;
 
         tracing::info!("done building object");
 
@@ -267,6 +284,9 @@ impl ObjectMessage {
         chunks
             .try_for_each_concurrent(Some(1), |chunk| {
                 tracing::debug!("stream for data opened");
+                // Source is `Cursor::new(chunk)` -- already in memory, so the
+                // clippy::unbuffered_bytes premise does not apply.
+                #[allow(clippy::unbuffered_bytes)]
                 let mut compressed = CompressorReader::new(Cursor::new(chunk), 4096, 4, 22)
                     .bytes()
                     .collect::<Result<Vec<_>, _>>()

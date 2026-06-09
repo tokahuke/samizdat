@@ -4,9 +4,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::install;
 
+/// Top-level samizdat-up CLI: just the subcommand to run.
 #[derive(Parser, Debug)]
 #[command(name = "samizdat-up", version, about, long_about = None)]
 pub struct Cli {
+    /// The subcommand selected on the command line.
     #[command(subcommand)]
     pub command: Command,
 }
@@ -15,13 +17,14 @@ pub struct Cli {
 /// install as system services by default. `cli` is the user-facing
 /// `samizdat` command-line tool and is also pulled in implicitly when
 /// any daemon is installed (the daemon needs it for administration).
-/// `all` is shorthand for `node`, `hub`, and `proxy` (cli rides
-/// along).
+/// `all` is shorthand for every daemon (`node`, `hub`, `proxy`,
+/// `pinner`); cli rides along.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Component {
     Node,
     Hub,
     Proxy,
+    Pinner,
     Cli,
     All,
 }
@@ -33,12 +36,14 @@ impl Component {
             Component::Node => vec!["node"],
             Component::Hub => vec!["hub"],
             Component::Proxy => vec!["proxy"],
+            Component::Pinner => vec!["pinner"],
             Component::Cli => vec![],
-            Component::All => vec!["node", "hub", "proxy"],
+            Component::All => vec!["node", "hub", "proxy", "pinner"],
         }
     }
 }
 
+/// Top-level samizdat-up subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Install a component + its CLI, register it as a system service,
@@ -137,6 +142,7 @@ pub enum Command {
     },
 }
 
+/// Subcommands of `samizdat-up admin`.
 #[derive(Subcommand, Debug)]
 pub enum AdminAction {
     /// Add `<user>` to the `samizdat` group. The user must log out
@@ -150,6 +156,7 @@ pub enum AdminAction {
 }
 
 impl Cli {
+    /// Dispatch the parsed subcommand to the appropriate handler.
     pub fn run(self) -> Result<(), anyhow::Error> {
         match self.command {
             Command::Install {

@@ -22,7 +22,7 @@ mod patricia_map;
 mod pki;
 mod riddles;
 pub use error::Error;
-pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
+pub use hash::{HASH_LEN, Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{Hint, MessageRiddle, Riddle};
@@ -30,8 +30,8 @@ pub use riddles::{Hint, MessageRiddle, Riddle};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
-/// Creates a cryptographically safe pseudo-random number generator, seeded with 32 bytes
-/// from the operating system's random number generator (the full state of `ChaChaRng`).
+/// A cryptographically secure PRNG, seeded with 32 bytes from the OS RNG
+/// (the full state of `ChaChaRng`).
 pub fn csprng() -> ChaChaRng {
     let mut seed = [0u8; 32];
     getrandom::getrandom(&mut seed).expect("getrandom failed");

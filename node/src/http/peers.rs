@@ -2,14 +2,11 @@
 
 use std::net::SocketAddr;
 
-use axum::routing::get;
-use axum::Router;
+use axum::{Router, routing::get};
 use futures::FutureExt;
 use serde_derive::Serialize;
 
-use crate::access::AccessRight;
-use crate::security_scope;
-use crate::system::PEER_CONNECTIONS;
+use crate::{access::AccessRight, security_scope, system::PEER_CONNECTIONS};
 
 use super::ApiResponse;
 

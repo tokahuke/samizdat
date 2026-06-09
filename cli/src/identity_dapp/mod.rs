@@ -296,7 +296,7 @@ pub async fn update(
 pub async fn get(identity: String, endpoint: Option<String>) -> Result<String, anyhow::Error> {
     let storage_contract = get_storage_contract(endpoint).await?;
     let (entity, _owner, _ttl, _data) = storage_contract
-        .method::<_, (String, Address, u64, Vec<u8>)>("identities", identity.to_owned())
+        .method::<_, (String, Address, u64, Vec<u8>)>("identities", identity.clone())
         .expect("ABI was not declared as expected")
         .call()
         .await

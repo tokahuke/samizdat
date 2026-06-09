@@ -4379,12 +4379,38 @@ dependencies = [
  "subtle",
  "tarpc",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "tower",
  "tower-http",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "samizdat-pinner"
+version = "0.3.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bincode",
+ "chrono",
+ "reqwest 0.12.28",
+ "samizdat-common",
+ "serde",
+ "serde-inline-default",
+ "serde_derive",
+ "serde_json",
+ "structopt",
+ "strum",
+ "strum_macros",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tower",
+ "tower-http",
+ "tracing",
 ]
 
 [[package]]

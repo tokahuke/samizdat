@@ -1,17 +1,26 @@
+//! Multiplexes many logical channels over a single QUIC connection,
+//! routing incoming streams to the right per-channel receiver via the
+//! channel-id prefix.
+
 use futures::prelude::*;
 use samizdat_common::address::ChannelId;
-use std::collections::BTreeMap;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, MutexGuard};
+use std::{
+    collections::BTreeMap,
+    io,
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use tokio::sync::{Mutex, MutexGuard, mpsc};
 
 use samizdat_common::quinn::{Connection, ConnectionError, RecvStream};
 
 use super::matcher::Matcher;
 
-/// A multiplexer over a QUIC connection, capable of splitting its uni streams into channels.
+/// A multiplexer over a QUIC connection, capable of splitting its uni streams into
+/// channels.
 pub struct Multiplexed {
     connection: Connection,
     senders: Arc<Mutex<BTreeMap<ChannelId, mpsc::UnboundedSender<RecvStream>>>>,
