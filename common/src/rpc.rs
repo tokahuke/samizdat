@@ -1,13 +1,11 @@
 //! The Samizdat RPC definition using [`tarpc`].
 
 use serde_derive::{Deserialize, Serialize};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
-use crate::address::ChannelId;
-use crate::cipher::OpaqueEncrypted;
-use crate::riddles::Hint;
-use crate::{Hash, MessageRiddle, Riddle};
+use crate::{
+    Hash, MessageRiddle, Riddle, address::ChannelId, cipher::OpaqueEncrypted, riddles::Hint,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SetPropertyResponse {
@@ -34,10 +32,11 @@ pub enum QueryKind {
 pub struct Query {
     /// The riddles the resolver can use to find the content hash.
     pub content_riddles: Vec<Riddle>,
-    /// A hint to the solution of the content hash. This can set the degree of toughness of solving
-    /// the content riddles.
+    /// A hint to the solution of the content hash. This can set the degree of toughness
+    /// of solving the content riddles.
     pub hint: Hint,
-    /// The riddle that will be used by the peer that has the hash to find the IP of the client.
+    /// The riddle that will be used by the peer that has the hash to find the IP of the
+    /// client.
     pub location_riddle: Riddle,
     /// The kind of entity being requested.
     pub kind: QueryKind,
@@ -52,9 +51,11 @@ pub enum QueryResponse {
     Replayed,
     /// Query was empty, i.e., `content_riddles` was empty.
     EmptyQuery,
-    /// You do not have a reverse connection to the hub (i.e. you are not connected as a server).
+    /// You do not have a reverse connection to the hub (i.e. you are not connected as a
+    /// server).
     NoReverseConnection,
-    /// Query was run and returned and candidates may be following (watch `recv_candidate`).
+    /// Query was run and returned and candidates may be following (watch
+    /// `recv_candidate`).
     Resolved {
         /// The id of the channel through which the candidates will arrive.
         candidate_channel: ChannelId,
@@ -68,8 +69,8 @@ pub enum QueryResponse {
 pub struct EditionRequest {
     /// The riddle defining the series public key.
     pub key_riddle: Riddle,
-    /// A hint to the solution of the key hash. This can set the degree of toughness of solving
-    /// the riddle.
+    /// A hint to the solution of the key hash. This can set the degree of toughness of
+    /// solving the riddle.
     pub hint: Hint,
 }
 
@@ -88,8 +89,8 @@ pub struct EditionResponse {
 pub struct EditionAnnouncement {
     /// The riddle defining the series public key.
     pub key_riddle: Riddle,
-    /// A hint to the solution of the key hash. This can set the degree of toughness of solving
-    /// the riddle.
+    /// A hint to the solution of the key hash. This can set the degree of toughness of
+    /// solving the riddle.
     pub hint: Hint,
     /// The information for the new edition.
     pub edition: OpaqueEncrypted,
@@ -115,7 +116,8 @@ pub struct IdentityResponse {
     pub rand: Hash,
 }
 
-/// The announcement of a new identity candidate in the network (as of yet, _unimplemented_).
+/// The announcement of a new identity candidate in the network (as of yet,
+/// _unimplemented_).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityAnnouncement {}
 
@@ -139,11 +141,11 @@ pub trait Hub {
 pub struct Resolution {
     /// The riddles the resolver can use to find the content hash.
     pub content_riddles: Vec<Riddle>,
-    /// The nonces which the resolver must combine with the content hash to prove that it knows the
-    /// correct hash.
+    /// The nonces which the resolver must combine with the content hash to prove that it
+    /// knows the correct hash.
     pub validation_nonces: Vec<Hash>,
-    /// A hint to the solution of the content hash. This can set the degree of toughness of solving
-    /// the content riddles.
+    /// A hint to the solution of the content hash. This can set the degree of toughness
+    /// of solving the content riddles.
     pub hint: Hint,
     /// The riddle for the client address.
     pub location_message_riddle: MessageRiddle,
@@ -151,7 +153,8 @@ pub struct Resolution {
     pub kind: QueryKind,
 }
 
-/// A promise of a possible peer in the network that might know the answer to a given query.
+/// A promise of a possible peer in the network that might know the answer to a given
+/// query.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
     /// The address of the peer.

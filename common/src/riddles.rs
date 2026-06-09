@@ -4,8 +4,10 @@
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
-use crate::cipher::{OpaqueEncrypted, TransferCipher};
-use crate::{Hash, HASH_LEN};
+use crate::{
+    HASH_LEN, Hash,
+    cipher::{OpaqueEncrypted, TransferCipher},
+};
 
 /// A message that can be passed around and only decoded by who knows the secret solution
 /// of a riddle.
@@ -114,14 +116,14 @@ impl MessageRiddle {
     }
 }
 
-/// A hint on the solution of a riddle. This gives the prefix of the solution, up to a given
-/// length.
+/// A hint on the solution of a riddle. This gives the prefix of the solution, up to a
+/// given length.
 #[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize)]
 pub struct Hint {
     /// The prefix of the solution of the riddle.
     prefix: Hash,
-    /// The length in bytes of the prefix. Everything after this length in the `prefix` hash is
-    /// ignored.
+    /// The length in bytes of the prefix. Everything after this length in the `prefix`
+    /// hash is ignored.
     length: u8,
 }
 

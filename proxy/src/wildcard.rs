@@ -7,27 +7,23 @@
 //! The renewal task wakes every 12 hours, checks expiry, and runs a full
 //! issuance if the existing cert is within 30 days of `not_after`.
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use arc_swap::ArcSwapOption;
-use axum::extract::Path as AxumPath;
-use axum::response::Redirect;
-use axum::routing::any;
+use axum::{extract::Path as AxumPath, response::Redirect, routing::any};
 use chrono::{DateTime, Utc};
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, NewAccount, NewOrder, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::server::{ClientHello, ResolvesServerCert};
-use rustls::sign::CertifiedKey;
+use rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    server::{ClientHello, ResolvesServerCert},
+    sign::CertifiedKey,
+};
 use serde_derive::{Deserialize, Serialize};
-use tokio::fs;
-use tokio::time::sleep;
+use tokio::{fs, time::sleep};
 use tracing::{error, info, warn};
 
 use crate::dns::DnsProvider;
@@ -171,11 +167,10 @@ impl WildcardCertManager {
                 }
             };
 
-            if needs_renewal {
-                if let Err(err) = self.run_issuance().await {
+            if needs_renewal
+                && let Err(err) = self.run_issuance().await {
                     error!("wildcard cert renewal failed: {err}; will retry next tick");
                 }
-            }
 
             // Jitter the wait so a fleet of proxies booted together
             // does not stampede the ACME directory at the same wall-
@@ -261,8 +256,7 @@ impl WildcardCertManager {
         }
 
         // Build a CSR with both names as SANs.
-        let key_pair =
-            KeyPair::generate().context("generating fresh keypair for wildcard cert")?;
+        let key_pair = KeyPair::generate().context("generating fresh keypair for wildcard cert")?;
         let mut params = CertificateParams::new(vec![bare.clone(), wildcard.clone()])
             .context("building CSR params")?;
         params.distinguished_name = DistinguishedName::new();
@@ -446,9 +440,7 @@ async fn atomic_write(path: PathBuf, bytes: &[u8]) -> anyhow::Result<()> {
         .context("atomic write target has no parent dir")?;
     let tmp = parent.join(format!(
         ".{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("write")
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("write")
     ));
     fs::write(&tmp, bytes)
         .await
@@ -498,8 +490,7 @@ pub async fn serve(
     let server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_cert_resolver(resolver);
-    let rustls_config =
-        axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config));
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config));
 
     let mut http_addr = addr;
     http_addr.set_port(http_port);

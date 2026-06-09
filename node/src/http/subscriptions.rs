@@ -1,20 +1,22 @@
 //! Subscriptions API.
 
-use axum::extract::Path;
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    extract::Path,
+    routing::{delete, get, post},
+};
 use futures::FutureExt;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
+use samizdat_common::db::{Droppable, readonly_tx, writable_tx};
 use serde_derive::Deserialize;
 
 use samizdat_common::Key;
 
-use crate::access::AccessRight;
-use crate::http::ApiResponse;
-use crate::models::{
-    BookmarkType, SeriesRef, Subscription, SubscriptionKind, SubscriptionRef,
+use crate::{
+    access::AccessRight,
+    http::ApiResponse,
+    models::{BookmarkType, SeriesRef, Subscription, SubscriptionKind, SubscriptionRef},
+    security_scope,
 };
-use crate::security_scope;
 
 /// The entrypoint of the subscriptions API.
 pub fn api() -> Router {
@@ -23,6 +25,13 @@ pub fn api() -> Router {
         public_key: String,
         #[serde(default)]
         kind: SubscriptionKind,
+        /// Cap on total bytes the subscribed series's current edition
+        /// may occupy on this node, expressed in megabytes. `None`
+        /// falls back to the node's `default_max_edition_size_mb`
+        /// config. The node converts to bytes internally; the wire
+        /// stays in human units.
+        #[serde(default)]
+        max_size_mb: Option<u64>,
     }
 
     Router::new()
@@ -32,10 +41,11 @@ pub fn api() -> Router {
             "/",
             post(|Json(request): Json<PostSubscriptionRequest>| {
                 async move {
+                    let max_bytes = request.max_size_mb.map(|mb| mb.saturating_mul(1_000_000));
                     let subscription = writable_tx(|tx| {
                         SubscriptionRef::build(
                             tx,
-                            Subscription::new(request.public_key.parse()?, request.kind),
+                            Subscription::new(request.public_key.parse()?, request.kind, max_bytes),
                         )
                     });
                     Ok(subscription?.public_key.to_string())

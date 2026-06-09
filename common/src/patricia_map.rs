@@ -91,7 +91,7 @@ impl Segment {
             match (this_it.next(), it.next()) {
                 (Some(this_side), Some(other_side)) if this_side == other_side => {}
                 (Some(_this_side), Some(other_side)) => {
-                    return FollowStatus::Split(other_side, position)
+                    return FollowStatus::Split(other_side, position);
                 }
                 (None, Some(other_side)) => return FollowStatus::FollowNode(other_side),
                 (Some(_), None) => {
@@ -722,7 +722,7 @@ mod test {
         from_map.sort();
         dbg!(&from_map);
 
-        let mut from_vec = some_hashes.iter().copied().collect::<Vec<_>>();
+        let mut from_vec = some_hashes.to_vec();
         from_vec.sort();
         dbg!(&from_vec);
 

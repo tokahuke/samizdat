@@ -1,9 +1,8 @@
-use std::collections::BTreeMap;
-use std::fmt::Display;
-use std::sync::Arc;
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use std::{collections::BTreeMap, fmt::Display, sync::Arc};
+use tokio::{
+    sync::{Mutex, oneshot},
+    time::{Duration, sleep},
+};
 
 struct MatcherInner<K: 'static + Ord + Copy + Send + Display, T: 'static + Send> {
     expecting: BTreeMap<K, oneshot::Sender<T>>,

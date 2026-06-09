@@ -1,17 +1,22 @@
-//! RPC implementation for the Node. This RPC is called by the hubs to trigger object resolution.
+//! RPC implementation for the Node. This RPC is called by the hubs to trigger object
+//! resolution.
 
 use futures::prelude::*;
 use samizdat_common::db::readonly_tx;
-use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Instant;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, LazyLock, Mutex},
+    time::Instant,
+};
 use tarpc::context;
 
-use samizdat_common::address::{ChannelAddr, ChannelId};
-use samizdat_common::cipher::TransferCipher;
-use samizdat_common::keyed_channel::KeyedChannel;
-use samizdat_common::rpc::*;
-use samizdat_common::{Hash, Riddle};
+use samizdat_common::{
+    Hash, Riddle,
+    address::{ChannelAddr, ChannelId},
+    cipher::TransferCipher,
+    keyed_channel::KeyedChannel,
+    rpc::*,
+};
 
 /// Per-series cooldown for accepting fresh edition announcements. Bounds
 /// refresh-DoS from a malicious hub that forges announcements for a
@@ -32,12 +37,13 @@ static LAST_REFRESH_ATTEMPT: LazyLock<Mutex<BTreeMap<Hash, Instant>>> =
 /// records the attempt. Returns false if we're inside the cooldown.
 fn allow_refresh_attempt(series_key_hash: Hash) -> bool {
     let now = Instant::now();
-    let mut guard = LAST_REFRESH_ATTEMPT.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(&last) = guard.get(&series_key_hash) {
-        if now < last + ANNOUNCE_COOLDOWN {
+    let mut guard = LAST_REFRESH_ATTEMPT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(&last) = guard.get(&series_key_hash)
+        && now < last + ANNOUNCE_COOLDOWN {
             return false;
         }
-    }
     guard.insert(series_key_hash, now);
     // Opportunistic GC: keep the map from growing unboundedly. Walk and prune
     // entries older than 10 cooldowns. This runs on every accepted attempt;
@@ -47,9 +53,11 @@ fn allow_refresh_attempt(series_key_hash: Hash) -> bool {
     true
 }
 
-use crate::cli;
-use crate::models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef};
-use crate::system::transport::channel_manager;
+use crate::{
+    cli,
+    models::{CollectionItem, Edition, ObjectRef, SeriesRef, SubscriptionRef},
+    system::transport::channel_manager,
+};
 
 use super::file_transfer;
 

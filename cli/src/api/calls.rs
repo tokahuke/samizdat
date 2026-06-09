@@ -1,6 +1,7 @@
 //! API call implementations for interacting with the Samizdat node.
 //!
-//! This module provides strongly-typed wrappers around HTTP endpoints exposed by the node,
+//! This module provides strongly-typed wrappers around HTTP endpoints exposed by the
+//! node,
 //! organized into logical groups.
 
 use anyhow::Context;
@@ -10,7 +11,7 @@ use std::{str::FromStr, time::Duration};
 
 use samizdat_common::{Hash, Key, Signed};
 
-use super::{access_token, delete, get, patch, post, put, CLIENT};
+use super::{CLIENT, access_token, delete, get, patch, post, put};
 
 // Hubs:
 
@@ -94,7 +95,7 @@ pub async fn get_all_peers() -> Result<Vec<GetPeerResponse>, anyhow::Error> {
 /// * `content_type` - The MIME type of the content being posted
 /// * `bookmark` - Whether to bookmark this object so that it is not vacumed. away.
 /// * `is_draft` - Whether this object is a draft version. Drafts are not exposed to the
-///    network
+///   network
 ///
 /// # Returns
 /// The hash of the posted object as a string
@@ -325,6 +326,11 @@ pub async fn get_collection_list(collection: &str) -> Result<Vec<String>, anyhow
 pub struct PostSubscriptionRequest<'a> {
     /// Public key to subscribe to
     pub public_key: &'a str,
+    /// Optional cap (megabytes) on the size of a single edition for
+    /// this subscription. `None` falls back to the node's
+    /// `default_max_edition_size_mb` operator setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_size_mb: Option<u64>,
 }
 
 /// Response containing subscription information.
@@ -334,6 +340,10 @@ pub struct GetSubscriptionResponse {
     pub public_key: Key,
     /// Type of subscription
     pub kind: String,
+    /// Per-subscription size cap in bytes; `None` when the operator
+    /// default applies. The CLI renders this as MB.
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
 }
 
 /// Creates a new subscription.

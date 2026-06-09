@@ -59,6 +59,3 @@ tempfile = "3.12"
 
 [features]
 test-helpers = ["dep:tempfile"]
-
-[lints]
-workspace = true

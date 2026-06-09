@@ -11,11 +11,11 @@
 //! require a server-side edit.
 
 use anyhow::{Context, anyhow};
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use crate::cli::cli;
 
@@ -85,10 +85,12 @@ pub fn init_port() -> Result<u16, anyhow::Error> {
             cli().data.display()
         )
     })?;
-    contents
-        .trim()
-        .parse::<u16>()
-        .with_context(|| format!("port file at {} does not contain a valid u16", path.display()))
+    contents.trim().parse::<u16>().with_context(|| {
+        format!(
+            "port file at {} does not contain a valid u16",
+            path.display()
+        )
+    })
 }
 
 /// Build a path inside the configured data dir. Uses `Path::join` so the

@@ -3,9 +3,11 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as DeriveDeserialize, Serialize as DeriveSerialize};
-use std::fmt::{self, Debug, Display};
-use std::ops::Deref;
-use std::str::FromStr;
+use std::{
+    fmt::{self, Debug, Display},
+    ops::Deref,
+    str::FromStr,
+};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::Hash;
@@ -132,6 +134,18 @@ impl From<PrivateKey> for ed25519_dalek::SigningKey {
 #[serde(transparent)]
 pub struct Key(ed25519_dalek::VerifyingKey);
 
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl FromStr for Key {
     type Err = crate::Error;
     fn from_str(s: &str) -> Result<Key, crate::Error> {
@@ -152,13 +166,21 @@ impl FromStr for Key {
 
 impl Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", crate::encoding::base32_lc().encode(self.0.as_bytes()))
+        write!(
+            f,
+            "{}",
+            crate::encoding::base32_lc().encode(self.0.as_bytes())
+        )
     }
 }
 
 impl Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", crate::encoding::base32_lc().encode(self.0.as_bytes()))
+        write!(
+            f,
+            "{}",
+            crate::encoding::base32_lc().encode(self.0.as_bytes())
+        )
     }
 }
 
@@ -241,7 +263,10 @@ mod tests {
         let disp = format!("{pk}");
 
         assert!(!dbg.contains(&secret_b64), "Debug leaked the key: {dbg}");
-        assert!(!disp.contains(&secret_b64), "Display leaked the key: {disp}");
+        assert!(
+            !disp.contains(&secret_b64),
+            "Display leaked the key: {disp}"
+        );
         assert!(dbg.contains("redacted"));
     }
 

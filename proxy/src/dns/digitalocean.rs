@@ -9,11 +9,11 @@ use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use std::fmt::Write;
 
-use super::{http_client, DnsError, DnsProvider, TxtHandle};
+use super::{DnsError, DnsProvider, TxtHandle, http_client};
 
 const API_BASE: &str = "https://api.digitalocean.com/v2";
 
-use crate::dns::util::{truncate_on_boundary as truncate, ERROR_BODY_LIMIT};
+use crate::dns::util::{ERROR_BODY_LIMIT, truncate_on_boundary as truncate};
 
 /// DigitalOcean DNS-01 provider. Owns a bearer token and a reqwest
 /// client shared across renewals via `http_client`.
@@ -155,12 +155,11 @@ fn extract_record_id(body: &str) -> Result<i64, DnsError> {
         }
     }
     let mut digits = String::new();
-    if let Some(&c) = chars.peek() {
-        if c == '-' {
+    if let Some(&c) = chars.peek()
+        && c == '-' {
             digits.push(c);
             chars.next();
         }
-    }
     while let Some(&c) = chars.peek() {
         if c.is_ascii_digit() {
             digits.push(c);
@@ -212,8 +211,7 @@ mod tests {
 
     #[test]
     fn derive_subdomain_strips_zone() {
-        let got =
-            derive_subdomain("_acme-challenge.proxy.example.com", "example.com").unwrap();
+        let got = derive_subdomain("_acme-challenge.proxy.example.com", "example.com").unwrap();
         assert_eq!(got, "_acme-challenge.proxy");
     }
 
@@ -225,8 +223,7 @@ mod tests {
 
     #[test]
     fn derive_subdomain_mismatch_errors() {
-        let err = derive_subdomain("_acme-challenge.proxy.other.com", "example.com")
-            .unwrap_err();
+        let err = derive_subdomain("_acme-challenge.proxy.other.com", "example.com").unwrap_err();
         match err {
             DnsError::Provider(msg) => {
                 assert!(msg.contains("not inside zone"), "got: {msg}");
@@ -294,8 +291,9 @@ impl crate::dns::ProviderConfig for DigitalOceanTopology {
             .token_env
             .clone()
             .unwrap_or_else(|| "DIGITALOCEAN_TOKEN".to_owned());
-        let token = std::env::var(&var)
-            .map_err(|_| anyhow::anyhow!("env var {var} is not set; cannot construct DO provider"))?;
+        let token = std::env::var(&var).map_err(|_| {
+            anyhow::anyhow!("env var {var} is not set; cannot construct DO provider")
+        })?;
         Ok(Box::new(DigitalOcean::new(token)))
     }
 }

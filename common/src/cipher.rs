@@ -1,13 +1,14 @@
 //! Defines the standard use of a symmetric cypher, using `AES256-GCM-SIV`.
 
-use aes_gcm_siv::aead::{AeadInPlace, KeyInit};
-use aes_gcm_siv::{Aes256GcmSiv, Nonce};
+use aes_gcm_siv::{
+    Aes256GcmSiv, Nonce,
+    aead::{AeadInPlace, KeyInit},
+};
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use sha2::Sha256;
-use std::fmt::Debug;
-use std::marker::PhantomData;
+use std::{fmt::Debug, marker::PhantomData};
 use zeroize::Zeroize;
 
 use crate::Hash;
@@ -148,8 +149,8 @@ impl OpaqueEncrypted {
 
     /// Decrypts the encrypted data using a supplied [`TransferCipher`] and the expected
     /// data type of the output. If the [`TransferCipher`] does not correspond to the
-    /// original cipher or the data type does not match the original type, this method will
-    /// fail with and error.
+    /// original cipher or the data type does not match the original type, this method
+    /// will fail with and error.
     pub fn decrypt_with<T>(mut self, cipher: &TransferCipher) -> Result<T, crate::Error>
     where
         T: for<'a> Deserialize<'a>,

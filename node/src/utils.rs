@@ -7,8 +7,8 @@ use std::{collections::VecDeque, net::SocketAddr};
 
 /// Makes a socket address use the canonical IP form.
 ///
-/// If an IPv6 address represents a tunneled IPv4 address, it will be converted to its IPv4
-/// form while preserving the port number.
+/// If an IPv6 address represents a tunneled IPv4 address, it will be converted to its
+/// IPv4 form while preserving the port number.
 pub fn socket_to_canonical(socket_addr: SocketAddr) -> SocketAddr {
     (socket_addr.ip().to_canonical(), socket_addr.port()).into()
 }

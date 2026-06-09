@@ -14,26 +14,21 @@ pub mod subscription;
 pub use doctor::run as doctor;
 
 use anyhow::Context;
-use futures::prelude::*;
-use futures::stream;
+use futures::{prelude::*, stream};
 use notify::{RecursiveMode, Watcher};
-use std::io::Read;
-use std::io::Write;
-use std::net::SocketAddr;
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
-use std::{env, fs, io};
+use std::{
+    env, fs, io,
+    io::{Read, Write},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 
 use samizdat_common::{Hash, PrivateKey};
 
-use crate::api;
-use crate::api::EditionKind;
-use crate::html::proxy_page;
-use crate::util::MARKER;
-use crate::{Manifest, PrivateManifest};
+use crate::{Manifest, PrivateManifest, api, api::EditionKind, html::proxy_page, util::MARKER};
 
 /// Displays a table of data using markdown formatting.
 fn show_table<T: Tabled>(t: impl IntoIterator<Item = T>) {
@@ -110,9 +105,7 @@ pub async fn init(nickname: Option<String>) -> Result<(), anyhow::Error> {
 /// The private key, if supplied, is read from a FILE path rather than from a
 /// CLI argument value; this keeps secret material out of `argv`, shell history,
 /// `/proc/<pid>/cmdline`, and shared audit logs.
-pub async fn import(
-    private_key_file: Option<PathBuf>,
-) -> Result<(), anyhow::Error> {
+pub async fn import(private_key_file: Option<PathBuf>) -> Result<(), anyhow::Error> {
     let manifest = Manifest::find_opt()
         .context("failed to find `Samizdat.toml`")?
         .ok_or_else(|| anyhow::anyhow!("`Samizdat.toml` does not exist"))?;
@@ -393,15 +386,14 @@ pub async fn watch(
     }
 
     // Load browser
-    if !no_browser {
-        if let Err(err) = webbrowser::open(&format!(
+    if !no_browser
+        && let Err(err) = webbrowser::open(&format!(
             "http://localhost:{}/_series/{}",
             crate::access_token::port()?,
             private_manifest.public_key_debug
         )) {
             println!("WARNING: could not open browser: {err}")
         }
-    }
 
     // Print watch banner:
     println!();

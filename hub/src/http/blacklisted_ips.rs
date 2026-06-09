@@ -1,8 +1,8 @@
 use std::net::IpAddr;
 
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use futures::FutureExt;
 use samizdat_common::db::{readonly_tx, writable_tx};
@@ -35,8 +35,6 @@ pub fn api() -> Router {
         )
         .route(
             "/",
-            get(|| {
-                async move { readonly_tx(|tx| BlacklistedIp::get_all(tx)) }.map(ApiResponse)
-            }),
+            get(|| async move { readonly_tx(|tx| BlacklistedIp::get_all(tx)) }.map(ApiResponse)),
         )
 }

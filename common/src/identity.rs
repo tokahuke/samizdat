@@ -139,8 +139,15 @@ mod tests {
 
     #[test]
     fn happy_path_accepts_realistic_identities() {
-        for ok in &["samizdat-blog", "alice", "blog-2026", "abc", "a-b-c-d", "x", "get-samizdat"]
-        {
+        for ok in &[
+            "samizdat-blog",
+            "alice",
+            "blog-2026",
+            "abc",
+            "a-b-c-d",
+            "x",
+            "get-samizdat",
+        ] {
             assert!(check_servable_identity(ok).is_ok(), "expected ok: {ok}");
         }
     }
@@ -190,8 +197,14 @@ mod tests {
 
     #[test]
     fn rejects_leading_and_trailing_hyphen() {
-        assert_eq!(check_servable_identity("-alice"), Err(Reason::LeadingHyphen));
-        assert_eq!(check_servable_identity("alice-"), Err(Reason::TrailingHyphen));
+        assert_eq!(
+            check_servable_identity("-alice"),
+            Err(Reason::LeadingHyphen)
+        );
+        assert_eq!(
+            check_servable_identity("alice-"),
+            Err(Reason::TrailingHyphen)
+        );
     }
 
     #[test]

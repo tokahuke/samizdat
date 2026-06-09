@@ -1,7 +1,9 @@
 //! Series command implementations for the Samizdat CLI.
 
-use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::{
+    io::{IsTerminal, Write},
+    path::PathBuf,
+};
 
 use anyhow::Context;
 use tabled::Tabled;
@@ -19,8 +21,8 @@ use crate::api::{self, Keypair};
 /// # Arguments
 ///
 /// * `nickname` - Node-local nickname for the series owner.
-/// * `is_draft` - Whether this is a draft series. Draft series are not published
-///   to the network.
+/// * `is_draft` - Whether this is a draft series. Draft series are not published to the
+///   network.
 /// * `public_key` - Optional public key for the series
 /// * `private_key_file` - Optional path to a file containing the private key
 pub async fn new(

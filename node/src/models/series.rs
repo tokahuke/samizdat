@@ -3,23 +3,29 @@
 
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
-use futures::prelude::*;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, TxHandle, WritableTx};
-use samizdat_common::rpc::QueryKind;
 use serde_derive::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-use std::str::FromStr;
-use std::time::Duration;
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::time::Instant;
 
-use samizdat_common::cipher::{OpaqueEncrypted, TransferCipher};
-use samizdat_common::Hint;
-use samizdat_common::HASH_LEN;
-use samizdat_common::{rpc::EditionAnnouncement, Hash, Key, PrivateKey, Riddle, Signed};
+use samizdat_common::{
+    HASH_LEN, Hash, Hint, Key, PrivateKey, Riddle, Signed,
+    cipher::{OpaqueEncrypted, TransferCipher},
+    db::{Droppable, Table as _, TxHandle, WritableTx, readonly_tx, writable_tx},
+    rpc::{EditionAnnouncement, QueryKind},
+};
 
-use crate::db::Table;
-use crate::system::ReceivedItem;
-use crate::{cli, hubs};
+use crate::{
+    cap::{self, Cap},
+    cli,
+    db::Table,
+    hubs,
+    system::FetchOutcome,
+};
 
 use super::{BookmarkType, CollectionRef, Inventory, ItemPath, ObjectRef};
 
@@ -253,8 +259,9 @@ impl SeriesRef {
         riddle: &Riddle,
         hint: &Hint,
     ) -> Result<Option<SeriesRef>, crate::Error> {
-        let outcome = Table::Series.prefix(hint.prefix()).for_each(tx, |key, value| {
-            match Key::from_bytes(key) {
+        let outcome = Table::Series
+            .prefix(hint.prefix())
+            .for_each(tx, |key, value| match Key::from_bytes(key) {
                 Ok(key) => {
                     if riddle.resolves(&key.hash()) {
                         Ok(Some(bincode::deserialize(value)?))
@@ -266,8 +273,7 @@ impl SeriesRef {
                     tracing::warn!("{}", err);
                     Ok(None)
                 }
-            }
-        })?;
+            })?;
 
         Ok(outcome)
     }
@@ -301,7 +307,8 @@ impl SeriesRef {
         Ok(())
     }
 
-    /// Set this series as just delayed. By now, this is the same as [`SeriesRef::mark_fresh`].
+    /// Set this series as just delayed. By now, this is the same as
+    /// [`SeriesRef::mark_fresh`].
     pub fn mark_delayed(&self, tx: &mut WritableTx) -> Result<(), crate::Error> {
         tracing::info!("Setting series {self} as delayed");
         Table::SeriesFreshnesses.put(
@@ -352,10 +359,7 @@ impl SeriesRef {
     }
 
     /// Gets the last edition for this series in the database.
-    pub fn get_last_edition<Tx: TxHandle>(
-        &self,
-        tx: &Tx,
-    ) -> Result<Option<Edition>, crate::Error> {
+    pub fn get_last_edition<Tx: TxHandle>(&self, tx: &Tx) -> Result<Option<Edition>, crate::Error> {
         Ok(self.get_editions(tx)?.next())
     }
 
@@ -369,8 +373,8 @@ impl SeriesRef {
     ///      old (still-validly-signed) edition.
     ///   4. **Bookmark accounting (B4):** Reference-pins the new edition's objects and
     ///      Reference-unpins the previous edition's objects, so the vacuum doesn't
-    ///      collect inventory that an active subscription wants. Idempotent: advancing
-    ///      to the same edition twice (same key) is a no-op.
+    ///      collect inventory that an active subscription wants. Idempotent: advancing to
+    ///      the same edition twice (same key) is a no-op.
     pub fn advance(&self, tx: &mut WritableTx, edition: &Edition) -> Result<(), crate::Error> {
         if !edition.is_valid() {
             return Err(crate::Error::InvalidEdition);
@@ -457,7 +461,8 @@ impl SeriesRef {
 pub enum EditionKind {
     /// Forget everything that came before. All the content will start from scratch.
     Base,
-    /// Add to what came before. If an item is not found in the current edition, search for the
+    /// Add to what came before. If an item is not found in the current edition, search
+    /// for the
     /// content in previous editions (unless _explicitely deleted_).
     Layer,
 }
@@ -563,8 +568,7 @@ impl Edition {
     /// reverse index. Returns `Ok(None)` if no edition has been indexed
     /// under that id; the host-form dispatch surfaces that as 404.
     pub fn by_id<Tx: TxHandle>(id: &Hash, tx: &Tx) -> Result<Option<Edition>, crate::Error> {
-        let Some(primary_key) =
-            Table::EditionsByHash.get(tx, id.as_ref(), |v| Ok(v.to_vec()))?
+        let Some(primary_key) = Table::EditionsByHash.get(tx, id.as_ref(), |v| Ok(v.to_vec()))?
         else {
             return Ok(None);
         };
@@ -632,13 +636,22 @@ impl Edition {
         };
 
         let content = match received_item {
-            ReceivedItem::NewObject(received_object) => {
-                received_object
-                    .into_content_stream()
-                    .collect_content()
-                    .await?
+            FetchOutcome::InFlight(in_flight) => {
+                // The inventory itself is small; pass no scope cap so
+                // it always fits regardless of subscription budget.
+                // The ambient `OBJECT_SIZE_LIMIT` and
+                // `NODE_STORAGE_CAP` still apply.
+                ObjectRef::import(
+                    in_flight.merkle_tree,
+                    in_flight.metadata,
+                    in_flight.query_duration,
+                    in_flight.chunks,
+                    None,
+                )?
+                .collect_content()
+                .await?
             }
-            ReceivedItem::ExistingObject(object) => object.content()?.expect("object exists"),
+            FetchOutcome::Existing(object) => object.content()?.expect("object exists"),
         };
 
         let inventory: Inventory = serde_json::from_slice(&content).map_err(|err| {
@@ -656,24 +669,73 @@ impl Edition {
             Ok(())
         })?;
 
-        // 3. Schedule fetches for objects not yet local. (Best-effort; failures of
-        //    individual object fetches do not roll back the advance/refresh; the series
-        //    is at the new edition, missing objects will be queried on demand.)
-        for (item_path, hash) in &inventory {
-            if !readonly_tx(|tx| ObjectRef::new(*hash).exists(tx))? {
+        // 3. Eager fetch under per-edition cap. Best-effort: failures leave items unfetched.
+        let public_key = self.public_key().clone();
+        let scope_cap: Arc<dyn Cap> = cap::refresh_cap_for(&public_key);
+
+        let pending = (&inventory)
+            .into_iter()
+            .filter_map(|(item_path, hash)| {
+                let object = ObjectRef::new(*hash);
+                match readonly_tx(|tx| object.exists(tx)) {
+                    Ok(true) => {
+                        // Account for cap even though no fetch is needed: this
+                        // subscription pins the object via the new edition.
+                        let metadata = readonly_tx(|tx| object.metadata(tx)).ok().flatten();
+                        if let Some(metadata) = metadata {
+                            match scope_cap.clone().reserve(metadata.content_size) {
+                                Ok(reservation) => reservation.commit(),
+                                Err(err) => tracing::warn!(
+                                    "subscription {public_key}: already-local {hash} \
+                                     could not be accounted ({err})"
+                                ),
+                            }
+                        }
+                        None
+                    }
+                    Ok(false) => Some((item_path.clone(), *hash)),
+                    Err(err) => {
+                        tracing::warn!("readonly_tx failure while filtering inventory: {err}");
+                        None
+                    }
+                }
+            })
+            .map(|(item_path, _hash)| {
+                let scope_cap = scope_cap.clone();
                 let content_hash = collection.locator_for(item_path.as_path()).hash();
-                tokio::spawn(
-                    hubs()
+                async move {
+                    let outcome = hubs()
                         .query_with_retry(
                             content_hash,
                             QueryKind::Item,
                             Instant::now() + Duration::from_secs(60),
                             exp_backoff(),
                         )
-                        .map(|_| ()),
-                );
-            } else {
-                tracing::info!("Object {hash} already exists in the database. Skipping");
+                        .await;
+                    let Some(FetchOutcome::InFlight(in_flight)) = outcome else {
+                        return Ok(());
+                    };
+                    let stream = ObjectRef::import(
+                        in_flight.merkle_tree,
+                        in_flight.metadata,
+                        in_flight.query_duration,
+                        in_flight.chunks,
+                        Some(scope_cap),
+                    )?;
+                    // Drain the stream so the import task actually runs
+                    // to completion; the bytes themselves are landed in
+                    // LMDB as chunks, we just need to wait.
+                    stream.collect_content().await?;
+                    Ok::<_, crate::Error>(())
+                }
+            })
+            .collect::<futures::stream::FuturesUnordered<_>>();
+
+        use futures::stream::StreamExt as _;
+        let mut pending = Box::pin(pending);
+        while let Some(outcome) = pending.next().await {
+            if let Err(err) = outcome {
+                tracing::warn!("edition refresh for series {public_key}: fetch failed: {err}");
             }
         }
 
@@ -694,8 +756,7 @@ impl Edition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use samizdat_common::db::test_harness::TestDb;
-    use samizdat_common::Hash;
+    use samizdat_common::{Hash, db::test_harness::TestDb};
 
     /// Builds a series-owner name unique enough not to collide with leftover state from
     /// previous tests in the same binary (TestDb shares the global DB across tests).
@@ -707,11 +768,10 @@ mod tests {
     fn generate_series_ownership() {
         TestDb::<crate::db::Table>::with(|| {
             let name = unique_name("a-series");
-            let series = writable_tx(|tx| {
-                SeriesOwner::create(tx, &name, Duration::from_secs(3600), true)
-            })
-            .unwrap()
-            .series();
+            let series =
+                writable_tx(|tx| SeriesOwner::create(tx, &name, Duration::from_secs(3600), true))
+                    .unwrap()
+                    .series();
             // Just check we got a series back; we don't compare structure.
             let _ = series;
         });
@@ -769,7 +829,11 @@ mod tests {
                 EditionKind::Base,
             );
 
-            assert_ne!(e1.key(), e2.key(), "1µs-apart editions must produce distinct keys");
+            assert_ne!(
+                e1.key(),
+                e2.key(),
+                "1µs-apart editions must produce distinct keys"
+            );
         });
     }
 
@@ -838,10 +902,7 @@ mod tests {
             let edition = owner.sign(CollectionRef::rand(), Utc::now(), None, EditionKind::Base);
             // The series we ask to advance with this edition is the OTHER one.
             let result = writable_tx(|tx| other.series().advance(tx, &edition));
-            assert!(matches!(
-                result,
-                Err(crate::Error::DifferentPublicKeys)
-            ));
+            assert!(matches!(result, Err(crate::Error::DifferentPublicKeys)));
         });
     }
 }

@@ -14,7 +14,7 @@
 
 use std::{
     net::SocketAddr,
-    sync::{mpsc, Arc, RwLock},
+    sync::{Arc, RwLock, mpsc},
     thread,
 };
 
@@ -57,6 +57,10 @@ impl RefreshSocket {
                         // user's machine (including one served by `evil.com`)
                         // can connect to the refresh port and observe rebuild
                         // pings as a side-channel.
+                        // The closure's Err type is dictated by tungstenite's
+                        // accept_hdr signature; boxing would require trait
+                        // gymnastics for one error site.
+                        #[allow(clippy::result_large_err)]
                         let mut conn = tungstenite::accept_hdr(
                             stream,
                             |req: &tungstenite::handshake::server::Request,
@@ -130,9 +134,9 @@ fn origin_is_local(req: &tungstenite::handshake::server::Request) -> bool {
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(origin_str);
-    let host = after_scheme.rsplit_once(':')
+    let host = after_scheme
+        .rsplit_once(':')
         .map(|(host, _port)| host)
         .unwrap_or(after_scheme);
-    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
-        || host.starts_with("127.")
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]") || host.starts_with("127.")
 }

@@ -13,23 +13,30 @@
 //!   data    /var/lib/samizdat/<role>/
 
 use anyhow::{Context, Result, bail};
-use std::fs;
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
-use crate::cli::{AdminAction, Component};
-use crate::daemons::{self, Daemon, launchd_label};
-use crate::fetch::{self, DEFAULT_ORIGIN};
+use crate::{
+    cli::{AdminAction, Component},
+    daemons::{self, Daemon, launchd_label},
+    fetch::{self, DEFAULT_ORIGIN},
+};
 
-use super::{InstallOpts, UninstallOpts, ADMIN_GROUP};
+use super::{ADMIN_GROUP, InstallOpts, UninstallOpts};
 
 pub(super) fn install(opts: InstallOpts) -> Result<()> {
     require_root()?;
 
     let version = opts.version.clone().unwrap_or_else(|| "latest".to_owned());
-    let origin = opts.from.clone().unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
+    let origin = opts
+        .from
+        .clone()
+        .unwrap_or_else(|| DEFAULT_ORIGIN.to_owned());
     let target = fetch::host_target_triple();
 
     ensure_admin_group()?;
@@ -212,8 +219,7 @@ pub(super) fn self_update() -> Result<()> {
     let target = fetch::host_target_triple();
     let fetched = fetch::fetch_file(&origin, "latest", target, "samizdat-up", "samizdat-up")
         .context("fetching new samizdat-up")?;
-    let dest = std::env::current_exe()
-        .context("locating current samizdat-up binary")?;
+    let dest = std::env::current_exe().context("locating current samizdat-up binary")?;
 
     let staged = dest.with_extension("samizdat-up-new");
     atomic_write_executable(&staged, &fetched.bytes)
@@ -271,8 +277,7 @@ fn install_cli_binary(origin: &str, version: &str, target: &str) -> Result<()> {
 fn ensure_config(d: &Daemon, as_user: Option<&str>) -> Result<()> {
     fs::create_dir_all("/etc/samizdat").context("creating /etc/samizdat")?;
     let data_dir = format!("/var/lib/samizdat/{}", d.name);
-    fs::create_dir_all(&data_dir)
-        .with_context(|| format!("creating {data_dir}"))?;
+    fs::create_dir_all(&data_dir).with_context(|| format!("creating {data_dir}"))?;
     // Mode 2755 (setgid bit on, world-traversable): setgid forces
     // every file the daemon creates here to inherit the data dir's
     // group (samizdat), so admin-token (0640) is group-readable by
@@ -337,7 +342,10 @@ fn ensure_proxy_env_file() -> Result<()> {
         .status()
         .with_context(|| format!("running chgrp {ADMIN_GROUP} {}", path.display()))?;
     if !status.success() {
-        bail!("chgrp {ADMIN_GROUP} {} exited with {status}", path.display());
+        bail!(
+            "chgrp {ADMIN_GROUP} {} exited with {status}",
+            path.display()
+        );
     }
     println!(
         "samizdat-up: created {} (mode 0640, owner root:{ADMIN_GROUP}). \
@@ -431,7 +439,7 @@ fn chgrp_recursive(path: &str, group: &str) -> Result<()> {
 
 /// Idempotent group creation via `dscl`. Picks the next free GID
 /// >= 500 (the user-range floor on macOS) to avoid colliding with
-/// system groups. If the group already exists, returns early.
+/// > system groups. If the group already exists, returns early.
 fn ensure_admin_group() -> Result<()> {
     // dscl returns non-zero when the record does not exist; success
     // means "found", so we treat success as "already there".
@@ -528,7 +536,12 @@ pub(super) fn admin(action: AdminAction) -> Result<()> {
         }
         AdminAction::List => {
             let out = Command::new("dscl")
-                .args([".", "-read", &format!("/Groups/{ADMIN_GROUP}"), "GroupMembership"])
+                .args([
+                    ".",
+                    "-read",
+                    &format!("/Groups/{ADMIN_GROUP}"),
+                    "GroupMembership",
+                ])
                 .output()
                 .with_context(|| format!("reading membership of {ADMIN_GROUP}"))?;
             if !out.status.success() {
@@ -574,7 +587,9 @@ fn print_post_install(daemons: &[&str]) {
         let label = format!("com.samizdat.{name}");
         println!("samizdat-{name} installed.  launchd: {label} (loaded + enabled)");
         println!("    stop:    sudo launchctl bootout system/{label}");
-        println!("    start:   sudo launchctl bootstrap system /Library/LaunchDaemons/{label}.plist");
+        println!(
+            "    start:   sudo launchctl bootstrap system /Library/LaunchDaemons/{label}.plist"
+        );
         println!("    restart: sudo launchctl kickstart -k system/{label}");
         println!("    check:   sudo launchctl print system/{label}");
         println!("    remove:  sudo samizdat-up uninstall {name}");

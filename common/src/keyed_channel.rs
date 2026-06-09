@@ -8,13 +8,13 @@
 //! The underlying mpsc is bounded; a misbehaving sender cannot grow memory without
 //! limit. Overflow drops the message and logs at `warn` level.
 
-use futures::{channel::mpsc, Stream, StreamExt};
+use futures::{Stream, StreamExt, channel::mpsc};
 use std::{
     collections::BTreeMap,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     task::{Context, Poll},
 };
@@ -128,12 +128,11 @@ pub struct RecvStream<T> {
 impl<T> Drop for RecvStream<T> {
     fn drop(&mut self) {
         let mut channels = self.channel.0.channels.write().expect("poisoned");
-        if let Some(slot) = channels.get(&self.key) {
-            if slot.generation == self.generation {
+        if let Some(slot) = channels.get(&self.key)
+            && slot.generation == self.generation {
                 channels.remove(&self.key);
             }
             // else: a newer listener replaced us; leave its slot alone.
-        }
     }
 }
 
@@ -147,8 +146,7 @@ impl<T> Stream for RecvStream<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::executor::block_on;
-    use futures::StreamExt;
+    use futures::{StreamExt, executor::block_on};
 
     fn id(n: u64) -> ChannelId {
         n.into()

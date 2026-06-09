@@ -1,12 +1,14 @@
 //! Provides address-related types and functionality for the Samizdat network.
 //!
-//! This module contains definitions for channel addresses, socket addresses, and IP address
-//! resolution modes used in peer-to-peer communication.
+//! This module contains definitions for channel addresses, socket addresses, and IP
+//! address resolution modes used in peer-to-peer communication.
 
 use serde_derive::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
-use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
+use std::{
+    fmt::{self, Debug, Display},
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+};
 
 use crate::Hash;
 

@@ -7,5 +7,7 @@ mod connection_manager;
 mod matcher;
 mod multiplexed;
 
-pub use self::channel_manager::{ChannelReceiver, ChannelSender, PEER_CONNECTIONS};
-pub use self::connection_manager::connection_manager;
+pub use self::{
+    channel_manager::{ChannelReceiver, ChannelSender, PEER_CONNECTIONS},
+    connection_manager::connection_manager,
+};

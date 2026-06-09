@@ -4,20 +4,25 @@
 //! storage size and remove rarely accessed data.
 
 use ordered_float::NotNan;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable, Table as _, WritableTx};
+use samizdat_common::db::{Droppable, Table as _, WritableTx, readonly_tx, writable_tx};
 use serde_derive::{Deserialize, Serialize};
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
-use std::time::Duration;
-use tokio::runtime::Handle;
-use tokio::time::{sleep, Instant};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+    time::Duration,
+};
+use tokio::{
+    runtime::Handle,
+    time::{Instant, sleep},
+};
 
-use samizdat_common::heap_entry::HeapEntry;
-use samizdat_common::Hash;
+use samizdat_common::{Hash, heap_entry::HeapEntry};
 
-use crate::cli::cli;
-use crate::db::{MergeOperation, Table};
-use crate::models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior};
+use crate::{
+    cli::cli,
+    db::{MergeOperation, Table},
+    models::{CollectionItem, ObjectMetadata, ObjectRef, ObjectStatistics, UsePrior},
+};
 
 /// Status for a vacuum task.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -335,8 +340,8 @@ pub fn sweep_crash_leaked_chunks() -> Result<usize, crate::Error> {
 
 /// Drop items that don't point to anything anymore.
 ///
-/// Removes collection items whose referenced objects no longer exist, cleaning up dangling
-/// references from the database.
+/// Removes collection items whose referenced objects no longer exist, cleaning up
+/// dangling references from the database.
 fn drop_dangling_items() -> Result<usize, crate::Error> {
     let mut items_to_drop = vec![];
 

@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DurationMilliSecondsWithFrac};
+use serde_with::{DurationMilliSecondsWithFrac, serde_as};
 use std::time::Duration;
 
 use samizdat_common::rpc::Candidate;

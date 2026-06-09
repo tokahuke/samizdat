@@ -7,28 +7,28 @@
 //! fields we need rather than pull in an XML parser.
 //!
 //! The Route53 record-set change flow has two steps:
-//!   1. POST a `ChangeResourceRecordSetsRequest` with action UPSERT or
-//!      DELETE, get back a change id and a status of `PENDING`.
-//!   2. Poll `GET /change/<id>` until the status flips to `INSYNC`
-//!      across the Route53 fleet, then the record is visible to
-//!      external resolvers including Let's Encrypt's.
+//!   1. POST a `ChangeResourceRecordSetsRequest` with action UPSERT or DELETE, get back a
+//!      change id and a status of `PENDING`.
+//!   2. Poll `GET /change/<id>` until the status flips to `INSYNC` across the Route53
+//!      fleet, then the record is visible to external resolvers including Let's
+//!      Encrypt's.
 //!
 //! The poll is bounded; on timeout we warn and return success, because
 //! Let's Encrypt's external DNS probe (with its own retries) is the
 //! authoritative check, and the cert manager will retry the whole
 //! issuance if validation actually fails.
 
-use std::collections::HashMap;
-use std::fmt::Write;
-use std::time::Duration;
+use std::{collections::HashMap, fmt::Write, time::Duration};
 
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::{sync::Mutex, time::sleep};
 
-use super::aws_sigv4::{sign, SigV4Request};
-use super::{http_client, DnsError, DnsProvider, TxtHandle};
+use super::{
+    DnsError, DnsProvider, TxtHandle,
+    aws_sigv4::{SigV4Request, sign},
+    http_client,
+};
 
 /// Route53 service host. SigV4 scope uses `route53` as the service
 /// name; the region in the scope is whatever the caller configured
@@ -42,7 +42,7 @@ const API_VERSION: &str = "/2013-04-01";
 /// SigV4 service name. Always `route53`.
 const SERVICE: &str = "route53";
 
-use crate::dns::util::{truncate_on_boundary as truncate, ERROR_BODY_LIMIT};
+use crate::dns::util::{ERROR_BODY_LIMIT, truncate_on_boundary as truncate};
 
 /// Maximum wall-clock to wait for a change to propagate to INSYNC.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(60);
@@ -106,9 +106,7 @@ impl Route53 {
         // canonical form. The value is plain ASCII for any real zone
         // name; percent-encode it conservatively all the same.
         let query = format!("dnsname={}", encode_query_value(&canonical));
-        let body = self
-            .request("GET", &path, &query, b"")
-            .await?;
+        let body = self.request("GET", &path, &query, b"").await?;
         let id = extract_first_capture(&body, "<Id>/hostedzone/", "</Id>").ok_or_else(|| {
             DnsError::Provider(format!(
                 "route53: hostedzonesbyname response missing Id: body={}",
@@ -116,10 +114,7 @@ impl Route53 {
             ))
         })?;
 
-        self.zone_ids
-            .lock()
-            .await
-            .insert(canonical, id.clone());
+        self.zone_ids.lock().await.insert(canonical, id.clone());
         Ok(id)
     }
 
@@ -195,9 +190,7 @@ impl Route53 {
     ) -> Result<String, DnsError> {
         let body = build_change_body(action, record_name, value);
         let path = format!("{API_VERSION}/hostedzone/{zone_id}/rrset");
-        let response = self
-            .request("POST", &path, "", body.as_bytes())
-            .await?;
+        let response = self.request("POST", &path, "", body.as_bytes()).await?;
         extract_first_capture(&response, "<Id>/change/", "</Id>").ok_or_else(|| {
             DnsError::Provider(format!(
                 "route53: change response missing Id: body={}",
@@ -406,11 +399,8 @@ fn extract_first_capture(body: &str, prefix: &str, suffix: &str) -> Option<Strin
 fn encode_query_value(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for b in value.bytes() {
-        let unreserved = b.is_ascii_alphanumeric()
-            || b == b'-'
-            || b == b'.'
-            || b == b'_'
-            || b == b'~';
+        let unreserved =
+            b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_' || b == b'~';
         if unreserved {
             out.push(b as char);
         } else {
@@ -526,8 +516,7 @@ mod tests {
 
     #[test]
     fn build_change_body_delete_uses_delete_action() {
-        let body =
-            build_change_body("DELETE", "_acme-challenge.example.com.", "v");
+        let body = build_change_body("DELETE", "_acme-challenge.example.com.", "v");
         assert!(body.contains("<Action>DELETE</Action>"));
         assert!(body.contains("<Value>\"v\"</Value>"));
     }
@@ -582,9 +571,7 @@ impl crate::dns::ProviderConfig for Route53Topology {
             anyhow::anyhow!("env var {id_var} is not set; cannot construct Route53 provider")
         })?;
         let secret_access_key = std::env::var(&secret_var).map_err(|_| {
-            anyhow::anyhow!(
-                "env var {secret_var} is not set; cannot construct Route53 provider"
-            )
+            anyhow::anyhow!("env var {secret_var} is not set; cannot construct Route53 provider")
         })?;
         let session_token = std::env::var(&session_var).ok();
         Ok(Box::new(Route53::new(

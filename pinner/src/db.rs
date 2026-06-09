@@ -6,10 +6,10 @@
 //! requires it.
 
 use chrono::{DateTime, Utc};
-use samizdat_common::db::{
-    init_db, readonly_tx, writable_tx, Migration, Table as _, WritableTx,
+use samizdat_common::{
+    Key,
+    db::{Migration, Table as _, WritableTx, init_db, readonly_tx, writable_tx},
 };
-use samizdat_common::Key;
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::{IntoStaticStr, VariantArray};
 
@@ -69,8 +69,8 @@ pub fn upsert(
     customer: Option<String>,
 ) -> Result<DateTime<Utc>, anyhow::Error> {
     writable_tx(|tx| {
-        let existing: Option<PinnedRow> =
-            Table::PinnedSeries.get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))?;
+        let existing: Option<PinnedRow> = Table::PinnedSeries
+            .get(tx, key.as_bytes(), |bytes| Ok(bincode::deserialize(bytes)?))?;
 
         let row = match existing {
             Some(mut existing) => {
@@ -108,12 +108,15 @@ pub fn list() -> Result<Vec<(Key, PinnedRow)>, anyhow::Error> {
     let collected: Result<Vec<(Key, PinnedRow)>, samizdat_common::Error> = readonly_tx(|tx| {
         Table::PinnedSeries
             .range::<_, [u8; 0]>(..)
-            .collect(tx, |key, value| -> Result<(Key, PinnedRow), samizdat_common::Error> {
-                let parsed_key = Key::from_bytes(key)
-                    .map_err(|e| samizdat_common::Error::from(format!("bad key: {e}")))?;
-                let row: PinnedRow = bincode::deserialize(value)?;
-                Ok((parsed_key, row))
-            })
+            .collect(
+                tx,
+                |key, value| -> Result<(Key, PinnedRow), samizdat_common::Error> {
+                    let parsed_key = Key::from_bytes(key)
+                        .map_err(|e| samizdat_common::Error::from(format!("bad key: {e}")))?;
+                    let row: PinnedRow = bincode::deserialize(value)?;
+                    Ok((parsed_key, row))
+                },
+            )
             .and_then(|res| res)
     });
     collected.map_err(|e| anyhow::anyhow!("db list: {e}"))
@@ -155,4 +158,3 @@ pub fn list_expired(now: DateTime<Utc>) -> Result<Vec<Key>, anyhow::Error> {
         .map(|(key, _)| key)
         .collect())
 }
-

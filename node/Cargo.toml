@@ -16,6 +16,7 @@ futures = "0.3.32"
 http = "1.4.0"
 serde = "1.0.228"
 serde_derive = "1.0.228"
+thiserror = "2.0.3"
 structopt = "0.3.26"
 tarpc = { version = "0.35.0", features = ["tokio1", "serde-transport", "tcp"] }
 tokio = { version = "1.52.3", features = [
@@ -56,6 +57,3 @@ subtle = "2.6.1"
 [dev-dependencies]
 samizdat-common = { path = "../common", features = ["test-helpers"] }
 tempfile = "3.12"
-
-[lints]
-workspace = true

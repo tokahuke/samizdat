@@ -1,17 +1,21 @@
 //! Bridges from the Samizdat world to the HTTP world.
 
-use axum::body::Body;
-use axum::response::{IntoResponse, Response};
+use axum::{
+    body::Body,
+    response::{IntoResponse, Response},
+};
 use futures::TryStreamExt;
 use samizdat_common::db::{readonly_tx, writable_tx};
 use tokio::time::Instant;
 
 use samizdat_common::rpc::QueryKind;
 
-use crate::hubs;
-use crate::identity_dapp::identity_provider;
-use crate::models::{EditionKind, ItemPath, Locator, ObjectRef, SeriesRef};
-use crate::system::{ReceivedItem, ReceivedObject};
+use crate::{
+    hubs,
+    identity_dapp::identity_provider,
+    models::{EditionKind, ItemPath, Locator, ObjectRef, SeriesRef},
+    system::{FetchOutcome, InFlightObject},
+};
 
 /// Am HTTP response for an object that has been resolved.
 pub struct Resolved {
@@ -55,15 +59,22 @@ impl IntoResponse for NotResolved {
 }
 
 /// Creates the HTTP response for an object that has been found outside the node and is
-/// being currently downloaded.
+/// being currently downloaded. The on-demand HTTP read does not enforce a scope cap;
+/// only the ambient `OBJECT_SIZE_LIMIT` and `NODE_STORAGE_CAP` apply.
 async fn resolve_new_object(
-    received_object: ReceivedObject,
+    in_flight: InFlightObject,
     ext_headers: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<Resolved, crate::Error> {
-    let object = received_object.object_ref();
-    let header = received_object.metadata().header.clone();
-    let query_duration = received_object.query_duration();
-    let content_stream = received_object.into_content_stream();
+    let object = in_flight.object_ref.clone();
+    let header = in_flight.metadata.header.clone();
+    let query_duration = in_flight.query_duration;
+    let content_stream = ObjectRef::import(
+        in_flight.merkle_tree,
+        in_flight.metadata,
+        in_flight.query_duration,
+        in_flight.chunks,
+        None,
+    )?;
 
     Ok(Resolved {
         content_type: header.content_type().to_owned(),
@@ -142,18 +153,16 @@ pub async fn resolve_object(
         .await
     {
         // This should not be possible!!
-        Some(ReceivedItem::ExistingObject(object)) => {
+        Some(FetchOutcome::Existing(object)) => {
             tracing::warn!(
                 "After querying hubs, found local hash {}. This should be impossible!",
                 object.hash()
             );
             Ok(resolve_existing_object(object, ext_headers)?.into_response())
         }
-        Some(ReceivedItem::NewObject(received_object)) => {
-            Ok(resolve_new_object(received_object, ext_headers)
-                .await?
-                .into_response())
-        }
+        Some(FetchOutcome::InFlight(in_flight)) => Ok(resolve_new_object(in_flight, ext_headers)
+            .await?
+            .into_response()),
         None => {
             let not_resolved = NotResolved {
                 message: format!("Object {} not found", object.hash()),
@@ -190,23 +199,23 @@ pub async fn resolve_item(
         .query(locator.hash(), QueryKind::Item, deadline)
         .await
     {
-        Some(ReceivedItem::ExistingObject(object)) if object.is_null() => Ok(NotResolved {
+        Some(FetchOutcome::Existing(object)) if object.is_null() => Ok(NotResolved {
             message: format!("Item {locator} not found"),
         }
         .into_response()),
-        Some(ReceivedItem::ExistingObject(object)) => {
+        Some(FetchOutcome::Existing(object)) => {
             tracing::warn!(
                 "After querying hubs, found local hash {} for item {locator}",
                 object.hash()
             );
             Ok(resolve_existing_object(object, ext_headers)?.into_response())
         }
-        Some(ReceivedItem::NewObject(received_object)) => {
+        Some(FetchOutcome::InFlight(in_flight)) => {
             tracing::warn!(
                 "After querying hubs, found new hash {} for item {locator}",
-                received_object.object_ref().hash()
+                in_flight.object_ref.hash()
             );
-            Ok(resolve_new_object(received_object, ext_headers)
+            Ok(resolve_new_object(in_flight, ext_headers)
                 .await?
                 .into_response())
         }
@@ -250,7 +259,9 @@ pub async fn resolve_series(
     tracing::info!("Trying to find path in freshest edition");
     let mut empty = true;
 
-    for edition in readonly_tx(|tx| Ok::<Vec<_>, crate::Error>(series.get_editions(tx)?.collect::<Vec<_>>()))? {
+    for edition in
+        readonly_tx(|tx| Ok::<Vec<_>, crate::Error>(series.get_editions(tx)?.collect::<Vec<_>>()))?
+    {
         empty = false;
         tracing::info!("Trying collection {:?}", edition.collection());
         let locator = edition.collection().locator_for(name.clone());

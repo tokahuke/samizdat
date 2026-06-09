@@ -24,11 +24,11 @@ use std::{
 };
 
 use axum::{
+    Router,
     extract::{ConnectInfo, FromRequestParts, Request},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use futures::FutureExt;
 use http::request::Parts;
@@ -152,21 +152,19 @@ impl IntoResponse for PageResponse {
 ///
 /// Split into two sub-routers and a top-level CORS layer:
 ///
-/// - The **admin sub-router** holds every `/_*` nest. Its requests must arrive
-///   on the bare loopback host (`localhost`, `127.0.0.1`, `[::1]`); the
-///   `require_bare_host` layer returns 404 for admin requests on any
-///   `*.localhost` subdomain. Admin auth (bearer token or `/_register`
-///   trusted-context grant via the Referer) still applies on individual
-///   routes; this layer is only the host-level guard.
-/// - The **content sub-router** holds the two content handlers (`GET /` and
-///   `GET /{*name}`). Both use the `HostScope` extractor to dispatch: bare
-///   host serves the welcome HTML at `/`, subdomain hosts resolve series /
-///   identity content. The content router never sees an admin path because
-///   the admin nest above is checked first by `Router::merge` order.
-/// - The top-level CORS layer reflects any `Origin` whose host is
-///   `localhost` or ends in `.localhost`, so the JS SDK can keep talking
-///   from content subdomains to admin endpoints. Tightening is a followup
-///   (see `docs/browser-security.md`).
+/// - The **admin sub-router** holds every `/_*` nest. Its requests must arrive on the
+///   bare loopback host (`localhost`, `127.0.0.1`, `[::1]`); the `require_bare_host`
+///   layer returns 404 for admin requests on any `*.localhost` subdomain. Admin auth
+///   (bearer token or `/_register` trusted-context grant via the Referer) still applies
+///   on individual routes; this layer is only the host-level guard.
+/// - The **content sub-router** holds the two content handlers (`GET /` and `GET
+///   /{*name}`). Both use the `HostScope` extractor to dispatch: bare host serves the
+///   welcome HTML at `/`, subdomain hosts resolve series / identity content. The content
+///   router never sees an admin path because the admin nest above is checked first by
+///   `Router::merge` order.
+/// - The top-level CORS layer reflects any `Origin` whose host is `localhost` or ends in
+///   `.localhost`, so the JS SDK can keep talking from content subdomains to admin
+///   endpoints. Tightening is a followup (see `docs/browser-security.md`).
 fn api() -> Router {
     use http::HeaderValue;
     use tower::ServiceBuilder;
@@ -174,16 +172,14 @@ fn api() -> Router {
 
     // Admin-only protections.
     //
-    // * `X-Frame-Options: DENY` refuses to be framed; closes the
-    //   clickjacking surface against the consent grant flow.
-    // * `Content-Security-Policy` locks the admin origin to same-origin
-    //   resources only. The admin host serves samizdat's own UI
-    //   (welcome page, `/_register`, `/_doctor`, JSON APIs) -- no
-    //   author-uploaded content runs here -- so a strict policy costs
-    //   nothing. `'unsafe-inline'` is allowed for the inline scripts
-    //   and styles inside samizdat's own templates; tightening that to
-    //   hash- or nonce-based is a followup if those templates stop
-    //   being touched.
+    // * `X-Frame-Options: DENY` refuses to be framed; closes the clickjacking surface against
+    //   the consent grant flow.
+    // * `Content-Security-Policy` locks the admin origin to same-origin resources only. The
+    //   admin host serves samizdat's own UI (welcome page, `/_register`, `/_doctor`, JSON
+    //   APIs) -- no author-uploaded content runs here -- so a strict policy costs nothing.
+    //   `'unsafe-inline'` is allowed for the inline scripts and styles inside samizdat's own
+    //   templates; tightening that to hash- or nonce-based is a followup if those templates
+    //   stop being touched.
     let admin_layers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             http::header::X_FRAME_OPTIONS,
@@ -225,19 +221,18 @@ fn api() -> Router {
 
     // Global protections applied to admin + content.
     //
-    // * `X-Content-Type-Options: nosniff` blocks MIME sniffing so a series
-    //   that uploads a file with a forged Content-Type cannot trick the
-    //   browser into executing it as HTML, JS, or SVG-with-script.
-    // * `Referrer-Policy: same-origin` strips Referer on cross-origin
-    //   requests, keeping it intact same-origin so the `/_register`
-    //   trusted-context check still works. Authors override per-document
-    //   via `<meta name="referrer">` or per-element via `referrerpolicy`.
-    // * `Permissions-Policy: interest-cohort=()` opts content out of
-    //   Chrome's Topics / FLoC behavioral cohort.
-    // * `cors_layer()` reflects any `Origin` whose host is `localhost` or
-    //   `*.localhost`, so the JS SDK can keep talking from content
-    //   subdomains to admin endpoints; tightening is a followup (see
-    //   `docs/browser-security.md`).
+    // * `X-Content-Type-Options: nosniff` blocks MIME sniffing so a series that uploads a
+    //   file with a forged Content-Type cannot trick the browser into executing it as HTML,
+    //   JS, or SVG-with-script.
+    // * `Referrer-Policy: same-origin` strips Referer on cross-origin requests, keeping it
+    //   intact same-origin so the `/_register` trusted-context check still works. Authors
+    //   override per-document via `<meta name="referrer">` or per-element via
+    //   `referrerpolicy`.
+    // * `Permissions-Policy: interest-cohort=()` opts content out of Chrome's Topics / FLoC
+    //   behavioral cohort.
+    // * `cors_layer()` reflects any `Origin` whose host is `localhost` or `*.localhost`, so
+    //   the JS SDK can keep talking from content subdomains to admin endpoints; tightening is
+    //   a followup (see `docs/browser-security.md`).
     let global_layers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             http::header::X_CONTENT_TYPE_OPTIONS,
@@ -290,7 +285,7 @@ fn cors_layer() -> tower_http::cors::CorsLayer {
 /// origin isolation (a content page could call admin endpoints from its own
 /// origin via a same-origin fetch).
 async fn require_bare_host(request: Request, next: Next) -> Response {
-    use crate::http::host_scope::{classify, HostScope};
+    use crate::http::host_scope::{HostScope, classify};
     let host = request
         .headers()
         .get("host")
@@ -338,7 +333,9 @@ fn vacuum() -> Router {
                 .map(ApiResponse)
             }),
         )
-        .layer(axum::middleware::from_fn(auth::authenticate_trusted_context))
+        .layer(axum::middleware::from_fn(
+            auth::authenticate_trusted_context,
+        ))
 }
 
 /// Middleware function to restrict access to only local connections.

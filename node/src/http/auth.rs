@@ -1,24 +1,27 @@
 //! Authentication API for web applications.
 
 use askama::Template;
-use axum::extract::{FromRequestParts, Path, Request};
-use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{delete, get, patch};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    extract::{FromRequestParts, Path, Request},
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Response},
+    routing::{delete, get, patch},
+};
 use axum_extra::extract::Query as AxumExtraQuery;
 use futures::FutureExt;
 use http::request::Parts;
-use samizdat_common::db::{readonly_tx, writable_tx, Table as _};
+use samizdat_common::db::{Table as _, readonly_tx, writable_tx};
 use serde_derive::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use url::{Host, Origin, Url};
 
-use samizdat_common::identity::check_servable_identity;
-use samizdat_common::Key;
+use samizdat_common::{Key, identity::check_servable_identity};
 
-use crate::access::{admin_token, read_token, AccessRight, Entity, TokenScope};
-use crate::db::Table;
+use crate::{
+    access::{AccessRight, Entity, TokenScope, admin_token, read_token},
+    db::Table,
+};
 
 use super::ApiResponse;
 
@@ -96,8 +99,7 @@ fn get_auths() -> Router {
                             tx,
                             |key, value| -> Result<Response, crate::Error> {
                                 let entity: Entity = bincode::deserialize(key)?;
-                                let granted_rights: Vec<AccessRight> =
-                                    bincode::deserialize(value)?;
+                                let granted_rights: Vec<AccessRight> = bincode::deserialize(value)?;
                                 Ok(Response {
                                     entity,
                                     granted_rights,
@@ -189,7 +191,7 @@ fn check_origin(referrer: &Url) -> Result<(), Origin> {
         url::Origin::Tuple(scheme, host, _) if scheme == "http" || scheme == "https" => {
             match host {
                 Host::Domain(domain) if domain == "localhost" || domain.ends_with(".localhost") => {
-                    return Ok(())
+                    return Ok(());
                 }
                 Host::Ipv4(ip) if ip.is_loopback() => return Ok(()),
                 Host::Ipv6(ip) if ip.to_canonical().is_loopback() => return Ok(()),
@@ -223,9 +225,7 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
     }
 
     let host = referrer.host_str().ok_or_else(|| {
-        SecurityScopeRejection::NotAnEntity(format!(
-            "referer has no host: {referrer}"
-        ))
+        SecurityScopeRejection::NotAnEntity(format!("referer has no host: {referrer}"))
     })?;
     let lowered = host.to_ascii_lowercase();
 
@@ -259,12 +259,11 @@ fn entity_from_referrer(referrer: &Url) -> Result<Entity, SecurityScopeRejection
             return Err(SecurityScopeRejection::NotAnEntity(host.to_owned()));
         }
 
-        check_servable_identity(subdomain)
-            .map_err(|reason| {
-                SecurityScopeRejection::NotAnEntity(format!(
-                    "identity subdomain `{subdomain}` is not servable: {reason}"
-                ))
-            })?;
+        check_servable_identity(subdomain).map_err(|reason| {
+            SecurityScopeRejection::NotAnEntity(format!(
+                "identity subdomain `{subdomain}` is not servable: {reason}"
+            ))
+        })?;
         return Ok(Entity::new("_identity", format!("~{subdomain}")));
     }
 
@@ -295,7 +294,8 @@ fn referer_from_request(request: &Request) -> Result<Option<Url>, SecurityScopeR
 ///
 /// # Returns
 /// Ok(Some(Url)) if Referer exists and is valid, Ok(None) if no Referer header present,
-/// or Err(SecurityScopeRejection) if the Referer header value is invalid UTF-8 or malformed URL
+/// or Err(SecurityScopeRejection) if the Referer header value is invalid UTF-8 or
+/// malformed URL
 fn referer_from_parts(parts: &Parts) -> Result<Option<Url>, SecurityScopeRejection> {
     let Some(header) = parts.headers.get("referer") else {
         return Ok(None);
@@ -312,9 +312,9 @@ fn referer_from_parts(parts: &Parts) -> Result<Option<Url>, SecurityScopeRejecti
 /// * `request` - The HTTP request to extract from
 ///
 /// # Returns
-/// Ok(Some(Entity)) if entity was found and validated, Ok(None) if no Referer header present,
-/// or Err(SecurityScopeRejection) if the Referer is invalid, has a bad origin, or doesn't
-/// correspond to an entity
+/// Ok(Some(Entity)) if entity was found and validated, Ok(None) if no Referer header
+/// present, or Err(SecurityScopeRejection) if the Referer is invalid, has a bad origin,
+/// or doesn't correspond to an entity
 fn entity_from_request(request: &Request) -> Result<Option<Entity>, SecurityScopeRejection> {
     let Some(referer) = referer_from_request(request)? else {
         return Ok(None);
@@ -398,7 +398,10 @@ pub enum AuthenticationRejection {
     /// caller should swap to, so a CLI invoked without sudo can print
     /// "try `sudo samizdat ...`" instead of a cryptic permission
     /// failure.
-    InsufficientScope { required: TokenScope, presented: TokenScope },
+    InsufficientScope {
+        required: TokenScope,
+        presented: TokenScope,
+    },
 }
 
 impl IntoResponse for AuthenticationRejection {
@@ -414,7 +417,10 @@ impl IntoResponse for AuthenticationRejection {
                 .status(403)
                 .body("bad auth token".into())
                 .expect("can create error response"),
-            AuthenticationRejection::InsufficientScope { required, presented } => response
+            AuthenticationRejection::InsufficientScope {
+                required,
+                presented,
+            } => response
                 .status(403)
                 .body(
                     format!(
@@ -435,18 +441,19 @@ impl IntoResponse for AuthenticationRejection {
 /// passes if EITHER succeeds; this function runs only when BOTH
 /// failed. The rule:
 ///
-/// * If only one method was *presented* (the other's "missing")
-///   surface the rejection from the method that was actually
-///   attempted; the caller almost certainly cares about why it
-///   didn't work, not why the other one was absent.
-/// * If both methods were presented and both failed substantively,
-///   surface the bearer-token rejection. The bearer path is what
-///   CLI users can directly affect (retry under sudo, switch
-///   tokens); the entity-rights path requires configuring
-///   `/_register` access for a browser entity. Telling a CLI user
-///   "the entity has insufficient privilege" when their problem is
-///   really "this token has read scope on an admin route" buries
-///   the actionable signal.
+/// * If only one method was *presented* (the other's "missing") surface the rejection
+///   from the method that was actually attempted; the caller almost certainly cares about
+///   why it didn't work, not why the other one was absent.
+/// * If both methods were presented and both failed substantively, surface the
+///   bearer-token rejection. The bearer path is what CLI users can directly affect (retry
+///   under sudo, switch tokens); the entity-rights path requires configuring `/_register`
+///   access for a browser entity. Telling a CLI user "the entity has insufficient
+///   privilege" when their problem is really "this token has read scope on an admin
+///   route" buries the actionable signal.
+// The second-and-else arms intentionally return the same response: the
+// explicit `MissingReferer` branch is preserved so the three rejection
+// paths read as a parallel structure documenting which side wins.
+#[allow(clippy::if_same_then_else)]
 fn merge_rejections(
     security_scope_rejection: SecurityScopeRejection,
     authorization_rejection: AuthenticationRejection,
@@ -506,7 +513,10 @@ fn do_authenticate_authorization(
     if presented >= required {
         Ok(presented)
     } else {
-        Err(AuthenticationRejection::InsufficientScope { required, presented })
+        Err(AuthenticationRejection::InsufficientScope {
+            required,
+            presented,
+        })
     }
 }
 
@@ -649,9 +659,7 @@ fn do_authenticate_trusted_context(request: &Request) -> Result<(), SecurityScop
     if is_trusted_context(&referer) {
         check_origin(&referer).map_err(SecurityScopeRejection::BadOrigin)
     } else {
-        Err(SecurityScopeRejection::NotTrustedContext(
-            referer.clone(),
-        ))
+        Err(SecurityScopeRejection::NotTrustedContext(referer.clone()))
     }
 }
 

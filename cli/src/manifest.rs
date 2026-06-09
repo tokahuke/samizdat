@@ -1,14 +1,12 @@
 //! The `Samizdat.toml` manifest format.
 //!
-//! This module handles the configuration files for Samizdat projects, managing both public
-//! (`Samizdat.toml`) and private (`.Samizdat.priv`) manifests. These files store project
-//! metadata, build settings, and cryptographic keys for series management.
+//! This module handles the configuration files for Samizdat projects, managing both
+//! public (`Samizdat.toml`) and private (`.Samizdat.priv`) manifests. These files store
+//! project metadata, build settings, and cryptographic keys for series management.
 
 use askama::Template;
 use serde_derive::Deserialize;
-use std::path::PathBuf;
-use std::process::Command;
-use std::{fs, io};
+use std::{fs, io, path::PathBuf, process::Command};
 
 use samizdat_common::{Key, PrivateKey};
 
@@ -273,8 +271,7 @@ fn validate_nickname(nickname: &str) -> Result<(), anyhow::Error> {
         anyhow::bail!("nickname is too long (max 128 chars)");
     }
     for c in nickname.chars() {
-        let ok = c.is_ascii_alphanumeric()
-            || matches!(c, '-' | '_' | '.' | '/' | ' ');
+        let ok = c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ' ');
         if !ok {
             anyhow::bail!(
                 "nickname contains disallowed character {c:?}; \

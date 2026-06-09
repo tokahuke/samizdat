@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 
-use crate::cli::cli;
-use crate::{db, node_client};
+use crate::{cli::cli, db, node_client};
 
 pub async fn run() {
     let tick = Duration::from_secs(cli().expiry_tick_seconds);

@@ -2,8 +2,7 @@
 //! identities for Samizdat.
 
 use chrono::{Duration, Utc};
-use ethers::abi::Abi;
-use ethers::prelude::*;
+use ethers::{abi::Abi, prelude::*};
 use std::{
     collections::BTreeMap,
     sync::{Arc, LazyLock, OnceLock},
@@ -12,7 +11,7 @@ use tokio::sync::RwLock;
 
 use samizdat_common::{
     blockchain,
-    db::{readonly_tx, writable_tx, Table as _},
+    db::{Table as _, readonly_tx, writable_tx},
 };
 
 use crate::{db::Table, models::SeriesRef};
@@ -154,9 +153,10 @@ impl IdentityProvider {
     pub async fn get(&self, identity: &str) -> Result<Identity, crate::Error> {
         let contract = self.storage_contract.read().await;
 
-        let reported_chain = contract.client().get_chainid().await.map_err(|e| {
-            format!("Failed to fetch chain ID from configured RPC provider: {e}")
-        })?;
+        let reported_chain =
+            contract.client().get_chainid().await.map_err(|e| {
+                format!("Failed to fetch chain ID from configured RPC provider: {e}")
+            })?;
         if reported_chain.as_u64() != samizdat_common::blockchain::BLOCKCHAIN_ID {
             return Err(format!(
                 "Configured RPC reports chain id {}, expected {} (Polygon). Refusing to \
@@ -186,8 +186,8 @@ impl IdentityProvider {
         })
     }
 
-    /// Retrieves identity information, using a cache to avoid redundant blockchain queries.
-    /// Returns `None` if the identity doesn't exist.
+    /// Retrieves identity information, using a cache to avoid redundant blockchain
+    /// queries. Returns `None` if the identity doesn't exist.
     pub async fn get_cached(&self, identity: &str) -> Result<Option<Arc<Identity>>, crate::Error> {
         if let Some(identity) = IDENTITY_CACHE.read().await.get(identity) {
             tracing::debug!("Found cached identity");

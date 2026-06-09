@@ -39,8 +39,9 @@ impl Hub {
 
     /// Lists all hubs currently in the database.
     pub fn get_all<Tx: TxHandle>(tx: &Tx) -> Result<Vec<Hub>, crate::Error> {
-        let collected: Result<Vec<Hub>, crate::Error> =
-            Table::Hubs.range::<_, [u8; 0]>(..).collect(tx, |_, value| {
+        let collected: Result<Vec<Hub>, crate::Error> = Table::Hubs
+            .range::<_, [u8; 0]>(..)
+            .collect(tx, |_, value| {
                 Ok::<Hub, crate::Error>(bincode::deserialize(value)?)
             })?;
         collected

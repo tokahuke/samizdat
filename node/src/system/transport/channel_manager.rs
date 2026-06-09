@@ -1,17 +1,20 @@
 use futures::prelude::*;
 use samizdat_common::address::{ChannelAddr, ChannelId};
-use std::collections::BTreeMap;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::{Arc, LazyLock};
-use std::time::Duration;
-use tokio::sync::OwnedMutexGuard;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use std::{
+    collections::BTreeMap,
+    io,
+    net::SocketAddr,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, mpsc};
 
 use samizdat_common::quinn::{ReadToEndError, RecvStream};
 
-use super::connection_manager::{connection_manager, DropMode};
-use super::multiplexed::Multiplexed;
+use super::{
+    connection_manager::{DropMode, connection_manager},
+    multiplexed::Multiplexed,
+};
 
 pub type PeerEntry = Arc<Mutex<Option<Arc<Multiplexed>>>>;
 

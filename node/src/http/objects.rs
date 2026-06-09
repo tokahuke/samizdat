@@ -1,20 +1,25 @@
 //! Objects API.
 
-use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path, Query};
-use axum::routing::{delete, get, post};
-use axum::Router;
+use axum::{
+    Router,
+    body::Bytes,
+    extract::{DefaultBodyLimit, Path, Query},
+    routing::{delete, get, post},
+};
 use futures::FutureExt;
-use samizdat_common::db::{readonly_tx, writable_tx, Droppable};
-use samizdat_common::Hash;
+use samizdat_common::{
+    Hash,
+    db::{Droppable, readonly_tx, writable_tx},
+};
 use serde_derive::Deserialize;
-use serde_with::serde_as;
-use serde_with::DisplayFromStr;
+use serde_with::{DisplayFromStr, serde_as};
 
-use crate::access::AccessRight;
-use crate::http::ContentType;
-use crate::models::{BookmarkType, ObjectHeader, ObjectRef};
-use crate::security_scope;
+use crate::{
+    access::AccessRight,
+    http::ContentType,
+    models::{BookmarkType, ObjectHeader, ObjectRef},
+    security_scope,
+};
 
 use super::ApiResponse;
 
@@ -152,7 +157,9 @@ fn object_bookmark() -> Router {
             delete(|Path(hash): Path<Hash>| {
                 async move {
                     writable_tx(|tx| {
-                        ObjectRef::new(hash).bookmark(BookmarkType::User).unmark(tx)?;
+                        ObjectRef::new(hash)
+                            .bookmark(BookmarkType::User)
+                            .unmark(tx)?;
                         Ok(())
                     })
                 }

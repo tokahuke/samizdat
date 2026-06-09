@@ -3,8 +3,7 @@
 //! `~/.samizdat/access-token` (created by the node on first run) and uses
 //! it for every request.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use anyhow::Context;
 use samizdat_common::Key;
@@ -92,7 +91,7 @@ impl NodeClient {
 fn read_admin_token() -> Result<String, anyhow::Error> {
     let home = std::env::var("HOME").context("HOME not set")?;
     let path = format!("{home}/.samizdat/access-token");
-    let token = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading admin token at {path}"))?;
+    let token =
+        std::fs::read_to_string(&path).with_context(|| format!("reading admin token at {path}"))?;
     Ok(token.trim().to_string())
 }

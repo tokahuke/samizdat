@@ -1,9 +1,10 @@
 use serde_derive::{Deserialize, Serialize};
 
-use crate::db::Table;
-use crate::models::Id;
-use crate::models::Indexable;
-use crate::rpc::node_sampler::StatisticsSnapshot;
+use crate::{
+    db::Table,
+    models::{Id, Indexable},
+    rpc::node_sampler::StatisticsSnapshot,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatisticsLog {

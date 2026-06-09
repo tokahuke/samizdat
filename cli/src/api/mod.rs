@@ -152,7 +152,12 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    tracing::info!("{} GET {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
+    tracing::info!(
+        "{} GET {} {}",
+        status,
+        url,
+        redact_if_sensitive(route.as_ref(), &text)
+    );
 
     bail_on_http_error("GET", route.as_ref(), status, &text)?;
     deserialize_api_response("GET", route.as_ref(), status, &text)
@@ -184,7 +189,12 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    tracing::info!("{} POST {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
+    tracing::info!(
+        "{} POST {} {}",
+        status,
+        url,
+        redact_if_sensitive(route.as_ref(), &text)
+    );
 
     bail_on_http_error("POST", route.as_ref(), status, &text)?;
     deserialize_api_response("POST", route.as_ref(), status, &text)
@@ -216,7 +226,12 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response POST {}", route.as_ref()))?;
 
-    tracing::info!("{} PUT {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
+    tracing::info!(
+        "{} PUT {} {}",
+        status,
+        url,
+        redact_if_sensitive(route.as_ref(), &text)
+    );
 
     bail_on_http_error("PUT", route.as_ref(), status, &text)?;
     deserialize_api_response("PUT", route.as_ref(), status, &text)
@@ -248,7 +263,12 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response PATCH {}", route.as_ref()))?;
 
-    tracing::info!("{} PATCH {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
+    tracing::info!(
+        "{} PATCH {} {}",
+        status,
+        url,
+        redact_if_sensitive(route.as_ref(), &text)
+    );
 
     bail_on_http_error("PATCH", route.as_ref(), status, &text)?;
     deserialize_api_response("PATCH", route.as_ref(), status, &text)
@@ -277,7 +297,12 @@ where
         .await
         .with_context(|| format!("error from samizdat-node response GET {}", route.as_ref()))?;
 
-    tracing::info!("{} DELETE {} {}", status, url, redact_if_sensitive(route.as_ref(), &text));
+    tracing::info!(
+        "{} DELETE {} {}",
+        status,
+        url,
+        redact_if_sensitive(route.as_ref(), &text)
+    );
 
     bail_on_http_error("DELETE", route.as_ref(), status, &text)?;
     deserialize_api_response("DELETE", route.as_ref(), status, &text)

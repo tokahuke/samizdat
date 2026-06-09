@@ -50,4 +50,3 @@ pub fn print_paths(paths: &[String], delimiter: char) {
 
     print_level(&tree, vec![]);
 }
-

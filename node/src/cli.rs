@@ -21,12 +21,14 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_DATA", long, default_value = "data/node")]
     #[serde_inline_default("data/node".into())]
     pub data: PathBuf,
-    /// The port on which to sever the local HTTP proxy. This is the port you will use to access in
+    /// The port on which to sever the local HTTP proxy. This is the port you will use to
+    /// access in
     ///  your browser.
     #[structopt(env = "SAMIZDAT_PORT", long, default_value = "4510")]
     #[serde_inline_default(4510)]
     pub port: u16,
-    /// (MB) The maximum size in bytes of the content that can be sent from a peer to this machine.
+    /// (MB) The maximum size in bytes of the content that can be sent from a peer to this
+    /// machine.
     #[structopt(env = "SAMIZDAT_MAX_CONTENT_SIZE", long, default_value = "1000")]
     #[serde_inline_default(1_000)]
     pub max_content_size: usize,
@@ -39,34 +41,60 @@ pub struct Cli {
     #[structopt(env = "SAMIZDAT_MAX_QUERIES_PER_HUB", long, default_value = "120")]
     #[serde_inline_default(120)]
     pub max_queries_per_hub: usize,
-    /// The maximum number of queries that a hub can make. This is sent to the each hub as part of
+    /// The maximum number of queries that a hub can make. This is sent to the each hub as
+    /// part of
     /// the node configuration.
     #[structopt(env = "SAMIZDAT_MAX_QUERY_RATE_PER_HUB", long, default_value = "12")]
     #[serde_inline_default(12.0)]
     pub max_query_rate_per_hub: f64,
-    /// (MB) The maximum total size of all cached files and _disposable_ files. Note that the total
-    /// size may still exceed this value, since some of the allocated space is used to store
+    /// (MB) The maximum total size of all cached files and _disposable_ files. Note that
+    /// the total
+    /// size may still exceed this value, since some of the allocated space is used to
+    /// store
     /// data that is valuable to you.
     #[structopt(env = "SAMIZDAT_MAX_STORAGE", long, default_value = "1000")]
     #[serde_inline_default(1_000)]
     pub max_storage: usize,
-    /// The number of riddles to be sent on each query. This gives the maximum number of hops that a
-    /// query can propagate inside a network, with 2 being the absolute minimum to get a result.
+    /// (MB) Default cap on the total bytes of a single edition's
+    /// inventory for any subscription whose own `max_bytes` is unset.
+    /// A subscription tracks one series, the series advances through
+    /// one edition at a time, and only the current edition's bytes
+    /// are pinned -- so the per-subscription cap and the per-edition
+    /// cap are the same thing. Enforced via `node/src/cap.rs` as an
+    /// atomic reservation at object-fetch time; defends against an
+    /// adversarial publisher pushing an oversized edition that would
+    /// otherwise fill the node's disk via Reference bookmarks vacuum
+    /// cannot reclaim.
+    #[structopt(
+        env = "SAMIZDAT_DEFAULT_MAX_EDITION_SIZE_MB",
+        long,
+        default_value = "1000"
+    )]
+    #[serde_inline_default(1_000)]
+    pub default_max_edition_size_mb: usize,
+    /// The number of riddles to be sent on each query. This gives the maximum number of
+    /// hops that a
+    /// query can propagate inside a network, with 2 being the absolute minimum to get a
+    /// result.
     #[structopt(env = "SAMIZDAT_RIDDLES_PER_QUERY", long, default_value = "6")]
     #[serde_inline_default(6)]
     pub riddles_per_query: usize,
-    /// The size in bytes of the answer to query riddles that will get "leaked". This allows peers
+    /// The size in bytes of the answer to query riddles that will get "leaked". This
+    /// allows peers
     /// to more quickly process content riddles.
     #[structopt(env = "SAMIZDAT_HINT_SIZE", long, default_value = "1")]
     #[serde_inline_default(1)]
     pub hint_size: u8,
-    /// The minimum size of riddle hint that this node accepts. All queries that have hints smaller
-    /// than this value will not be resolved. Since going through all the database is costly, it's a
+    /// The minimum size of riddle hint that this node accepts. All queries that have
+    /// hints smaller
+    /// than this value will not be resolved. Since going through all the database is
+    /// costly, it's a
     /// good idea to expect a minimum hint size so as not to get overwhelmed.
     #[structopt(env = "SAMIZDAT_MIN_HINT_SIZE", long, default_value = "1")]
     #[serde_inline_default(1)]
     pub min_hint_size: u8,
-    /// The maximum number of simultaneous candidates (peers that have the content you queried) to
+    /// The maximum number of simultaneous candidates (peers that have the content you
+    /// queried) to
     /// accept when processing a query to the network.
     #[structopt(env = "SAMIZDAT_CONCURRENT_CANDIDATES", long, default_value = "4")]
     #[serde_inline_default(4)]

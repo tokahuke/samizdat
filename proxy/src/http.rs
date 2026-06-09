@@ -1,11 +1,8 @@
 use std::sync::LazyLock;
 
-use axum::body::Body;
-use axum::extract::OriginalUri;
-use axum::http::HeaderMap;
-use axum::response::Response;
-use axum::routing::get;
-use axum::Router;
+use axum::{
+    Router, body::Body, extract::OriginalUri, http::HeaderMap, response::Response, routing::get,
+};
 use samizdat_common::identity::check_servable_identity;
 
 use crate::cli::cli;
@@ -45,8 +42,8 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 /// - `object-<hash>.<wildcard_root>`: raw object bytes.
 /// - `collection-<hash>.<wildcard_root>`: item lookup in the snapshot.
 /// - `edition-<id>.<wildcard_root>`: item lookup in the edition.
-/// - `<identity>.<wildcard_root>` where `<identity>` passes
-///   `check_servable_identity`: identity content.
+/// - `<identity>.<wildcard_root>` where `<identity>` passes `check_servable_identity`:
+///   identity content.
 ///
 /// Anything else gets a 400.
 pub fn wildcard_api(wildcard_root: String) -> axum::Router {
@@ -128,8 +125,7 @@ async fn do_wildcard_dispatch(
     // The proxy's `--node` URL is the node's bare admin origin
     // (e.g. `http://localhost:4510`). For host-form forwarding we
     // substitute the host label.
-    let node = node_base()
-        .ok_or_else(|| anyhow::anyhow!("invalid --node URL: {}", cli().node))?;
+    let node = node_base().ok_or_else(|| anyhow::anyhow!("invalid --node URL: {}", cli().node))?;
 
     let upstream = match sub {
         None => format!("{}{}", cli().node, path_and_query),

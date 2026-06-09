@@ -2,27 +2,31 @@
 
 mod blacklisted_ips;
 
-use axum::extract::{ConnectInfo, Query, Request};
-use axum::middleware::Next;
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
-use axum::Router;
+use axum::{
+    Router,
+    extract::{ConnectInfo, Query, Request},
+    middleware::Next,
+    response::{Html, IntoResponse, Response},
+    routing::get,
+};
 use futures::{FutureExt, StreamExt};
 use serde_derive::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
-use std::collections::BTreeSet;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::{
+    collections::BTreeSet,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+};
 
 use samizdat_common::db::readonly_tx;
 
-use crate::cli::cli;
-use crate::models::CandidateLog;
-use crate::models::ConnectionLog;
-use crate::models::QueryLog;
-use crate::models::StatisticsLog;
-use crate::models::{Id, Indexable};
-use crate::rpc::node_sampler::{QuerySampler, StatisticsType};
-use crate::rpc::ROOM;
+use crate::{
+    cli::cli,
+    models::{CandidateLog, ConnectionLog, Id, Indexable, QueryLog, StatisticsLog},
+    rpc::{
+        ROOM,
+        node_sampler::{QuerySampler, StatisticsType},
+    },
+};
 
 /// Mapping of Samizdat errors into HTTP status codes.
 fn error_status_code(err: &crate::Error) -> http::StatusCode {
@@ -130,9 +134,7 @@ fn connected_ips() -> Router {
             async move {
                 let ips = ROOM
                     .raw_participants()
-                    .await
-                    .iter()
-                    .map(|(addr, _)| *addr)
+                    .await.keys().copied()
                     .collect::<Vec<_>>();
                 Ok(ips)
             }
@@ -346,11 +348,10 @@ fn statistics_logs() -> Router {
 
                             let log: StatisticsLog = bincode::deserialize(serialized)?;
 
-                            if let Some(statistics_type) = statistics_type {
-                                if statistics_type != log.statistics().statistics_type {
+                            if let Some(statistics_type) = statistics_type
+                                && statistics_type != log.statistics().statistics_type {
                                     return Ok(None);
                                 }
-                            }
 
                             if !peers.is_empty() && !peers.contains(&log.statistics().peer_ip) {
                                 return Ok(None);

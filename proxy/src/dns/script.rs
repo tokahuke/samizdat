@@ -8,17 +8,15 @@
 //!
 //! Two shapes are supported:
 //!
-//! * Single-command form: one binary handles both create and delete,
-//!   distinguishing by `SAMIZDAT_DNS_ACTION=set|delete`.
-//! * Pair form: separate binaries for create and delete; the action env
-//!   var is not set in this shape.
+//! * Single-command form: one binary handles both create and delete, distinguishing by
+//!   `SAMIZDAT_DNS_ACTION=set|delete`.
+//! * Pair form: separate binaries for create and delete; the action env var is not set in
+//!   this shape.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
-use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::{process::Command, time::timeout};
 use tracing::{debug, warn};
 
 use super::{DnsError, DnsProvider, TxtHandle};
@@ -82,10 +80,7 @@ impl Script {
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        debug!(
-            ?binary,
-            action, zone, record_name, "invoking DNS-01 script"
-        );
+        debug!(?binary, action, zone, record_name, "invoking DNS-01 script");
 
         let child = cmd.spawn().map_err(|err| {
             DnsError::Provider(format!(
@@ -208,10 +203,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn single_command_success() {
-        let script = write_script(
-            "ok",
-            "#!/bin/sh\necho \"$SAMIZDAT_DNS_VALUE\"\nexit 0\n",
-        );
+        let script = write_script("ok", "#!/bin/sh\necho \"$SAMIZDAT_DNS_VALUE\"\nexit 0\n");
         let provider = Script::single(script.clone(), Duration::from_secs(5));
         let result = provider
             .set_txt("example.com", "_acme-challenge.example.com", "abc123")
@@ -224,10 +216,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn single_command_failure_surfaces_stderr() {
-        let script = write_script(
-            "fail",
-            "#!/bin/sh\necho 'kaboom-marker' >&2\nexit 1\n",
-        );
+        let script = write_script("fail", "#!/bin/sh\necho 'kaboom-marker' >&2\nexit 1\n");
         let provider = Script::single(script.clone(), Duration::from_secs(5));
         let result = provider
             .set_txt("example.com", "_acme-challenge.example.com", "abc123")

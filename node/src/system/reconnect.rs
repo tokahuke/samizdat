@@ -3,13 +3,19 @@
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive as _;
 use serde_derive::Serialize;
-use std::fmt::Display;
-use std::future::Future;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard};
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use std::{
+    fmt::Display,
+    future::Future,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+};
+use tokio::{
+    sync::{RwLock, RwLockReadGuard},
+    task::JoinHandle,
+    time::{Duration, sleep},
+};
 
 #[derive(Debug, FromPrimitive, Serialize)]
 pub enum ConnectionStatus {

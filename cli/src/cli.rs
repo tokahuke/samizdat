@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::{path::PathBuf, sync::OnceLock};
 use structopt::StructOpt;
 
 use crate::{api::EditionKind, commands};
@@ -398,20 +397,10 @@ impl SeriesCommand {
                 is_draft,
                 public_key,
                 private_key_file,
-            } => {
-                commands::series::new(nickname, is_draft, public_key, private_key_file)
-                    .await
-            }
-            SeriesCommand::Rm {
-                nickname,
-                r#yes,
-            } => commands::series::rm(nickname, r#yes).await,
-            SeriesCommand::Show { nickname } => {
-                commands::series::show(nickname).await
-            }
-            SeriesCommand::Ls { nickname } => {
-                commands::series::ls(nickname).await
-            }
+            } => commands::series::new(nickname, is_draft, public_key, private_key_file).await,
+            SeriesCommand::Rm { nickname, r#yes } => commands::series::rm(nickname, r#yes).await,
+            SeriesCommand::Show { nickname } => commands::series::show(nickname).await,
+            SeriesCommand::Ls { nickname } => commands::series::ls(nickname).await,
             SeriesCommand::LsCached {} => commands::series::ls_cached().await,
         }
     }
@@ -423,7 +412,8 @@ impl SeriesCommand {
 /// versions of content within a series.
 #[derive(Clone, Debug, StructOpt)]
 pub enum EditionCommand {
-    /// Lists all known editions or all known editions for a given series public key, if supplied.
+    /// Lists all known editions or all known editions for a given series public key, if
+    /// supplied.
     Ls { series_key: Option<String> },
 }
 
@@ -445,6 +435,17 @@ pub enum SubscriptionCommand {
     New {
         /// Public key of the series
         public_key: String,
+        /// Maximum total size (in MB) of any single edition the node
+        /// will retain for this series. Defaults to the node's
+        /// `default_max_edition_size_mb` operator setting (1000 MB out
+        /// of the box). Enforced atomically at object-fetch time; an
+        /// edition whose declared content exceeds the budget gets the
+        /// offending object rejected and the rest of the inventory
+        /// proceeds up to whatever budget is left. Paths sort
+        /// lexicographically, so publishers can express priority via
+        /// path naming (earlier paths win retention).
+        #[structopt(long)]
+        max_size_mb: Option<u64>,
     },
     /// Trigger a manual refresh
     Refresh {
@@ -466,9 +467,10 @@ pub enum SubscriptionCommand {
 impl SubscriptionCommand {
     async fn execute(self) -> Result<(), anyhow::Error> {
         match self {
-            SubscriptionCommand::New { public_key } => {
-                commands::subscription::new(public_key).await
-            }
+            SubscriptionCommand::New {
+                public_key,
+                max_size_mb,
+            } => commands::subscription::new(public_key, max_size_mb).await,
             SubscriptionCommand::Refresh { public_key } => {
                 commands::subscription::refresh(public_key).await
             }

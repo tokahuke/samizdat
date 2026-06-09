@@ -5,45 +5,41 @@ mod node_server;
 mod reconnect;
 mod transport;
 
-pub use file_transfer::{ReceivedItem, ReceivedObject};
+pub use file_transfer::{FetchOutcome, InFlightObject};
 pub use reconnect::{ConnectionStatus, Reconnect};
 use samizdat_common::db::readonly_tx;
-use transport::channel_manager;
-use transport::connection_manager;
 pub use transport::PEER_CONNECTIONS;
+use transport::{channel_manager, connection_manager};
 
-use futures::prelude::*;
-use futures::stream;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tarpc::client::NewClient;
-use tarpc::context;
-use tarpc::server::{self, Channel};
-use tokio::sync::oneshot;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tokio::time::Duration;
-use tokio::time::Instant;
+use futures::{prelude::*, stream};
+use std::{net::SocketAddr, sync::Arc};
+use tarpc::{
+    client::NewClient,
+    context,
+    server::{self, Channel},
+};
+use tokio::{
+    sync::{RwLock, oneshot},
+    task::JoinHandle,
+    time::{Duration, Instant},
+};
 
-use samizdat_common::address::ChannelAddr;
-use samizdat_common::cipher::TransferCipher;
-use samizdat_common::keyed_channel::KeyedChannel;
-use samizdat_common::quinn::Connection;
-use samizdat_common::rpc::*;
-use samizdat_common::Hint;
-use samizdat_common::HASH_LEN;
-use samizdat_common::{Hash, Riddle};
+use samizdat_common::{
+    HASH_LEN, Hash, Hint, Riddle, address::ChannelAddr, cipher::TransferCipher,
+    keyed_channel::KeyedChannel, quinn::Connection, rpc::*,
+};
 
-use crate::cli;
-use crate::models;
-use crate::models::{Edition, SeriesRef};
+use crate::{
+    cli, models,
+    models::{Edition, SeriesRef},
+};
 
-use self::node_server::NodeServer;
-use self::transport::file_transfer;
+use self::{node_server::NodeServer, transport::file_transfer};
 
 pub const MAX_TRANSFER_SIZE: usize = 2_048;
 
-/// A single connection instance, which will be recreated by [`Reconnect`] on connection loss.
+/// A single connection instance, which will be recreated by [`Reconnect`] on connection
+/// loss.
 pub struct HubConnectionInner {
     client: HubClient,
     candidate_channels: KeyedChannel<Candidate>,
@@ -95,7 +91,8 @@ impl HubConnectionInner {
         Ok(handler)
     }
 
-    /// Creates the two connections between hub and node: RPC from node to hub and RPC from
+    /// Creates the two connections between hub and node: RPC from node to hub and RPC
+    /// from
     /// hub to node.
     async fn connect(
         hub_addr: SocketAddr,
@@ -165,7 +162,7 @@ impl HubConnection {
         content_hash: Hash,
         kind: QueryKind,
         deadline: Instant,
-    ) -> Result<ReceivedItem, crate::Error> {
+    ) -> Result<FetchOutcome, crate::Error> {
         // Create riddles for query:
         let content_riddles = (0..cli().riddles_per_query)
             .map(|_| Riddle::new(&content_hash))
@@ -205,10 +202,10 @@ impl HubConnection {
             QueryResponse::Replayed => return Err("hub has suspected replay attack".into()),
             QueryResponse::EmptyQuery => return Err("hub has received an empty query".into()),
             QueryResponse::NoReverseConnection => {
-                return Err("hub said I have no reverse connection".into())
+                return Err("hub said I have no reverse connection".into());
             }
             QueryResponse::InternalError => {
-                return Err("hub has experienced an internal error".into())
+                return Err("hub has experienced an internal error".into());
             }
             QueryResponse::Resolved {
                 candidate_channel,
@@ -247,7 +244,7 @@ impl HubConnection {
             QueryKind::Object => {
                 file_transfer::recv_object(candidates, content_hash, query_start, deadline_instant)
                     .await
-                    .map(ReceivedItem::NewObject)
+                    .map(FetchOutcome::InFlight)
             }
             QueryKind::Item => {
                 file_transfer::recv_item(candidates, content_hash, query_start, deadline_instant)
@@ -441,7 +438,7 @@ impl Hubs {
         content_hash: Hash,
         kind: QueryKind,
         deadline: Instant,
-    ) -> Option<ReceivedItem> {
+    ) -> Option<FetchOutcome> {
         let hubs = self.hubs.read().await;
         let mut results = stream::iter(hubs.iter().cloned())
             .map(|hub| async move {
@@ -471,7 +468,7 @@ impl Hubs {
         kind: QueryKind,
         deadline: Instant,
         retries: I,
-    ) -> Option<ReceivedItem>
+    ) -> Option<FetchOutcome>
     where
         I: IntoIterator<Item = Duration>,
     {
@@ -499,8 +496,8 @@ impl Hubs {
             })
             .buffer_unordered(cli().max_parallel_hubs);
 
-        // Even though we should have to go through *aaaaaaall* the hubs to get the best answer, we
-        // can wait for changes to propagate eventually.
+        // Even though we should have to go through *aaaaaaall* the hubs to get the best answer,
+        // we can wait for changes to propagate eventually.
         // In other words, this might be inaccurate, but it is faster.
         while let Some((hub_name, result)) = results.next().await {
             match result {

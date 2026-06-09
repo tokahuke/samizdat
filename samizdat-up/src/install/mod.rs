@@ -7,11 +7,13 @@
 //! module.
 
 use anyhow::Result;
-use std::net::TcpStream;
-use std::path::PathBuf;
-use std::process::Command;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    net::TcpStream,
+    path::PathBuf,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::cli::{AdminAction, Component};
 
@@ -78,9 +80,7 @@ fn seed_default_hubs_best_effort() {
         .map(|(_, path)| path);
 
     let Some(samizdat) = samizdat else {
-        eprintln!(
-            "samizdat-up: cannot locate `samizdat` binary; skipping default-hub seeding."
-        );
+        eprintln!("samizdat-up: cannot locate `samizdat` binary; skipping default-hub seeding.");
         return;
     };
 
@@ -166,7 +166,7 @@ pub fn uninstall(opts: UninstallOpts) -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::uninstall(opts);
+        macos::uninstall(opts)
     }
     #[cfg(target_os = "windows")]
     {
@@ -186,7 +186,7 @@ pub fn update(component: Option<Component>, to: Option<String>) -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::update(component, to);
+        macos::update(component, to)
     }
     #[cfg(target_os = "windows")]
     {
@@ -206,7 +206,7 @@ pub fn list() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::list();
+        macos::list()
     }
     #[cfg(target_os = "windows")]
     {
@@ -230,7 +230,7 @@ pub fn admin(action: AdminAction) -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::admin(action);
+        macos::admin(action)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -250,7 +250,7 @@ pub fn installed_binary_paths() -> Vec<(&'static str, PathBuf)> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::installed_binary_paths();
+        macos::installed_binary_paths()
     }
     #[cfg(target_os = "windows")]
     {
@@ -269,7 +269,7 @@ pub fn self_update() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return macos::self_update();
+        macos::self_update()
     }
     #[cfg(target_os = "windows")]
     {

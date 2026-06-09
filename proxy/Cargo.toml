@@ -53,6 +53,3 @@ tokio-stream = "0.1.18"
 serde-inline-default = "0.2.3"
 tower = "0.5.3"
 tower-http = { version = "0.6.10", features = ["trace"] }
-
-[lints]
-workspace = true

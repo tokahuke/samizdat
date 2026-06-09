@@ -1,5 +1,4 @@
 //! Connection command implementations for the Samizdat CLI.
-//!
 
 use tabled::Tabled;
 

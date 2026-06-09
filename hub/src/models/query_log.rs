@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use samizdat_common::rpc::{Query, QueryResponse};
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DurationMilliSecondsWithFrac};
+use serde_with::{DurationMilliSecondsWithFrac, serde_as};
 
 use crate::db::Table;
 

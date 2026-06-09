@@ -85,12 +85,11 @@ pub fn launchd_label(d: &Daemon) -> String {
 /// default). The named user must already exist on the system.
 ///
 /// Notes:
-///   - `RunAtLoad` makes the service start the moment launchctl loads
-///     the plist, mirroring systemd's `enable --now`.
+///   - `RunAtLoad` makes the service start the moment launchctl loads the plist,
+///     mirroring systemd's `enable --now`.
 ///   - `KeepAlive` ensures the daemon comes back after a crash.
-///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat,
-///     /var/lib/samizdat) so users can administer a Mac install with
-///     the same paths they would on a Linux box.
+///   - Paths match the Linux layout (/usr/local/bin, /etc/samizdat, /var/lib/samizdat) so
+///     users can administer a Mac install with the same paths they would on a Linux box.
 #[allow(dead_code)]
 pub fn render_launchd_plist(d: &Daemon, as_user: Option<&str>) -> String {
     let label = launchd_label(d);
@@ -250,7 +249,10 @@ mod tests {
     fn launchd_plist_for_node_matches_golden() {
         let actual = render_launchd_plist(&NODE, None);
         let golden = include_str!("../tests/golden/com.samizdat.node.plist");
-        assert_eq!(actual, golden, "plist drift; update the golden if intentional");
+        assert_eq!(
+            actual, golden,
+            "plist drift; update the golden if intentional"
+        );
     }
 
     #[test]

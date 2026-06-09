@@ -14,13 +14,13 @@
 //! duplicates, not long-term unforgeability.
 
 use std::convert::TryInto;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
-use samizdat_common::db::{writable_tx, Table as _};
-use samizdat_common::rpc::{
-    EditionAnnouncement, EditionRequest, IdentityRequest, Query, Resolution,
+use samizdat_common::{
+    Hash,
+    db::{Table as _, writable_tx},
+    rpc::{EditionAnnouncement, EditionRequest, IdentityRequest, Query, Resolution},
 };
-use samizdat_common::Hash;
 
 use crate::db::Table;
 
@@ -144,8 +144,7 @@ impl Nonce for IdentityRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use samizdat_common::db::test_harness::TestDb;
-    use samizdat_common::Hash;
+    use samizdat_common::{Hash, db::test_harness::TestDb};
 
     /// Tiny stand-in `Nonce` so tests don't need to construct full `Query`s etc.
     struct N(Hash);

@@ -7,9 +7,7 @@
 //! page-refresh snippet that `samizdat watch` uses in dev mode.
 
 use regex::Regex;
-use std::borrow::Cow;
-use std::net::SocketAddr;
-use std::path::Path;
+use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use std::sync::LazyLock;
 

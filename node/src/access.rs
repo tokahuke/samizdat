@@ -2,35 +2,37 @@
 //!
 //! This module implements two complementary access control systems:
 //!
-//! 1. Access tokens: A filesystem-based authentication system for local
-//!    applications. The node maintains TWO tokens with different scopes,
-//!    so day-to-day introspection does not require root:
+//! 1. Access tokens: A filesystem-based authentication system for local applications. The
+//!    node maintains TWO tokens with different scopes, so day-to-day introspection does
+//!    not require root:
 //!
-//!      - `read-token`  (mode 0644): grants read-only access to the
-//!         admin API (list series / subscriptions / hubs / connections,
-//!         look up auths, etc.). World-readable so any local shell can
-//!         use the CLI without sudo.
-//!      - `admin-token` (mode 0600): grants the full admin scope,
-//!         including state-mutating routes (commit, import, series new,
-//!         subscription new/rm, hub new/rm, identity ops). Owner-only.
+//!      - `read-token`  (mode 0644): grants read-only access to the admin API (list
+//!        series / subscriptions / hubs / connections, look up auths, etc.).
+//!        World-readable so any local shell can use the CLI without sudo.
+//!      - `admin-token` (mode 0600): grants the full admin scope, including
+//!        state-mutating routes (commit, import, series new, subscription new/rm, hub
+//!        new/rm, identity ops). Owner-only.
 //!
 //!    The token a request presents in `Authorization: Bearer <t>` is
 //!    classified by the auth middleware (see `http/auth.rs`); routes
 //!    declare the minimum [`TokenScope`] they accept.
 //!
-//! 2. Access rights: A permission system for web applications running in browsers. It defines
-//!    different levels of access (from public access to management capabilities) that can be
-//!    granted to web-based clients, ensuring fine-grained control over API operations.
+//! 2. Access rights: A permission system for web applications running in browsers. It
+//!    defines different levels of access (from public access to management capabilities)
+//!    that can be granted to web-based clients, ensuring fine-grained control over API
+//!    operations.
 
 use serde_derive::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt::{self, Display};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::{
+    cmp::Ordering,
+    fmt::{self, Display},
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::PathBuf,
+    sync::OnceLock,
+};
 
 use samizdat_common::Hash;
 

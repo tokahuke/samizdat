@@ -22,7 +22,7 @@ mod patricia_map;
 mod pki;
 mod riddles;
 pub use error::Error;
-pub use hash::{Hash, InclusionProof, MerkleTree, HASH_LEN};
+pub use hash::{HASH_LEN, Hash, InclusionProof, MerkleTree};
 pub use patricia_map::{PatriciaMap, PatriciaProof};
 pub use pki::{Key, PrivateKey, Signed};
 pub use riddles::{Hint, MessageRiddle, Riddle};

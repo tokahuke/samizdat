@@ -5,19 +5,20 @@
 //! key. There is no `/api/` prefix because there is no other surface on
 //! this daemon to disambiguate from.
 
-use axum::extract::{Path, Request};
-use axum::http::{HeaderMap, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{
+    Json, Router,
+    extract::{Path, Request},
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
 use chrono::{Duration, Utc};
 use samizdat_common::Key;
 use serde_derive::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 
-use crate::cli::cli;
-use crate::{db, node_client};
+use crate::{cli::cli, db, node_client};
 
 pub fn router() -> Router {
     let auth = middleware::from_fn(require_api_key);
@@ -161,9 +162,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, body) = match self {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            ApiError::Unauthorized => {
-                (StatusCode::UNAUTHORIZED, "missing or wrong X-Api-Key".into())
-            }
+            ApiError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "missing or wrong X-Api-Key".into(),
+            ),
             ApiError::NodeAdmin(err) => {
                 tracing::warn!("pinner node-admin failure: {err:#}");
                 (StatusCode::BAD_GATEWAY, "node admin call failed".into())

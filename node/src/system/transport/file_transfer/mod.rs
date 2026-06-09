@@ -2,29 +2,35 @@
 
 mod messages;
 
-use std::collections::VecDeque;
-use std::io::{Cursor, Read};
-use std::pin::pin;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::VecDeque,
+    io::{Cursor, Read},
+    pin::pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use brotli::{CompressorReader, Decompressor};
-use futures::prelude::*;
-use samizdat_common::cipher::TransferCipher;
-use samizdat_common::db::{readonly_tx, writable_tx};
-use samizdat_common::{Hash, MerkleTree};
+use futures::{prelude::*, stream::BoxStream};
+use samizdat_common::{
+    Hash, MerkleTree,
+    cipher::TransferCipher,
+    db::{readonly_tx, writable_tx},
+};
 use serde_derive::{Deserialize, Serialize};
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
-use tokio::time::Instant;
+use tokio::{
+    sync::{Mutex, mpsc},
+    time::Instant,
+};
 
-use crate::models::{self, ContentStream};
-use crate::models::{CollectionItem, ObjectMetadata, ObjectRef};
-use crate::utils::{pop_front_chunk, push_front_chunk};
+use crate::{
+    models::{self, CHUNK_SIZE, CollectionItem, ObjectMetadata, ObjectRef},
+    utils::{pop_front_chunk, push_front_chunk},
+};
 
 use super::{ChannelReceiver, ChannelSender};
 
-use self::messages::{ItemMessage, Message, NonceMessage, ObjectMessage, MAX_STREAM_SIZE};
+use self::messages::{ItemMessage, MAX_STREAM_SIZE, Message, NonceMessage, ObjectMessage};
 
 const MAX_CONCURRENT_CANDIDATES: usize = 10;
 const HASHES_PER_REQUEST: usize = 5;
@@ -146,9 +152,24 @@ impl ValidatedCandidate {
                 // Decrypt compressed chunk:
                 transfer_cipher.decrypt(&mut compressed_chunk)?;
 
-                // Decompress chunk:
-                let mut chunk = Vec::with_capacity(MAX_STREAM_SIZE);
-                Decompressor::new(Cursor::new(compressed_chunk), 4096).read_to_end(&mut chunk)?;
+                // Decompress chunk, with a hard cap on the OUTPUT length.
+                // Without this, a brotli zip-bomb (a few KB compressed that
+                // inflates to 1+ TB) would blow up here before any downstream
+                // chunk-size check could fire. Reading one byte past CHUNK_SIZE
+                // lets us distinguish "decompressed to exactly CHUNK_SIZE" from
+                // "the source wanted more"; the latter we reject.
+                let mut chunk = Vec::with_capacity(CHUNK_SIZE);
+                let mut limited = Decompressor::new(Cursor::new(compressed_chunk), 4096)
+                    .take((CHUNK_SIZE as u64) + 1);
+                limited.read_to_end(&mut chunk)?;
+                if chunk.len() > CHUNK_SIZE {
+                    return Err(format!(
+                        "decompressed chunk exceeds CHUNK_SIZE ({} bytes); \
+                         rejecting (zip-bomb defense)",
+                        chunk.len(),
+                    )
+                    .into());
+                }
 
                 Ok(chunk) as Result<_, crate::Error>
             })
@@ -227,50 +248,30 @@ enum RequestChunkMessage {
 
 impl Message for RequestChunkMessage {}
 
-/// Represents an object in the process of being received. The object to which this
-/// struct corresponds most likely does not exist in the database.
-pub struct ReceivedObject {
-    /// The received, but not verified metadata.
-    metadata: ObjectMetadata,
-    /// A stream for the incoming content. The content is streamed from the local
-    /// database. Therefore it is "proper for consumption".
-    content_stream: ContentStream,
-    /// The object handle for the soon-to-be object.
-    object_ref: ObjectRef,
-    /// The time that took for the object to be resolved.
-    query_duration: Duration,
+/// Lifecycle state: an object whose merkle tree has been validated
+/// against the requested hash and whose chunks are streaming in, but
+/// which has not yet been committed to storage. The caller decides
+/// when to import (and with which cap) by passing these raw materials
+/// to `ObjectRef::import`.
+pub struct InFlightObject {
+    pub merkle_tree: MerkleTree,
+    pub metadata: ObjectMetadata,
+    pub object_ref: ObjectRef,
+    pub query_duration: Duration,
+    pub chunks: BoxStream<'static, Result<Vec<u8>, crate::Error>>,
 }
 
-impl ReceivedObject {
-    /// A stream for the incoming content. The content is streamed from the local
-    /// database. Therefore it is "proper for consumption".
-    pub fn into_content_stream(self) -> ContentStream {
-        self.content_stream
-    }
-
-    /// The object handle for the soon-to-be object.
-    pub fn object_ref(&self) -> ObjectRef {
-        self.object_ref.clone()
-    }
-
-    /// The received, but not verified metadata.
-    pub fn metadata(&self) -> &ObjectMetadata {
-        &self.metadata
-    }
-
-    /// The time that took for the object to be resolved.
-    pub fn query_duration(&self) -> Duration {
-        self.query_duration
-    }
-}
-
-/// Receives the object from a channel.
+/// Receives the object from a channel. Returns an `InFlightObject`
+/// with the raw materials (merkle tree, metadata, chunk stream) that
+/// the caller must hand to `ObjectRef::import` along with their
+/// chosen cap. Network-layer code does not commit to storage on its
+/// own.
 pub async fn recv_object(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     hash: Hash,
     query_start: Instant,
     deadline_instant: Instant,
-) -> Result<ReceivedObject, crate::Error> {
+) -> Result<InFlightObject, crate::Error> {
     let mut negotiated = Box::pin(
         stream::select(
             candidate_stream
@@ -303,7 +304,7 @@ pub async fn recv_object(
 
     // Prepare to receive content:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
-    let merkle_tree = master.merkle_tree.clone().take().expect("is always set");
+    let merkle_tree = master.merkle_tree.clone().expect("is always set");
     let metadata = master.metadata.take().expect("is always set");
     let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
 
@@ -339,21 +340,16 @@ pub async fn recv_object(
             }),
     );
 
-    // Import the data into the database:
-    let content_stream = ObjectRef::import(
+    tracing::info!("done negotiating object; chunks streaming");
+
+    Ok(InFlightObject {
         merkle_tree,
-        metadata.clone(),
-        query_duration,
-        stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
-    );
-
-    tracing::info!("done receiving object");
-
-    Ok(ReceivedObject {
         metadata,
-        content_stream,
         object_ref: ObjectRef::new(hash),
         query_duration,
+        chunks: stream::poll_fn(move |cx| chunk_recv.poll_recv(cx))
+            .map(Ok)
+            .boxed(),
     })
 }
 
@@ -390,6 +386,10 @@ pub async fn send_object(
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
                         let chunk_content = readonly_tx(|tx| models::get_chunk(tx, chunk))?;
+                        // Source is `Cursor::new(chunk_content)` -- already in
+                        // memory, so the clippy::unbuffered_bytes premise does
+                        // not apply.
+                        #[allow(clippy::unbuffered_bytes)]
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()
@@ -410,32 +410,37 @@ pub async fn send_object(
     Ok(())
 }
 
-/// Represents an item in the process of being received. It can correspond either to a
-/// fresh new object or to an existing object in the database.
-pub enum ReceivedItem {
-    /// The item resolved to a fresh new object not present in th database.
-    NewObject(ReceivedObject),
-    /// The item resolved to an existing object.
-    ExistingObject(ObjectRef),
+/// Outcome of a fetch: either the object is already present locally,
+/// or an in-flight object is streaming in and awaiting import by the
+/// caller.
+pub enum FetchOutcome {
+    /// The fetch resolved to an object that already exists in the
+    /// database; no import is needed.
+    Existing(ObjectRef),
+    /// The fetch produced a freshly-validated incoming stream; the
+    /// caller must call `ObjectRef::import` with their chosen cap.
+    InFlight(InFlightObject),
 }
 
-impl ReceivedItem {
+impl FetchOutcome {
     pub fn object_ref(&self) -> ObjectRef {
         match self {
-            Self::NewObject(n) => n.object_ref(),
-            Self::ExistingObject(e) => e.clone(),
+            Self::InFlight(in_flight) => in_flight.object_ref.clone(),
+            Self::Existing(object_ref) => object_ref.clone(),
         }
     }
 }
 
-/// Receive a collection item from a channel. Returns `Ok(None)` if the item object is
-/// perceived to already exist in the database.
+/// Receive a collection item from a channel. Returns a `FetchOutcome`
+/// distinguishing the already-cached case from the in-flight case;
+/// the caller decides when (and with which cap) to call
+/// `ObjectRef::import` on the in-flight variant.
 pub async fn recv_item(
     candidate_stream: impl 'static + Send + Stream<Item = (ChannelSender, ChannelReceiver)>,
     locator_hash: Hash,
     query_start: Instant,
     deadline_instant: Instant,
-) -> Result<ReceivedItem, crate::Error> {
+) -> Result<FetchOutcome, crate::Error> {
     let mut negotiated = Box::pin(
         stream::select(
             candidate_stream
@@ -468,7 +473,7 @@ pub async fn recv_item(
 
     // Prepare to receive data:
     let (chunk_sender, mut chunk_recv) = mpsc::unbounded_channel();
-    let merkle_tree = master.merkle_tree.clone().take().expect("is always set");
+    let merkle_tree = master.merkle_tree.clone().expect("is always set");
     let metadata = master.metadata.take().expect("is always set");
     let item = master.item.take().expect("is always set");
     let hashes = Arc::new(Mutex::new(Hashes::new(merkle_tree.hashes().to_vec())));
@@ -479,8 +484,8 @@ pub async fn recv_item(
     // between this write and the eventual completion of the chunk stream, the item row
     // points at a non-existent object. This is deliberate (it lets concurrent local
     // lookups see "in progress" rather than "missing") and is safe because:
-    //   * `resolve_object` always re-checks `object.exists(tx)` before serving; misses
-    //     fall through to the network query path rather than panicking.
+    //   * `resolve_object` always re-checks `object.exists(tx)` before serving; misses fall
+    //     through to the network query path rather than panicking.
     //   * `vacuum::drop_dangling_items` reaps items that never see their object arrive.
     //   * `CollectionItem::object()` only returns Err on inclusion-proof failure (a
     //     structural check), not on object-existence; existence is handled downstream.
@@ -513,7 +518,7 @@ pub async fn recv_item(
                     }
                 }),
         );
-        return Ok(ReceivedItem::ExistingObject(object_ref));
+        return Ok(FetchOutcome::Existing(object_ref));
     }
 
     // Receive the content in a separate task:
@@ -548,21 +553,16 @@ pub async fn recv_item(
             }),
     );
 
-    // Import the data into the database:
-    let content_stream = ObjectRef::import(
+    tracing::info!("done negotiating item; chunks streaming");
+
+    Ok(FetchOutcome::InFlight(InFlightObject {
         merkle_tree,
-        metadata.clone(),
-        query_duration,
-        stream::poll_fn(move |cx| chunk_recv.poll_recv(cx)).map(Ok),
-    );
-
-    tracing::info!("done receiving object");
-
-    Ok(ReceivedItem::NewObject(ReceivedObject {
         metadata,
-        content_stream,
         object_ref,
         query_duration,
+        chunks: stream::poll_fn(move |cx| chunk_recv.poll_recv(cx))
+            .map(Ok)
+            .boxed(),
     }))
 }
 
@@ -600,6 +600,10 @@ pub async fn send_item(
                     // decoding side, so... why not?
                     let compressed = tokio::task::spawn_blocking(move || {
                         let chunk_content = readonly_tx(|tx| models::get_chunk(tx, chunk))?;
+                        // Source is `Cursor::new(chunk_content)` -- already in
+                        // memory, so the clippy::unbuffered_bytes premise does
+                        // not apply.
+                        #[allow(clippy::unbuffered_bytes)]
                         let mut compressed =
                             CompressorReader::new(Cursor::new(chunk_content), 4096, 4, 22)
                                 .bytes()
