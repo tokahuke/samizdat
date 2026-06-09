@@ -2,6 +2,7 @@
 
 mod access;
 mod cap;
+mod chunk_protect;
 mod cli;
 mod db;
 mod http;

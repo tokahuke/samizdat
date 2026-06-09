@@ -358,15 +358,28 @@ impl Droppable for ObjectRef {
         //     batch.delete_cf(Table::ObjectChunks.get(), hash);
         // }
 
-        for chunk_hash in metadata.hashes {
+        for chunk_hash in &metadata.hashes {
             Table::ObjectChunkRefCount.map(
                 tx,
-                chunk_hash,
+                *chunk_hash,
                 MergeOperation::Increment(-1).merger(),
             )?;
-        }
 
-        // leave the vacuum daemon to clean up unused chunks. It runs frequently.
+            // Inline orphan reclamation: if this object was the last
+            // referrer AND no in-flight import has the chunk protected,
+            // delete it in the same writable_tx. See
+            // `chunk_protect`'s module doc for the lock ordering that
+            // makes this safe.
+            let new_count = Table::ObjectChunkRefCount
+                .get(tx, *chunk_hash, |bytes| {
+                    Ok(bincode::deserialize::<MergeOperation>(bytes)?.eval_on_zero())
+                })?
+                .unwrap_or(0);
+            if new_count <= 0 && !crate::chunk_protect::is_protected(tx, chunk_hash) {
+                Table::ObjectChunks.delete(tx, *chunk_hash)?;
+                Table::ObjectChunkRefCount.delete(tx, *chunk_hash)?;
+            }
+        }
 
         // Only the User bookmark is cleared here. The Reference bookmark is a counter of
         // pinning entities (e.g. live editions of an owned series); clearing it
@@ -679,6 +692,15 @@ impl ObjectRef {
         chunks: impl Unpin + Stream<Item = Result<Vec<u8>, crate::Error>>,
         reservation: cap::Reservation,
     ) -> Result<(), crate::Error> {
+        // Mark this object's chunks as in-flight for the lifetime of
+        // do_import. The orphan-drop path consults this so a
+        // concurrent drop of a previous owner does not race the
+        // chunk write that is about to land. RAII drop on any path
+        // out, including `?` early-returns.
+        let _protector = crate::chunk_protect::ChunkProtector::protect(
+            merkle_tree.hashes().to_vec(),
+        );
+
         // Having a map allows us to receive chunks out of order.
         let hash = merkle_tree.root();
         let hashes = Arc::new(

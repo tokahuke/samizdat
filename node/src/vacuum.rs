@@ -291,10 +291,16 @@ fn drop_orphan_chunks() -> Result<usize, crate::Error> {
                 Ok::<Option<()>, crate::Error>(None)
             })?;
 
-        let dropped = chunks_to_drop.len();
+        let mut dropped = 0;
         for hash in chunks_to_drop {
+            // Skip chunks held by an in-flight import. See
+            // `chunk_protect`'s module doc.
+            if crate::chunk_protect::is_protected(tx, &hash) {
+                continue;
+            }
             Table::ObjectChunks.delete(tx, hash)?;
             Table::ObjectChunkRefCount.delete(tx, hash)?;
+            dropped += 1;
         }
 
         Ok(dropped)
